@@ -38,6 +38,18 @@ export function showEditPanel(context) {
     linkSliderAndInput(context, 'rotZSlider', 'rotZ', val => obj.rotation.z = val);
 
     document.getElementById('editPriority').value = obj.userData.priority || 0;
+
+    // Initialize color picker with current color
+    const currentColor = '#' + obj.material.color.getHexString();
+    document.getElementById('editColor').value = currentColor;
+
+    // Update color on button click
+    document.getElementById('updateColorBtn').onclick = () => {
+        const newColor = document.getElementById('editColor').value;
+        obj.material.color.set(newColor);
+        obj.userData.materialName = newColor;
+    };
+
     // ⬇️ SHAPE PARAMETERS SECTION ⬇️
     const paramContainer = document.getElementById('shapeParams');
     console.log(obj.geometry);
