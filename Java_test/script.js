@@ -6,6 +6,8 @@ import { updateObjectList } from './updateObjectList.js';
 import context from './appContext.js';
 import { onMouseClick } from './clickOnObjects.js';
 import { setupUpdateHandler,setupDeleteHandler } from './updateObject.js';
+import { loadInstrumentFile } from './importInstr.js';
+
 
 
 initScene(context);
@@ -41,6 +43,7 @@ function initScene(context) {
   });
   setupUpdateHandler(context);
   setupDeleteHandler(context);
+  loadInstrumentFile(context);
   animate(context);
 }
 
@@ -49,74 +52,3 @@ function animate(context) {
   context.controls.update();
   context.renderer.render(context.scene, context.camera);
 }
-
-
-// document.getElementById("loadInstrBtn").addEventListener("click", () => {
-//   document.getElementById("instrFile").click();
-// });
-
-// document.getElementById("instrFile").addEventListener("change", handleInstrFile);
-
-// function handleInstrFile(event) {
-//   const file = event.target.files[0];
-//   if (!file) return;
-
-//   const reader = new FileReader();
-//   reader.onload = e => {
-//     const content = e.target.result;
-//     parseInstrFile(content);
-//   };
-//   reader.readAsText(file);
-// }
-
-
-
-// function parseParams(block) {
-//   const paramRegex = /(\w+)\s*=\s*("?[^",\n]+?"?)/g;
-//   const params = {};
-//   let match;
-//   while ((match = paramRegex.exec(block)) !== null) {
-//     let key = match[1];
-//     let val = match[2].replace(/"/g, '');
-//     val = isNaN(val) ? val : parseFloat(val);
-//     params[key] = val;
-//   }
-//   return params;
-// }
-
-// function spawnFromInstr({ name, type, params, position }) {
-//   let geometry;
-//   const color = 0xff0000; // Default red
-//   const material = new THREE.MeshStandardMaterial({ color });
-
-//   // Match shape by known types or parameter patterns
-//   if (params.radius) {
-//     geometry = new THREE.SphereGeometry(params.radius, 32, 32);
-//   } else if (params.xwidth && params.yheight && (params.zdepth || params.zlength)) {
-//     geometry = new THREE.BoxGeometry(
-//       params.xwidth,
-//       params.yheight,
-//       params.zdepth || params.zlength
-//     );
-//   } else {
-//     console.warn(`Unknown shape for component ${name}, skipping.`);
-//     return;
-//   }
-
-//   const mesh = new THREE.Mesh(geometry, material);
-//   mesh.name = name;
-//   mesh.position.set(...position);
-//   mesh.userData.materialName = type;
-//   mesh.userData.priority = 0;
-
-//   objects.push(mesh);
-//   scene.add(mesh);
-
-//   // Add to dropdown
-//   const option = document.createElement("option");
-//   option.value = mesh.name;
-//   option.text = `${mesh.name} (${geometry.type.replace('Geometry', '')})`;
-//   document.getElementById("objectSelect").appendChild(option);
-
-//   updateObjectList();
-// }

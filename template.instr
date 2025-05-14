@@ -99,6 +99,11 @@ COMPONENT sample_container_lid = Union_cylinder(
  radius = 0.013, yheight = 0.004)
 AT (0,0.051,0) RELATIVE sample_container
 
+COMPONENT sample_container_box = Union_box(
+ material_string = "Al", priority = 98,
+ xwidth = 0.013, yheight = 0.004, zdepth=0.01)
+AT (0,0.051,0) RELATIVE sample_container
+
 COMPONENT logger_space_zx = Union_logger_2D_space(
  D_direction_1 = "z", D1_min = -0.12,
  D1_max = 0.12, n1 = 300,

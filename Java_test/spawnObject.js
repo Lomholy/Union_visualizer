@@ -35,7 +35,7 @@ export function spawnObject(context) {
   option.value = id;
   option.text = `${id} (${shapeType})`;
   document.getElementById("objectSelect").appendChild(option);
-  // ✅ Set as selected object
+  // Set as selected object
   context.selectedObject = mesh;
   document.getElementById("objectSelect").value = id;
 

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-
 import { showEditPanel } from "./editPanel";
 
 export function onMouseClick(event, context) {
@@ -9,14 +8,14 @@ export function onMouseClick(event, context) {
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(scene.children);
-  // ✅ Only update if we hit a valid (non-helper) object
+  const intersects = raycaster.intersectObjects(scene.children, true);
+
+  // ✅ Only use the first valid (non-AxesHelper) hit
   const hit = intersects.find(obj => !(obj.object instanceof THREE.AxesHelper));
+
   if (hit) {
-    if (intersects.length > 0) {
-      context.selectedObject = intersects[0].object;
-      document.getElementById("objectSelect").value = context.selectedObject.name;
-      showEditPanel(context);
-    }
+    context.selectedObject = hit.object;
+    document.getElementById("objectSelect").value = context.selectedObject.name;
+    showEditPanel(context);
   }
 }

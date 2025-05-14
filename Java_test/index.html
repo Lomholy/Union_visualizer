@@ -13,7 +13,7 @@
 </head>
 <body>
   <div id="ui">
-    <input type="file" id="importFile" accept=".json">
+    <input type="file" id="importFile" accept=".instr">
     <button id="importBtn">Import Scene</button>
 
     <div id="objectListContainer" style="margin-top: 1em;">
@@ -49,6 +49,7 @@
 
       <h3>Edit Selected Object</h3>
       <div>
+        
         <label>X Position:</label>
         <input type="range" id="posXSlider" min="-10" max="10" step="0.01">
         <input type="number" id="posX" step="0.01"><br>
@@ -73,10 +74,13 @@
         <input type="range" id="rotZSlider" min="-10" max="10" step="0.01">
         <input type="number" id="rotZ" step="0.01"><br>
       </div>
+      <div id="shapeParams"></div>
       <label>Priority: <input type="number" id="editPriority"></label><br>
       <label>Material Name: <input type="text" id="materialName"></label><br>
       <button id="updateBtn">Update Object</button>
+      
     </div>
+
     
   </div>
 
