@@ -8,7 +8,7 @@ import { onMouseClick } from './clickOnObjects.js';
 import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials} from './updateObject.js';
 import { loadInstrumentFile } from './importInstr.js';
 import { showEditPanel } from './editPanel.js';
-import { writeInstr } from '../writeInstr.js';
+import { writeInstr } from './writeInstr.js';
 
 
 
