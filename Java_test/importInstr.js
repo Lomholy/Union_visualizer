@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { showEditPanel } from './editPanel';
+import { rotate } from 'three/tsl';
 
 
 
@@ -30,25 +31,32 @@ function parseInstrumentFile(fileContent) {
   const shapeTypes = ['cylinder', 'cone', 'sphere', 'box'];  // The types of shapes you're interested in
 
   // Regex pattern to match component definitions
-  const componentRegex = /COMPONENT\s+(\w+)\s*=\s*(Union_\w+)\(([^)]*)\)/g;
-
+  const componentRegex = /COMPONENT\s+(\w+)\s*=\s*(Union_\w+)\(([^)]*)\)\s+AT\s+\(([^)]+)\)(?:\s+RELATIVE\s+\w+)?(?:\s+ROTATED\s+\(([^)]+)\)(?:\s+RELATIVE\s+\w+)?)?/g;
   let match;
   while ((match = componentRegex.exec(fileContent)) !== null) {
       const componentName = match[1];
       const componentType = match[2];
-      const parametersString = match[3];
-
-      // Check if the component type starts with 'Union_' and matches one of the specified shapes
       if (componentType.startsWith('Union_') && shapeTypes.some(shape => componentType.toLowerCase().includes(shape))) {
-          const parameters = parseParameters(parametersString);
-          components.push({
-              name: componentName,
-              type: componentType,
-              parameters: parameters
-          });
+        const parametersString = match[3];
+        const positionString = match[4];
+        const rotationString = match[5];
+        
+        const parameters = parseParameters(parametersString);
+        const position = parseVector(positionString);
+        const rotation = parseVector(rotationString);
+      
+      // Check if the component type starts with 'Union_' and matches one of the specified shapes
+        
+        components.push({
+          name: componentName,
+          type: componentType,
+          parameters,
+          position,
+          rotation
+        });
       }
-  }
-
+     
+    };
   return components;
 }
 
@@ -65,6 +73,20 @@ function parseParameters(parametersString) {
 
   return params;
 }
+
+function parseVector(vectorString) {
+  if (!vectorString) return new THREE.Vector3(0, 0, 0);
+
+  const parts = vectorString.split(',').map(s => parseFloat(s.trim()));
+  const [x, y, z] = parts;
+
+  return new THREE.Vector3(
+    isNaN(x) ? 0 : x,
+    isNaN(y) ? 0 : y,
+    isNaN(z) ? 0 : z
+  );
+}
+
 
 function processComponents(components, context) {
   // You can use this function to process the parsed components
@@ -137,9 +159,20 @@ function addComponentToScene(component, context) {
 
 
   // Optionally, set position, rotation, or scale for the mesh
-  mesh.position.set(0, 0, 0);  // You can modify this based on your component parameters
-  mesh.rotation.set(0, 0, 0);  // Similarly, you can modify rotation if needed
-
+  if (component.position) {
+    mesh.position.copy(component.position);
+  } else {
+    mesh.position.set(0, 0, 0);
+  }  if (component.rotation) {
+    const rot = component.rotation;
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(rot.x),
+      THREE.MathUtils.degToRad(rot.y),
+      THREE.MathUtils.degToRad(rot.z)
+    );
+  } else {
+    mesh.rotation.set(0, 0, 0);
+  }
   // Add the mesh to the scene
   context.scene.add(mesh);  // Assuming context.scene is your THREE.js scene object
 
