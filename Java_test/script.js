@@ -8,6 +8,7 @@ import { onMouseClick } from './clickOnObjects.js';
 import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials} from './updateObject.js';
 import { loadInstrumentFile } from './importInstr.js';
 import { showEditPanel } from './editPanel.js';
+import { writeInstr } from '../writeInstr.js';
 
 
 
@@ -50,6 +51,9 @@ function initScene(context) {
   setupUpdateHandler(context);
   setupDeleteHandler(context);
   loadInstrumentFile(context);
+  document.getElementById('downloadBtn').addEventListener('click', function() {
+  writeInstr(context);
+  });
   // Assuming the 'objectSelect' is the dropdown for object selection
   document.getElementById('objectSelect').addEventListener('change', function () {
     const selectedObjectName = this.value;
@@ -60,6 +64,7 @@ function initScene(context) {
       showEditPanel(context); // Show the edit panel for the newly selected object
     }
   }); 
+  
   animate(context);
 }
 
