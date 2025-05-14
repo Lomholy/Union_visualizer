@@ -142,7 +142,7 @@ function addComponentToScene(component, context) {
   const materialColor = getMaterialColor(materialName); // Optional: map material name to color
   const material = new THREE.MeshBasicMaterial({ 
     color: materialColor,
-    wireframe: true });
+    transparent: true, opacity: 0.5  });
 
   // Create mesh
   const mesh = new THREE.Mesh(geometry, material);
