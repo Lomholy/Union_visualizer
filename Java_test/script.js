@@ -5,7 +5,7 @@ import { spawnObject } from './spawnObject.js';
 import { updateObjectList } from './updateObjectList.js';
 import context from './appContext.js';
 import { onMouseClick } from './clickOnObjects.js';
-import { setupUpdateHandler } from './updateObject.js';
+import { setupUpdateHandler,setupDeleteHandler } from './updateObject.js';
 
 
 initScene(context);
@@ -40,6 +40,7 @@ function initScene(context) {
     onMouseClick(event, context);
   });
   setupUpdateHandler(context);
+  setupDeleteHandler(context);
   animate(context);
 }
 

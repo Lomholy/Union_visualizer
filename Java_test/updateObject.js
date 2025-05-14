@@ -1,6 +1,8 @@
 
 // updateObject.js
+import { showEditPanel } from './editPanel.js';
 import { updateObjectList } from './updateObjectList.js';
+
 
 export function setupUpdateHandler(context) {
   document.getElementById('updateBtn').addEventListener('click', () => {
@@ -43,5 +45,40 @@ export function setupUpdateHandler(context) {
 
     updateObjectList(context);
     console.log('Updated object:', selectedObject);
+  });
+}
+
+export function setupDeleteHandler(context) {
+  document.getElementById('deleteBtn').addEventListener('click', () => {
+    const { selectedObject, scene, objects } = context;
+    if (!selectedObject) return;
+
+    // Remove from scene
+    scene.remove(selectedObject);
+
+    // Remove from objects list
+    const index = objects.indexOf(selectedObject);
+    if (index !== -1) objects.splice(index, 1);
+
+    // Remove from dropdown
+    const dropdown = document.getElementById("objectSelect");
+    const option = [...dropdown.options].find(opt => opt.value === selectedObject.name);
+    if (option) dropdown.removeChild(option);
+
+    // Remove from object list UI
+    const list = document.getElementById("objectList");
+    const item = [...list.children].find(li => li.textContent.includes(selectedObject.name));
+    if (item) list.removeChild(item);
+
+    // Update selection: select first remaining object, if any
+    context.selectedObject = objects[0] || null;
+    if (context.selectedObject) {
+      document.getElementById("objectSelect").value = context.selectedObject.name;
+      showEditPanel(context);
+    } else {
+      document.getElementById('editPanel').style.display = 'none'; // Hide panel if nothing left
+    }
+
+    console.log("Object deleted.");
   });
 }
