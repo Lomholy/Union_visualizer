@@ -1,6 +1,3 @@
-import { updateObjectList } from "./updateObjectList.js";
-
-
 export function linkSliderAndInput(context, sliderId, inputId, onChange) {
     const { sliderListeners, inputListeners, objects } = context;
 
@@ -13,13 +10,11 @@ export function linkSliderAndInput(context, sliderId, inputId, onChange) {
     const sliderHandler = () => {
         input.value = slider.value;
         onChange(parseFloat(slider.value));
-        updateObjectList(context);
     };
 
     const inputHandler = () => {
         slider.value = input.value;
         onChange(parseFloat(input.value));
-        updateObjectList(context);
     };
 
     sliderListeners[sliderId] = sliderHandler;

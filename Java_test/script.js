@@ -2,19 +2,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { setupLighting } from './lighting.js';
 import { spawnObject } from './spawnObject.js';
-import { updateObjectList } from './updateObjectList.js';
+import { updateObjectList, updateObjectOrder } from './updateObjectList.js';
 import context from './appContext.js';
 import { onMouseClick } from './clickOnObjects.js';
-import { setupUpdateHandler,setupDeleteHandler } from './updateObject.js';
+import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials} from './updateObject.js';
 import { loadInstrumentFile } from './importInstr.js';
+import { showEditPanel } from './editPanel.js';
+
 
 
 
 initScene(context);
 setupLighting(context.scene);
-document.getElementById("spawnBtn").addEventListener("click", function() {
-  spawnObject(context);  // Call spawnObject with scene and objects when the button is clicked
-});
+
 
 function initScene(context) {
   context.scene = new THREE.Scene();
@@ -41,14 +41,35 @@ function initScene(context) {
   context.renderer.domElement.addEventListener('click', function(event) {
     onMouseClick(event, context);
   });
+  document.getElementById("spawnBtn").addEventListener("click", function() {
+    spawnObject(context);  // Call spawnObject with scene and objects when the button is clicked
+  });
+  document.getElementById('renderStyle').addEventListener('change', function() {
+    updateAllMaterials(context); // Or wherever your context is stored
+  });
   setupUpdateHandler(context);
   setupDeleteHandler(context);
   loadInstrumentFile(context);
+  // Assuming the 'objectSelect' is the dropdown for object selection
+  document.getElementById('objectSelect').addEventListener('change', function () {
+    const selectedObjectName = this.value;
+    const selectedObject = context.objects.find(obj => obj.name === selectedObjectName);
+
+    if (selectedObject) {
+      context.selectedObject = selectedObject; // Update selected object in context
+      showEditPanel(context); // Show the edit panel for the newly selected object
+    }
+  }); 
   animate(context);
 }
 
 function animate(context) {
   requestAnimationFrame(() => animate(context));  // Pass context explicitly
+  // Ensure objects are sorted by priority before rendering
+  updateObjectList(context);
+  updateObjectOrder(context);
+  
+
   context.controls.update();
   context.renderer.render(context.scene, context.camera);
 }

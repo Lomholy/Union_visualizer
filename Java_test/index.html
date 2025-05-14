@@ -15,12 +15,18 @@
   <div id="ui">
     <input type="file" id="importFile" accept=".instr">
     <button id="importBtn">Import Scene</button>
-
+    <label for="renderStyle" style="display:block; margin-top:10px;">Render Style:</label>
+    <select id="renderStyle">
+      <option value="solid">Solid</option>
+      <option value="wireframe">Wireframe</option>
+      <option value="transparent">Transparent</option>
+      <option value="edges">Edges</option>
+      <option value="normals">Normals</option>
+    </select>
     <div id="objectListContainer" style="margin-top: 1em;">
       <h3>Current Objects</h3>
       <ul id="objectList"></ul>
     </div>
-    
     <label>Shape:
       <select id="shape">
         <option>Box</option>
@@ -40,6 +46,7 @@
       </select>
     </label><br><br>
     <button id="spawnBtn">Spawn Object</button><button id="deleteBtn">Delete Object</button>
+    
     <div id="editPanel" style="display:none; margin-top:1em;">
       <label>Object Name: <input type="text" id="objectName"></label><br>
       <label for="objectSelect">Select Object:</label>

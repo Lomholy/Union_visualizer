@@ -1,6 +1,5 @@
 // spawnObject.js
 import * as THREE from 'three';
-import { updateObjectList } from './updateObjectList.js';
 import { showEditPanel } from './editPanel.js';
 
 
@@ -39,6 +38,6 @@ export function spawnObject(context) {
   context.selectedObject = mesh;
   document.getElementById("objectSelect").value = id;
 
-  updateObjectList(context);
   showEditPanel(context);
+  console.log(context);
 }
