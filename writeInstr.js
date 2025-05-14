@@ -14,7 +14,7 @@ export function writeInstr(context){
         const rotation = `(${obj.rotation.x.toFixed(2)}, ${obj.rotation.y.toFixed(2)}, ${obj.rotation.z.toFixed(2)})`;
 
         // Construct the object description
-        fileContent += `COMPONENT ${obj.name} = ${obj.type}(\n${parameters}\n) AT ${position} RELATIVE sample_arm\nROTATED ${rotation} RELATIVE sample_arm\n\n`;
+        fileContent += `COMPONENT ${obj.name} = ${obj.userData.type}(\n${parameters}\n) AT ${position} RELATIVE sample_arm\nROTATED ${rotation} RELATIVE sample_arm\n\n`;
     });
 
     // Create a Blob from the content
@@ -41,17 +41,30 @@ function buildParameters(obj) {
 
     switch (obj.userData.type) {
         case 'Union_cylinder':
-            params += `radiusTop=${obj.userData.radiusTop || 1}, radiusBottom=${obj.userData.radiusBottom || 1}, height=${obj.userData.height || 1}, material=${material}, priority=${priority}`;
+            params += `radius=${obj.userData.radiusTop ?? obj.geometry.parameters.radiusTop ?? obj.userData.radiusBottom ?? obj.geometry.parameters.radiusBottom ?? 1}, ` +
+                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `material=${material}, priority=${priority}`;
             break;
+    
         case 'Union_box':
-            params += `width=${obj.userData.width || 1}, height=${obj.userData.height || 1}, depth=${obj.userData.depth || 1}, material=${material}, priority=${priority}`;
+            params += `xwidth=${obj.userData.width ?? obj.geometry.parameters.width ?? 1}, ` +
+                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `zdepth=${obj.userData.depth ?? obj.geometry.parameters.depth ?? 1}, ` +
+                      `material=${material}, priority=${priority}`;
             break;
+    
         case 'Union_sphere':
-            params += `radius=${obj.userData.radius || 1}, material=${material}, priority=${priority}`;
+            params += `radius=${obj.userData.radius ?? obj.geometry.parameters.radius ?? 1}, ` +
+                      `material=${material}, priority=${priority}`;
             break;
+    
         case 'Union_cone':
-            params += `radius=${obj.userData.radius || 1}, height=${obj.userData.height || 1}, material=${material}, priority=${priority}`;
+            params += `radius_top=${obj.userData.radiusTop ?? obj.geometry.parameters.radiusTop ?? 1}, ` +
+                      `radius_bottom=${obj.userData.radiusBottom ?? obj.geometry.parameters.radiusBottom ?? 1}, ` +
+                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `material=${material}, priority=${priority}`;
             break;
+    
         default:
             console.warn(`Unsupported geometry type: ${obj.type}`);
             break;

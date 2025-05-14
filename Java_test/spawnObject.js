@@ -11,11 +11,28 @@ export function spawnObject(context) {
   const color = document.getElementById("material").value;
 
   let geometry;
+  let unionType = ""; // <- Track the Union_type string
+
   switch (shapeType) {
-    case "Box": geometry = new THREE.BoxGeometry(); break;
-    case "Sphere": geometry = new THREE.SphereGeometry(0.5, 32, 32); break;
-    case "Cylinder": geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32); break;
-    case "Cone": geometry = new THREE.ConeGeometry(0.5, 1, 32); break;
+    case "Box":
+      geometry = new THREE.BoxGeometry();
+      unionType = "Union_box";
+      break;
+    case "Sphere":
+      geometry = new THREE.SphereGeometry(0.5, 32, 32);
+      unionType = "Union_sphere";
+      break;
+    case "Cylinder":
+      geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+      unionType = "Union_cylinder";
+      break;
+    case "Cone":
+      geometry = new THREE.ConeGeometry(0.5, 1, 32);
+      unionType = "Union_cone";
+      break;
+    default:
+      console.warn("Unknown shape type:", shapeType);
+      return;
   }
 
   const material = new THREE.MeshStandardMaterial({ color });
@@ -24,6 +41,8 @@ export function spawnObject(context) {
   mesh.position.set(0, 0, 0);
   mesh.userData.priority = priority;
   mesh.userData.materialName = '';
+  mesh.userData.type = unionType; // <- Set the correct type here
+
 
   const id = `Object${objects.length + 1}`;
   mesh.name = id;
