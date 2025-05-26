@@ -1,9 +1,79 @@
+// This file contains all the functions for handling the objects in the scene.
 
+// This means, it spawns them, it destroys them, it updates all of them, ....
 // updateObject.js
-import { showEditPanel } from './editPanel.js';
+
+import { showEditPanel } from './contextMenu.js';
 import * as THREE from 'three';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 
+
+
+//==============================================================================
+//================================= spawnObject ================================
+//==============================================================================
+export function spawnObject(context) {
+  const { scene, objects } = context;
+
+  const shapeType = document.getElementById("shape").value;
+  const priority = parseInt(document.getElementById("priority").value) || 0;
+  const color = document.getElementById("material").value;
+
+  let geometry;
+  let unionType = ""; // <- Track the Union_type string
+
+  switch (shapeType) {
+    case "Box":
+      geometry = new THREE.BoxGeometry();
+      unionType = "Union_box";
+      break;
+    case "Sphere":
+      geometry = new THREE.SphereGeometry(0.5, 32, 32);
+      unionType = "Union_sphere";
+      break;
+    case "Cylinder":
+      geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+      unionType = "Union_cylinder";
+      break;
+    case "Cone":
+      geometry = new THREE.ConeGeometry(0.5, 1, 32);
+      unionType = "Union_cone";
+      break;
+    default:
+      console.warn("Unknown shape type:", shapeType);
+      return;
+  }
+
+  const material = new THREE.MeshStandardMaterial({ color });
+  const mesh = new THREE.Mesh(geometry, material);
+
+  mesh.position.set(0, 0, 0);
+  mesh.userData.priority = priority;
+  mesh.userData.materialName = '';
+  mesh.userData.type = unionType; // <- Set the correct type here
+
+
+  const id = `Object${objects.length + 1}`;
+  mesh.name = id;
+  objects.push(mesh);
+  scene.add(mesh);
+
+  const option = document.createElement("option");
+  option.value = id;
+  option.text = `${id} (${shapeType})`;
+  document.getElementById("objectSelect").appendChild(option);
+  // Set as selected object
+  context.selectedObject = mesh;
+  document.getElementById("objectSelect").value = id;
+
+  showEditPanel(context);
+  console.log(context);
+}
+
+
+//==============================================================================
+//=========================== Update button logic ==============================
+//==============================================================================
 
 export function setupUpdateHandler(context) {
   document.getElementById('updateBtn').addEventListener('click', () => {
@@ -48,6 +118,11 @@ export function setupUpdateHandler(context) {
   });
 }
 
+
+//==============================================================================
+//=========================== Delete Button logic ==============================
+//==============================================================================
+
 export function setupDeleteHandler(context) {
   document.getElementById('deleteBtn').addEventListener('click', () => {
     const { selectedObject, scene, objects } = context;
@@ -83,6 +158,9 @@ export function setupDeleteHandler(context) {
   });
 }
 
+//==============================================================================
+//========== Update of all materials when switching view styles ================
+//==============================================================================
 
 export function updateAllMaterials(context) {
   const style = document.getElementById('renderStyle').value;

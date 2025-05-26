@@ -1,4 +1,23 @@
+// Initializing the scene
 import * as THREE from 'three';
+
+const context = {
+    scene: null,
+    camera: null,
+    renderer: null,
+    controls: null,
+    objects: [],
+    sliderListeners: {},
+    inputListeners: {},
+    selectedObject: null,
+    raycaster: null,
+    mouse: null
+  };
+  
+  export default context;
+
+
+
 
 export function setupLighting(scene) {
   // Hemisphere light: gives a soft ambient glow from sky and ground

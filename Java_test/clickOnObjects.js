@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { showEditPanel } from "./editPanel";
+import { showEditPanel } from "./contextMenu";
 
 export function onMouseClick(event, context) {
   const { renderer, mouse, camera, scene, raycaster } = context;

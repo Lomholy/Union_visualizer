@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { setupLighting } from './lighting.js';
-import { spawnObject } from './spawnObject.js';
-import { updateObjectList, updateObjectOrder } from './updateObjectList.js';
-import context from './appContext.js';
+import { setupLighting } from './scene.js';
+import { spawnObject } from './objectHandling.js';
+import { updateObjectList, updateObjectOrder } from './contextMenu.js';
+import context from './scene.js';
 import { onMouseClick } from './clickOnObjects.js';
-import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials} from './updateObject.js';
-import { loadInstrumentFile } from './importInstr.js';
-import { showEditPanel } from './editPanel.js';
-import { writeInstr } from './writeInstr.js';
+import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials} from './objectHandling.js';
+import { loadInstrumentFile } from './importExport.js';
+import { showEditPanel } from './contextMenu.js';
+import { writeInstr } from './importExport.js';
 
 
 
