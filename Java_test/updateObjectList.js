@@ -13,6 +13,9 @@ export function updateObjectList(context) {
   
   context.objects.forEach(obj => {
     const li = document.createElement("li");
+
+    const {r,g,b} = obj.material.color;
+    li.style.color = `rgb(${Math.round(r*255)}, ${Math.round(g*255)}, ${Math.round(b*255)})`; // Convert rgb values to 0-255 range
     li.textContent = `${obj.name} (Priority: ${obj.userData.priority}, Material: ${obj.userData.materialName || "none"})`;
     
     // Add the data-obj-name attribute
