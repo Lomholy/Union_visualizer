@@ -1,14 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { setupLighting } from './scene.js';
-import { spawnObject } from './objectHandling.js';
-import { updateObjectList, updateObjectOrder } from './contextMenu.js';
 import context from './scene.js';
-import { onMouseClick } from './clickOnObjects.js';
-import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials} from './objectHandling.js';
-import { loadInstrumentFile } from './importExport.js';
-import { showEditPanel } from './contextMenu.js';
-import { writeInstr } from './importExport.js';
+import { updateObjectList, updateObjectOrder, showEditPanel} from './ui/contextMenu.js';
+import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials, spawnObject} from './utils/objectHandling.js';
+import { loadInstrumentFile,writeInstr } from './utils/importExport.js';
 
 
 
@@ -39,9 +35,6 @@ function initScene(context) {
 
   context.raycaster = new THREE.Raycaster();
   context.mouse = new THREE.Vector2();
-  context.renderer.domElement.addEventListener('click', function(event) {
-    onMouseClick(event, context);
-  });
   document.getElementById("spawnBtn").addEventListener("click", function() {
     spawnObject(context);  // Call spawnObject with scene and objects when the button is clicked
   });

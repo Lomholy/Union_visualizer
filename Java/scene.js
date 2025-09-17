@@ -11,7 +11,8 @@ const context = {
     inputListeners: {},
     selectedObject: null,
     raycaster: null,
-    mouse: null
+    mouse: null,
+    materials: {}
   };
   
   export default context;

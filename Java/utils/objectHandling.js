@@ -3,7 +3,7 @@
 // This means, it spawns them, it destroys them, it updates all of them, ....
 // updateObject.js
 
-import { showEditPanel } from './contextMenu.js';
+import { showEditPanel } from '../ui/contextMenu.js';
 import * as THREE from 'three';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 
@@ -65,6 +65,16 @@ export function spawnObject(context) {
   // Set as selected object
   context.selectedObject = mesh;
   document.getElementById("objectSelect").value = id;
+  const li = document.createElement('li');
+  li.textContent = context.name || `Object ${objects.length + 1}`;
+  li.dataset.objectId = context.id;
+  li.style.cursor = "pointer";
+
+  li.addEventListener('click', () => {
+      selectObjectById(context.id);
+  });
+
+  document.getElementById('objectList').appendChild(li);
 
   showEditPanel(context);
   console.log(context);

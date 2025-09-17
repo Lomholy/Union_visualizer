@@ -150,7 +150,11 @@ export function showEditPanel(context) {
         const label = document.createElement('label');
         label.textContent = param;
         label.htmlFor = `shape_${param}`;
-        label.style.display = 'block';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '8px';
+        label.style.display = 'inline-block';
+        label.style.minWidth = '80px'; // optional, keeps labels aligned
 
         const numberInput = document.createElement('input');
         numberInput.type = 'number';

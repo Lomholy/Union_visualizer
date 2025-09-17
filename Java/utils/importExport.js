@@ -1,13 +1,16 @@
 import * as THREE from 'three';
-import { showEditPanel } from './contextMenu';
-import { rotate } from 'three/tsl';
+import { showEditPanel } from '../ui/contextMenu.js';
 
 
 
 export function loadInstrumentFile(context) {
   // Set up the file input change handler
-  document.getElementById('importBtn').addEventListener('click', () => {
+  document.getElementById('importFile').addEventListener('change', () => {
     const fileInput = document.getElementById('importFile');
+    if (fileInput.files.length>1){
+      alert("Please select only 1 file.")
+      return;
+    }
     const file = fileInput.files[0]; // Get the first file
 
     if (!file) {
@@ -67,7 +70,10 @@ function parseParameters(parametersString) {
   paramsArray.forEach(param => {
     const [key, value] = param.split('=').map(s => s.trim());
     if (key && value !== undefined) {
-      params[key] = value;
+      params[key] = parseFloat(value);
+      if (key=="material_string"){
+        params[key] = value;
+      }
     }
   });
 
@@ -108,38 +114,38 @@ function addComponentToScene(component, context) {
 
   switch (component.type) {
     case 'Union_cylinder': {
-      const radius = parseFloat(params.radius) || 1;  // Default to 1 if no value is provided
-      const height = parseFloat(params.height) || 1;  // Default to 1 if no value is provided
+      const radius = params.radius || 0.01;
+      const height = params.yheight || 0.01;
       geometry = new THREE.CylinderGeometry(radius, radius, height);
       break;
     }
     case 'Union_cone': {
-      const radius_top = parseFloat(params.radius_top) || 1;  // Default to 1 if no value is provided
-      const height = parseFloat(params.yheight) || 1;  // Default to 1 if no value is provided
-      const radius_bottom = parseFloat(params.radius_bottom) || 1;  // Default to 1 if no value is provided
+      const radius_top = params.radius_top || 0.01;
+      const height = params.yheight || 0.01;
+      const radius_bottom = params.radius_bottom || 0.01;
       geometry = new THREE.CylinderGeometry(radius_top, radius_bottom, height);
       break;
     }
     case 'Union_sphere': {
-      const radius = parseFloat(params.radius) || 1;  // Default to 1 if no value is provided
+      const radius = params.radius || 0.01;
       geometry = new THREE.SphereGeometry(radius);
       break;
     }
     case 'Union_box': {
-      const width = parseFloat(params.xwidth) || 1;  // Default to 1 if no value is provided
-      const height = parseFloat(params.yheight) || 1;  // Default to 1 if no value is provided
-      const depth = parseFloat(params.zdepth) || 1;  // Default to 1 if no value is provided
+      const width = params.xwidth || 0.01;
+      const height = params.yheight || 0.01;
+      const depth = params.zdepth || 0.01;
       geometry = new THREE.BoxGeometry(width, height, depth);
       break;
     }
     default:
       console.warn(`Unknown component type: ${component.type}`);
-      return;  // If the component type is unknown, don't add it to the scene
+      break;
   }
 
-  // Material logic
-  const materialName = params.material || 'default';
-  const materialColor = getMaterialColor(materialName); // Optional: map material name to color
+  const materialName = params.material_string || 'default';
+
+  const materialColor = getMaterialColor(materialName, context);
   const material = new THREE.MeshBasicMaterial({ 
     color: materialColor,
     transparent: true, opacity: 0.5  });
@@ -161,22 +167,19 @@ function addComponentToScene(component, context) {
   // Optionally, set position, rotation, or scale for the mesh
   if (component.position) {
     mesh.position.copy(component.position);
-  } else {
-    mesh.position.set(0, 0, 0);
-  }  if (component.rotation) {
+  } if (component.rotation) {
     const rot = component.rotation;
     mesh.rotation.set(
       THREE.MathUtils.degToRad(rot.x),
       THREE.MathUtils.degToRad(rot.y),
       THREE.MathUtils.degToRad(rot.z)
     );
-  } else {
-    mesh.rotation.set(0, 0, 0);
   }
-  // Add the mesh to the scene
-  context.scene.add(mesh);  // Assuming context.scene is your THREE.js scene object
 
-  // Store the component in the context (optional, for future reference)
+  // Add the mesh to the scene
+  context.scene.add(mesh);
+
+  // Store the component in the context
   context.objects.push(mesh);
   // Add to the object selection list
   const objectSelect = document.getElementById("objectSelect");
@@ -190,16 +193,26 @@ function addComponentToScene(component, context) {
   showEditPanel(context);
 };
 
-function getMaterialColor(name) {
+function getMaterialColor(name, context) {
+  // Handle vacuum
   if (name.toLowerCase() === 'vacuum') {
-    return 0x000000;  // Color for vacuum (black)
+    if (!context.materials[name]){
+      context.materials[name] = 0x000000
+    }
+    return context.materials[name];
+  }
+
+  // Check if the material already has a color
+  if (context.materials[name]) {
+    return context.materials[name];
   }
 
   // Generate a random color
-  const randomColor = Math.floor(Math.random() * 16777215); // Random color in hex (0x000000 to 0xFFFFFF)
+  const randomColor = Math.floor(Math.random() * 0xffffff); // 0x000000 to 0xFFFFFF
+  context.materials[name] = randomColor; // Store for future use
+
   return randomColor;
 }
-
 
 export function writeInstr(context){
     // Add the event listener for the download button
