@@ -146,11 +146,19 @@ export function setupUpdateHandler(context) {
     );
 
     selectedObject.userData.priority = parseInt(document.getElementById('editPriority').value) || 0;
-    selectedObject.userData.materialName = document.getElementById('materialName').value;
-
+    //If the chosen material does not exist, make it
+    const mat_name = document.getElementById('materialName').value;
+    if (!context.materials[mat_name]){
+      const randomColor = Math.floor(Math.random() * 0xffffff); // 0x000000 to 0xFFFFFF
+      context.materials[mat_name] = new THREE.MeshStandardMaterial({ color: randomColor, name: mat_name ,transparent: true, opacity: 0.5}); 
+    }
+    selectedObject.userData.materialName = mat_name;
+    selectedObject.material = context.materials[mat_name];
+    //
     console.log('Updated object:', selectedObject);
     console.log(context.materials)
     console.log(context.old_materials)
+    updateObjectList(context);
 
   });
 }
