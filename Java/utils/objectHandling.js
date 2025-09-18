@@ -17,7 +17,7 @@ export function spawnObject(context) {
 
   const shapeType = document.getElementById("shape").value;
   const priority = parseInt(document.getElementById("priority").value) || 0;
-  const color = document.getElementById("material").value;
+  const mat_name = document.getElementById("material").value;
 
   let geometry;
   let unionType = "";
@@ -56,9 +56,15 @@ export function spawnObject(context) {
       console.warn("Unknown shape type:", shapeType);
       return;
   }
-
+  
   // Create mesh
-  const material = new THREE.MeshStandardMaterial({ color });
+  if (!context.materials[mat_name]){
+      const randomColor = Math.floor(Math.random() * 0xffffff); // 0x000000 to 0xFFFFFF
+      context.materials[mat_name] = new THREE.MeshStandardMaterial({ color: randomColor, name: mat_name ,transparent: true, opacity: 0.5}); 
+  } else {
+  
+  }
+  const material = context.materials[mat_name]
   const mesh = new THREE.Mesh(geometry, material);
 
   mesh.position.set(0, 0, 0);
@@ -66,7 +72,7 @@ export function spawnObject(context) {
   // Attach metadata
   mesh.userData = {
     priority,
-    materialName: '',
+    materialName: mat_name,
     type: unionType,
     ...params   // ✅ include shape parameters
   };
@@ -252,6 +258,7 @@ export function updateAllMaterials(context) {
   });
   console.log(context.objects[0].userData);
 }
+// Update the UI if materials were added, removed, or replaced
 export function updateMaterialUI(context) {
   const newEntries = Object.entries(context.materials);
   const oldEntries = context.old_materials || {};
@@ -279,13 +286,12 @@ export function updateMaterialUI(context) {
   }
 }
 
-
 // Populate the list from context.materials
 function populateMaterialList(context) {
-  console.log(context.materials);
   const materialListEl = document.getElementById('materialList');
   materialListEl.innerHTML = '';
-  Object.entries(context.materials).forEach(([name, color]) => {
+
+  Object.entries(context.materials).forEach(([name, mat]) => {
     const li = document.createElement('li');
     li.className = 'material-item';
     li.textContent = name;
@@ -293,27 +299,23 @@ function populateMaterialList(context) {
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
 
-    // if color already has '#', just use it
-    colorInput.value = toHexColorString(color);
+    // Use the material's current color
+    if (mat.color) {
+      colorInput.value = `#${mat.color.getHexString()}`;
+    } else {
+      colorInput.value = '#ffffff';
+      colorInput.disabled = true;
+    }
 
+    // When the user changes the color
     colorInput.addEventListener('input', (e) => {
-      context.materials[name] = e.target.value; // update the dictionary
+      if (mat.color) {
+        mat.color.set(e.target.value); // update the THREE.Material color
+        context.renderer.render(context.scene, context.camera); // redraw scene
+      }
     });
 
     li.appendChild(colorInput);
     materialListEl.appendChild(li);
   });
-}
-
-function toHexColorString(value) {
-  if (typeof value === 'string') {
-    // already a string, ensure it starts with #
-    return value.startsWith('#') ? value : `#${value}`;
-  } else if (typeof value === 'number') {
-    // convert number to hex string and pad with zeros
-    return `#${value.toString(16).padStart(6, '0')}`;
-  } else {
-    // fallback
-    return '#ffffff';
-  }
 }

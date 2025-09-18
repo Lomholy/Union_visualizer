@@ -151,10 +151,7 @@ function addComponentToScene(component, context) {
 
   const materialName = params.material_string || 'default';
 
-  const materialColor = getMaterialColor(materialName, context);
-  const material = new THREE.MeshBasicMaterial({ 
-    color: materialColor,
-    transparent: true, opacity: 0.5  });
+  const material= getMaterialColor(materialName, context);
 
   // Create mesh
   const mesh = new THREE.Mesh(geometry, material);
@@ -203,7 +200,7 @@ function getMaterialColor(name, context) {
   // Handle vacuum
   if (name.toLowerCase() === 'vacuum') {
     if (!context.materials[name]){
-      context.materials[name] = 0x000000
+      context.materials[name] = new THREE.MeshStandardMaterial({ color: 0x000000, name: name ,transparent: true, opacity: 0.5})
     }
     return context.materials[name];
   }
@@ -215,9 +212,9 @@ function getMaterialColor(name, context) {
 
   // Generate a random color
   const randomColor = Math.floor(Math.random() * 0xffffff); // 0x000000 to 0xFFFFFF
-  context.materials[name] = randomColor; // Store for future use
-
-  return randomColor;
+  context.materials[name] = new THREE.MeshStandardMaterial({ color: randomColor, name: name ,transparent: true, opacity: 0.5}); // Store for future use
+ 
+  return context.materials[name];
 }
 
 export function writeInstr(context){
