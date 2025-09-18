@@ -68,6 +68,23 @@
       margin-top: 1em; /* or 10-15px for a smaller gap */
     }
 
+    #objectList li {
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+
+    #objectList li:hover {
+      background: #eee;
+    }
+
+    #objectList li.selected {
+      background: #acbac9;
+      color: white;
+      font-weight: bold;
+    }
+
   </style>
 </head>
 <body>

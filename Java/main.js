@@ -32,8 +32,7 @@ function initScene(context) {
   context.controls.screenSpacePanning = false; // Optional, prevents camera from panning along the screen space
   context.controls.target.set(0, 0, 0); // Camera will always orbit around (0, 0, 0)
   context.camera.position.set(5, 5, 5); // Set it a bit far from the center to see the objects
-
-  context.raycaster = new THREE.Raycaster();
+  
   context.mouse = new THREE.Vector2();
   document.getElementById("spawnBtn").addEventListener("click", function() {
     spawnObject(context);  // Call spawnObject with scene and objects when the button is clicked
@@ -64,7 +63,7 @@ function initScene(context) {
 function animate(context) {
   requestAnimationFrame(() => animate(context));  // Pass context explicitly
   // Ensure objects are sorted by priority before rendering
-  updateObjectList(context);
+  // updateObjectList(context);
   updateObjectOrder(context);
   
 

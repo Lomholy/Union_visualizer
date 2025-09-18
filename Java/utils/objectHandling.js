@@ -3,7 +3,7 @@
 // This means, it spawns them, it destroys them, it updates all of them, ....
 // updateObject.js
 
-import { showEditPanel } from '../ui/contextMenu.js';
+import { showEditPanel, updateObjectList } from '../ui/contextMenu.js';
 import * as THREE from 'three';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 
@@ -20,7 +20,7 @@ export function spawnObject(context) {
   const color = document.getElementById("material").value;
 
   let geometry;
-  let unionType = ""; // <- Track the Union_type string
+  let unionType = "";
 
   switch (shapeType) {
     case "Box":
@@ -44,40 +44,34 @@ export function spawnObject(context) {
       return;
   }
 
+  // Create mesh
   const material = new THREE.MeshStandardMaterial({ color });
   const mesh = new THREE.Mesh(geometry, material);
 
   mesh.position.set(0, 0, 0);
   mesh.userData.priority = priority;
   mesh.userData.materialName = '';
-  mesh.userData.type = unionType; // <- Set the correct type here
+  mesh.userData.type = unionType;
 
-
+  // Assign unique name
   const id = `Object${objects.length + 1}`;
   mesh.name = id;
+
+  // Add to context and scene
   objects.push(mesh);
   scene.add(mesh);
 
-  const option = document.createElement("option");
-  option.value = id;
-  option.text = `${id} (${shapeType})`;
-  document.getElementById("objectSelect").appendChild(option);
   // Set as selected object
   context.selectedObject = mesh;
   document.getElementById("objectSelect").value = id;
-  const li = document.createElement('li');
-  li.textContent = context.name || `Object ${objects.length + 1}`;
-  li.dataset.objectId = context.id;
-  li.style.cursor = "pointer";
 
-  li.addEventListener('click', () => {
-      selectObjectById(context.id);
-  });
+  // ✅ Update UI through the centralized function
+  updateObjectList(context);
 
-  document.getElementById('objectList').appendChild(li);
-
+  // Show the edit panel
   showEditPanel(context);
-  console.log(context);
+
+  console.log("Spawned object:", mesh);
 }
 
 

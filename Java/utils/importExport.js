@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { showEditPanel } from '../ui/contextMenu.js';
+import { showEditPanel, updateObjectList } from '../ui/contextMenu.js';
+
 
 
 
@@ -23,9 +24,11 @@ export function loadInstrumentFile(context) {
       const content = e.target.result;
       const components = parseInstrumentFile(content);
       processComponents(components, context); // Process the components and integrate them into the context
+      updateObjectList(context);
     };
 
     reader.readAsText(file); // Read the file as text
+    
   });
 }
 
