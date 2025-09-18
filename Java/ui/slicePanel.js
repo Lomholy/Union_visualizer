@@ -61,162 +61,82 @@ export function init_slicePanel(context){// Add slice panel
 
 function drawPrioritySlice(objects, planeY, planeWidth, planeHeight) {
     const canvas = document.getElementById('planeCanvas');
-    
     const ctx = canvas.getContext('2d');
+
+    // Match canvas size to container
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
-     // Compute scale factors (pixels per world unit)
+
     const scaleX = canvas.width / planeWidth;
     const scaleY = canvas.height / planeHeight;
+    const centerX = canvas.width / 2;
+    const centerZ = canvas.height / 2;
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    let topPriority = -Infinity;
-    let color = [0,0,0];
-    const imageData = ctx.createImageData(canvas.width, canvas.height);
-    const data = imageData.data;
+
+    // Sort objects by priority (low -> high)
+    objects.sort((a,b) => (a.userData.priority || 0) - (b.userData.priority || 0));
 
     objects.forEach(obj => {
-        // Skip objects that do not intersect planeY (local-space check)
-        const localPlane = new THREE.Vector3(0, planeY, 0);
-        obj.worldToLocal(localPlane);
-        // If object has a height, check bounding box
-        if (obj.userData.heigh){
-            const halfHeight = (obj.userData.height || 0) / 2;
-            if (localPlane.y < -halfHeight || localPlane.y > halfHeight) return;
-        } else {
-            if (Math.abs(localPlane.y > obj.userData.radius)) return;
-        }
+        const color = obj.material.color.getStyle();
+        ctx.fillStyle = color;
 
-        const color = [
-            Math.floor(obj.material.color.r * 255),
-            Math.floor(obj.material.color.g * 255),
-            Math.floor(obj.material.color.b * 255)
-        ];
-        const priority = obj.userData.priority || 0;
-        const vec = new THREE.Vector3(0, planeY, 0);
-        // Loop over pixels that the object projects onto
-        for (let i = 0; i <= canvas.width; i++) {
-            for (let j = 0; j <= canvas.height; j++) {
-                // Map pixel to world coordinates
-                
-                vec.set((i / scaleX - planeWidth/2), planeY, (planeHeight / 2) - (j / scaleY));
+        switch(obj.userData.type) {
+            case 'Union_cylinder':
+                const halfHeight = obj.userData.height / 2;
+                if (planeY < obj.position.y - halfHeight || planeY > obj.position.y + halfHeight) break;
 
-                if (!shapeContainsPoint(obj, vec)) continue;
+                const r = obj.userData.radius;
+                const x = centerX + obj.position.x * scaleX;
+                const z = centerZ - obj.position.z * scaleY;
 
-                const idx = (j * canvas.width + i) * 4;
-                const p = obj.userData.priority;
-                // Only overwrite if this object has higher priority
-                if (p >= topPriority) {
-                    data[idx] = color[0];
-                    data[idx + 1] = color[1];
-                    data[idx + 2] = color[2];
-                    data[idx + 3] = 255; // fully opaque
-                }
-            }
+                ctx.beginPath();
+                ctx.arc(x, z, r * ((scaleX + scaleY)/2), 0, 2*Math.PI);
+                ctx.fill();
+                break;
+
+            case 'Union_sphere':
+                const sphereR = obj.userData.radius;
+                const dy = planeY - obj.position.y;
+                if (Math.abs(dy) > sphereR) break;
+
+                const sliceR = Math.sqrt(sphereR*sphereR - dy*dy); // radius at slice
+                const sx = centerX + obj.position.x * scaleX;
+                const sz = centerZ - obj.position.z * scaleY;
+
+                ctx.beginPath();
+                ctx.arc(sx, sz, sliceR * ((scaleX + scaleY)/2), 0, 2*Math.PI);
+                ctx.fill();
+                break;
+
+            case 'Union_box':
+                const w = obj.userData.width / 2;
+                const d = obj.userData.depth / 2;
+                const h = obj.userData.height / 2;
+                if (planeY < obj.position.y - h || planeY > obj.position.y + h) break;
+
+                const bx = centerX + (obj.position.x - w) * scaleX;
+                const bz = centerZ - (obj.position.z + d) * scaleY;
+                ctx.fillRect(bx, bz, w*2*scaleX, d*2*scaleY);
+                break;
+
+            case 'Union_cone':
+                const coneH = obj.userData.height;
+                const bottomR = obj.userData.radius_bottom;
+                const topR = obj.userData.radius_top;
+                const halfH = coneH / 2;
+                if (planeY < obj.position.y - halfH || planeY > obj.position.y + halfH) break;
+
+                // Linear interpolation of radius at planeY
+                const t = (planeY - (obj.position.y - halfH)) / coneH;
+                const coneR = bottomR * (1 - t) + topR * t;
+
+                const cx = centerX + obj.position.x * scaleX;
+                const cz = centerZ - obj.position.z * scaleY;
+                ctx.beginPath();
+                ctx.arc(cx, cz, coneR * ((scaleX + scaleY)/2), 0, 2*Math.PI);
+                ctx.fill();
+                break;
         }
     });
-    ctx.putImageData(imageData, 0, 0);
-    // for (let i = 0; i < canvas.width; i++) {
-    // for (let j = 0; j < canvas.height; j++) {
-    //     // Map canvas pixel to world coordinates
-    //     vec.set((i / scaleX) - planeWidth / 2,
-    //             planeY,
-    //             (planeHeight / 2) - (j / scaleY))
-
-    //     let topPriority = -Infinity;
-    //     let color = [0,0,0];
-
-    //     objects.forEach(obj => {
-    //     if (shapeContainsPoint(obj,vec)) {
-    //         const p = obj.userData.priority;
-    //         if (p >= topPriority) {
-    //             topPriority = p;
-    //             const c = obj.material.color;
-    //             color = [
-    //             Math.floor(c.r*255),
-    //             Math.floor(c.g*255),
-    //             Math.floor(c.b*255)
-    //             ];
-    //         };
-    //     };
-    //     });
-
-    //     const idx = (j*canvas.width + i) * 4;
-    //     data[idx] = color[0];
-    //     data[idx+1] = color[1];
-    //     data[idx+2] = color[2];
-    //     data[idx+3] = (topPriority>-Infinity)? 255 : 0;
-    // }
-    // }
-
-  
-}
-function shapeContainsPoint(obj, vec){
-    // ensure world matrices are up-to-date
-    obj.updateMatrixWorld(true);
-
-    // copy the world point and transform it into the object's local space
-    const local = vec.clone();
-    obj.worldToLocal(local); 
-    switch (obj.userData.type) {
-        case 'Union_cylinder':
-            return cylinderContainsPoint(obj, local);
-        case 'Union_sphere':
-            return sphereContainsPoint(obj, local);
-        case 'Union_box':
-            return boxContainsPoint(obj, local);
-        case 'Union_cone':
-            return coneContainsPoint(obj, local);
-        default:
-        return false;
-
-    }
-}
-
-function cylinderContainsPoint(obj, local){
-    // cylinder aligned with local Y
-    const radius = obj.userData.radius;
-    const height = obj.userData.height;
-
-    // radial distance in XZ plane and local Y as height
-    const r = Math.hypot(local.x, local.z); // equivalent to sqrt(x*x + z*z)
-    const h = local.y;
-
-    // If cylinder origin is centered, check [-height/2, +height/2]
-    return (r >= 0) &&(r <= radius) && (h >= -height/2) && (h <= height/2);
-}
-
-function sphereContainsPoint(obj, local) {
-    const radius = obj.userData.radius;
-
-    const r = Math.hypot(local.x, local.y, local.z);
-    return r <= radius;
-}
-
-function boxContainsPoint(obj, local) {
-    const w = obj.userData.width / 2;
-    const h = obj.userData.height / 2;
-    const d = obj.userData.depth / 2;
-
-    return (
-    local.x >= -w && local.x <= w &&
-    local.y >= -h && local.y <= h &&
-    local.z >= -d && local.z <= d
-    );
-}
-
-function coneContainsPoint(obj, local) {
-  const height = obj.userData.height;
-  const bottomRadius = obj.userData.radius_bottom;
-  const topRadius = obj.userData.radius_top;
-    
-  const h = local.y;
-  if (h < -height/2 || h > height/2) return false;
- 
-  // Linearly interpolate radius at this height
-  const t = h / height; // 0 at base, 1 at top
-  const rAtH = bottomRadius * (1 - t) + topRadius * t;
-
-  const r = Math.hypot(local.x, local.z);
-    // console.log(bottomRadius, topRadius, height)
-  return r <= rAtH;
 }
