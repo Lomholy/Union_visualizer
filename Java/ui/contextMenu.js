@@ -43,11 +43,6 @@ export function updateObjectList(context) {
     if (context.selectedObject === obj) {
       li.classList.add("selected");
     }
-    // li.onclick = () => {
-    //   context.selectedObject = obj;  // Update selectedObject in context if you store it there
-    //   document.getElementById("objectSelect").value = obj.name;
-    //   showEditPanel(context);  // Show the edit panel for the selected object
-    // };
     
     list.appendChild(li);
   });
@@ -99,6 +94,7 @@ export function showEditPanel(context) {
     document.getElementById('editPanel').style.display = 'block';
 
     document.getElementById('objectName').value = obj.name || '';
+    document.getElementById('materialName').value = obj.userData.materialName;
 
     document.getElementById('posX').value = obj.position.x.toFixed(2);
     document.getElementById('posY').value = obj.position.y.toFixed(2);
