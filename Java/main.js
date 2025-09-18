@@ -4,7 +4,7 @@ import { setupLighting } from './scene.js';
 import { init_slicePanel } from './ui/slicePanel.js';
 import context from './scene.js';
 import { updateObjectOrder, showEditPanel} from './ui/contextMenu.js';
-import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials, spawnObject} from './utils/objectHandling.js';
+import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials, spawnObject, updateMaterialUI} from './utils/objectHandling.js';
 import { loadInstrumentFile,writeInstr } from './utils/importExport.js';
 
 
@@ -48,6 +48,7 @@ function initScene(context) {
   document.getElementById('downloadBtn').addEventListener('click', function() {
   writeInstr(context);
   });
+
   // Assuming the 'objectSelect' is the dropdown for object selection
   document.getElementById('objectSelect').addEventListener('change', function () {
     const selectedObjectName = this.value;
@@ -66,6 +67,7 @@ function animate(context) {
   requestAnimationFrame(() => animate(context));  // Pass context explicitly
   // Ensure objects are sorted by priority before rendering
   // updateObjectList(context);
+  updateMaterialUI(context)
   updateObjectOrder(context);
   
 

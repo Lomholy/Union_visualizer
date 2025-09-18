@@ -163,6 +163,10 @@
     </label><br><br>
 
     <button id="spawnBtn">Spawn Object</button><button id="deleteBtn">Delete Object</button>
+    <div id="materialPanel">
+      <h3>Materials</h3>
+    <ul id="materialList"></ul>
+  </div>
    </div>
     <div id="objectUi">
       <div id="editPanel" style="display:none; margin-top:1em;">
@@ -171,11 +175,6 @@
         <select id="objectSelect">
           <option value="">-- Select an object --</option>
         </select>
-        <div style="margin-top: 10px;">
-          <label for="editColor">Material Color:</label>
-          <input type="color" id="editColor">
-          <button id="updateColorBtn">Update Color</button>
-        </div>
 
         <h3>Edit Selected Object</h3>
         <button id="updateBtn">Update Object</button>

@@ -82,7 +82,13 @@ export function spawnObject(context) {
   // Set as selected object
   context.selectedObject = mesh;
   document.getElementById("objectSelect").value = id;
-
+  const objectSelect = document.getElementById("objectSelect");
+  const option = document.createElement("option");
+  option.value = mesh.name;  // Use the mesh name as the value
+  option.text = `${mesh.name} (${mesh.userData.type})`;  // Display name and type in the dropdown
+  objectSelect.appendChild(option);
+  context.selectedObject = mesh;
+  objectSelect.value = mesh.name;
   // ✅ Update UI through the centralized function
   updateObjectList(context);
 
@@ -137,6 +143,9 @@ export function setupUpdateHandler(context) {
     selectedObject.userData.materialName = document.getElementById('materialName').value;
 
     console.log('Updated object:', selectedObject);
+    console.log(context.materials)
+    console.log(context.old_materials)
+
   });
 }
 
@@ -242,4 +251,69 @@ export function updateAllMaterials(context) {
     obj.material = material;
   });
   console.log(context.objects[0].userData);
+}
+export function updateMaterialUI(context) {
+  const newEntries = Object.entries(context.materials);
+  const oldEntries = context.old_materials || {};
+
+  let changed = false;
+
+  // Compare keys and object references
+  if (newEntries.length !== Object.keys(oldEntries).length) {
+    changed = true;
+  } else {
+    for (const [name, mat] of newEntries) {
+      if (!(name in oldEntries) || oldEntries[name] !== mat) {
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (changed) {
+    console.log('Materials changed');
+    populateMaterialList(context);
+
+    // Save snapshot of references
+    context.old_materials = { ...context.materials };
+  }
+}
+
+
+// Populate the list from context.materials
+function populateMaterialList(context) {
+  console.log(context.materials);
+  const materialListEl = document.getElementById('materialList');
+  materialListEl.innerHTML = '';
+  Object.entries(context.materials).forEach(([name, color]) => {
+    const li = document.createElement('li');
+    li.className = 'material-item';
+    li.textContent = name;
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+
+    // if color already has '#', just use it
+    colorInput.value = toHexColorString(color);
+
+    colorInput.addEventListener('input', (e) => {
+      context.materials[name] = e.target.value; // update the dictionary
+    });
+
+    li.appendChild(colorInput);
+    materialListEl.appendChild(li);
+  });
+}
+
+function toHexColorString(value) {
+  if (typeof value === 'string') {
+    // already a string, ensure it starts with #
+    return value.startsWith('#') ? value : `#${value}`;
+  } else if (typeof value === 'number') {
+    // convert number to hex string and pad with zeros
+    return `#${value.toString(16).padStart(6, '0')}`;
+  } else {
+    // fallback
+    return '#ffffff';
+  }
 }

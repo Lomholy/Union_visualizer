@@ -12,7 +12,8 @@ const context = {
     selectedObject: null,
     raycaster: null,
     mouse: null,
-    materials: {}
+    materials: {},
+    old_materials: {}
   };
   
   export default context;
