@@ -119,12 +119,14 @@ function addComponentToScene(component, context) {
     case 'Union_cylinder': {
       const radius = params.radius || 0.01;
       const height = params.yheight || 0.01;
+      params.height = params.yheight;
       geometry = new THREE.CylinderGeometry(radius, radius, height);
       break;
     }
     case 'Union_cone': {
       const radius_top = params.radius_top || 0.01;
       const height = params.yheight || 0.01;
+      params.height = params.yheight;
       const radius_bottom = params.radius_bottom || 0.01;
       geometry = new THREE.CylinderGeometry(radius_top, radius_bottom, height);
       break;
@@ -137,6 +139,7 @@ function addComponentToScene(component, context) {
     case 'Union_box': {
       const width = params.xwidth || 0.01;
       const height = params.yheight || 0.01;
+      params.height = params.yheight;
       const depth = params.zdepth || 0.01;
       geometry = new THREE.BoxGeometry(width, height, depth);
       break;
@@ -262,13 +265,13 @@ function buildParameters(obj) {
     switch (obj.userData.type) {
         case 'Union_cylinder':
             params += `radius=${obj.userData.radiusTop ?? obj.geometry.parameters.radiusTop ?? obj.userData.radiusBottom ?? obj.geometry.parameters.radiusBottom ?? 1}, ` +
-                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `height=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
                       `material=${material}, priority=${priority}`;
             break;
     
         case 'Union_box':
             params += `xwidth=${obj.userData.width ?? obj.geometry.parameters.width ?? 1}, ` +
-                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `height=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
                       `zdepth=${obj.userData.depth ?? obj.geometry.parameters.depth ?? 1}, ` +
                       `material=${material}, priority=${priority}`;
             break;
@@ -281,7 +284,7 @@ function buildParameters(obj) {
         case 'Union_cone':
             params += `radius_top=${obj.userData.radiusTop ?? obj.geometry.parameters.radiusTop ?? 1}, ` +
                       `radius_bottom=${obj.userData.radiusBottom ?? obj.geometry.parameters.radiusBottom ?? 1}, ` +
-                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `height=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
                       `material=${material}, priority=${priority}`;
             break;
     

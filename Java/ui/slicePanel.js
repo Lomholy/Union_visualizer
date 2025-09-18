@@ -10,6 +10,9 @@ export function init_slicePanel(context){// Add slice panel
     const planeHeightSlider = document.getElementById('planeHeight');
     // Track if the plane has been added
     let xyPlane = null;
+    let planeWidth = 2;
+    let planeHeight = 2;
+
 
     toggleBtn.addEventListener('click', () => {
     // Toggle panel visibility
@@ -18,8 +21,8 @@ export function init_slicePanel(context){// Add slice panel
     // Add XY plane if it doesn't exist
     if (!xyPlane) {
         // Create a plane
-        const size = 2; // adjust as needed
-        const geometry = new THREE.PlaneGeometry(size, size);
+     
+        const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
         const material = new THREE.MeshStandardMaterial({
         color: 0xaaaaaa,
         side: THREE.DoubleSide,
@@ -40,6 +43,8 @@ export function init_slicePanel(context){// Add slice panel
     } else {
         console.warn('scene is not defined');
     }
+    // make the first plot
+    drawPrioritySlice(context.objects, planeHeightSlider.value, planeWidth, planeHeight);
     });
     // Move plane up/down when slider changes
     planeHeightSlider.addEventListener('input', () => {
@@ -49,87 +54,169 @@ export function init_slicePanel(context){// Add slice panel
     });
     // Update when slider moves
     planeHeightSlider.addEventListener('input', () => {
-        drawPrioritySlice(context.objects, planeHeightSlider.value);
+        drawPrioritySlice(context.objects, planeHeightSlider.value, planeWidth, planeHeight);
     });
 }
 
 
-function drawPrioritySlice(objects, planeY) {
+function drawPrioritySlice(objects, planeY, planeWidth, planeHeight) {
     const canvas = document.getElementById('planeCanvas');
+    
     const ctx = canvas.getContext('2d');
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+     // Compute scale factors (pixels per world unit)
+    const scaleX = canvas.width / planeWidth;
+    const scaleY = canvas.height / planeHeight;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let topPriority = -Infinity;
+    let color = [0,0,0];
+    const imageData = ctx.createImageData(canvas.width, canvas.height);
+    const data = imageData.data;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    objects.forEach(obj => {
+        // Skip objects that do not intersect planeY (local-space check)
+        const localPlane = new THREE.Vector3(0, planeY, 0);
+        obj.worldToLocal(localPlane);
+        // If object has a height, check bounding box
+        if (obj.userData.heigh){
+            const halfHeight = (obj.userData.height || 0) / 2;
+            if (localPlane.y < -halfHeight || localPlane.y > halfHeight) return;
+        } else {
+            if (Math.abs(localPlane.y > obj.userData.radius)) return;
+        }
 
-    const scale = 1000;         // world units → pixels
-    const offsetX = width / 2;
-    const offsetZ = height / 2;
-    console.log('New planeHeight Check')
-    for (let i = 0; i < width; i++) {
-        for (let j = 0; j < height; j++) {
-            // Map canvas pixel to world coordinates (X,Z)
-            const x = (i - offsetX) / scale;
-            const z = (offsetZ - j) / scale;
-            const vec = new THREE.Vector3(x, planeY, z)
+        const color = [
+            Math.floor(obj.material.color.r * 255),
+            Math.floor(obj.material.color.g * 255),
+            Math.floor(obj.material.color.b * 255)
+        ];
+        const priority = obj.userData.priority || 0;
+        const vec = new THREE.Vector3(0, planeY, 0);
+        // Loop over pixels that the object projects onto
+        for (let i = 0; i <= canvas.width; i++) {
+            for (let j = 0; j <= canvas.height; j++) {
+                // Map pixel to world coordinates
+                
+                vec.set((i / scaleX - planeWidth/2), planeY, (planeHeight / 2) - (j / scaleY));
 
-            let topShape = null;
-            let topPriority = -Infinity;
+                if (!shapeContainsPoint(obj, vec)) continue;
 
-            objects.forEach(obj => {
-            if (obj.userData.type==='Union_cylinder'){
-                if (cylinderContainsPoint(obj, vec)){
-                    
-                    const p = obj.userData.priority || 0;
-                    console.log(p)
-                    if (p >= topPriority) {
-                        topPriority = p;
-                        topShape = obj;
-                    }
+                const idx = (j * canvas.width + i) * 4;
+                const p = obj.userData.priority;
+                // Only overwrite if this object has higher priority
+                if (p >= topPriority) {
+                    data[idx] = color[0];
+                    data[idx + 1] = color[1];
+                    data[idx + 2] = color[2];
+                    data[idx + 3] = 255; // fully opaque
                 }
-            }});
-
-            if (topShape) {
-                ctx.fillStyle = topShape.material.color.getStyle();
-                ctx.fillRect(i, j, 1, 1);
             }
         }
-    }
+    });
+    ctx.putImageData(imageData, 0, 0);
+    // for (let i = 0; i < canvas.width; i++) {
+    // for (let j = 0; j < canvas.height; j++) {
+    //     // Map canvas pixel to world coordinates
+    //     vec.set((i / scaleX) - planeWidth / 2,
+    //             planeY,
+    //             (planeHeight / 2) - (j / scaleY))
+
+    //     let topPriority = -Infinity;
+    //     let color = [0,0,0];
+
+    //     objects.forEach(obj => {
+    //     if (shapeContainsPoint(obj,vec)) {
+    //         const p = obj.userData.priority;
+    //         if (p >= topPriority) {
+    //             topPriority = p;
+    //             const c = obj.material.color;
+    //             color = [
+    //             Math.floor(c.r*255),
+    //             Math.floor(c.g*255),
+    //             Math.floor(c.b*255)
+    //             ];
+    //         };
+    //     };
+    //     });
+
+    //     const idx = (j*canvas.width + i) * 4;
+    //     data[idx] = color[0];
+    //     data[idx+1] = color[1];
+    //     data[idx+2] = color[2];
+    //     data[idx+3] = (topPriority>-Infinity)? 255 : 0;
+    // }
+    // }
+
+  
 }
 function shapeContainsPoint(obj, vec){
-    return false
-}
+    // ensure world matrices are up-to-date
+    obj.updateMatrixWorld(true);
 
+    // copy the world point and transform it into the object's local space
+    const local = vec.clone();
+    obj.worldToLocal(local); 
+    switch (obj.userData.type) {
+        case 'Union_cylinder':
+            return cylinderContainsPoint(obj, local);
+        case 'Union_sphere':
+            return sphereContainsPoint(obj, local);
+        case 'Union_box':
+            return boxContainsPoint(obj, local);
+        case 'Union_cone':
+            return coneContainsPoint(obj, local);
+        default:
+        return false;
 
-function cylinderContainsPoint(obj, vec){
-    // console.log(obj)
-    const max_rad = obj.userData.radius;
-    const height = obj.userData.height;
-    // Get the rotation matrix
-    const matrix4 = new THREE.Matrix4().makeRotationFromEuler(obj.rotation);
-
-    // Extract 3x3 rotation matrix
-    const ROT = new THREE.Matrix3().setFromMatrix4(matrix4);
-    // Make a copy of ROT and invert it
-    const ROT_inv = new THREE.Matrix3().copy(ROT).invert();
-
-    // Apply inverse rotation to X
-    const localVec = vec.clone().applyMatrix3(ROT_inv);
-
-    const dx = localVec.x - obj.position.x;
-    const dz = localVec.z - obj.position.z;
-    const r = Math.sqrt(dx*dx + dz*dz);
-    const h = localVec.y - obj.position.y;
-    
-    
-    // Return true if r and h are within max rad & height
-    if (r <= max_rad && r>=0 && h >= -height/2 && h <= height/2){
-        console.log(r,h)
-        return true
     }
-
-    return false
 }
 
+function cylinderContainsPoint(obj, local){
+    // cylinder aligned with local Y
+    const radius = obj.userData.radius;
+    const height = obj.userData.height;
 
+    // radial distance in XZ plane and local Y as height
+    const r = Math.hypot(local.x, local.z); // equivalent to sqrt(x*x + z*z)
+    const h = local.y;
 
+    // If cylinder origin is centered, check [-height/2, +height/2]
+    return (r >= 0) &&(r <= radius) && (h >= -height/2) && (h <= height/2);
+}
+
+function sphereContainsPoint(obj, local) {
+    const radius = obj.userData.radius;
+
+    const r = Math.hypot(local.x, local.y, local.z);
+    return r <= radius;
+}
+
+function boxContainsPoint(obj, local) {
+    const w = obj.userData.width / 2;
+    const h = obj.userData.height / 2;
+    const d = obj.userData.depth / 2;
+
+    return (
+    local.x >= -w && local.x <= w &&
+    local.y >= -h && local.y <= h &&
+    local.z >= -d && local.z <= d
+    );
+}
+
+function coneContainsPoint(obj, local) {
+  const height = obj.userData.height;
+  const bottomRadius = obj.userData.radius_bottom;
+  const topRadius = obj.userData.radius_top;
+    
+  const h = local.y;
+  if (h < -height/2 || h > height/2) return false;
+ 
+  // Linearly interpolate radius at this height
+  const t = h / height; // 0 at base, 1 at top
+  const rAtH = bottomRadius * (1 - t) + topRadius * t;
+
+  const r = Math.hypot(local.x, local.z);
+    // console.log(bottomRadius, topRadius, height)
+  return r <= rAtH;
+}

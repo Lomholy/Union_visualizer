@@ -137,24 +137,24 @@ export function showEditPanel(context) {
 
     // ⬇️ SHAPE PARAMETERS SECTION ⬇️
     const paramContainer = document.getElementById('shapeParams');
-    console.log(obj.geometry);
+    console.log(obj.userData.type);
     paramContainer.innerHTML = ''; // Clear previous parameters
-
-    // Get the geometry type (e.g., CylinderGeometry, BoxGeometry, etc.)
-    const geometryType = obj.geometry?.type;
 
     // Define which parameters to show for which shapes
     const shapeParamsMap = {
-        CylinderGeometry: ['radiusTop', 'radiusBottom', 'height'],
-        BoxGeometry: ['width', 'height', 'depth'],
-        SphereGeometry: ['radius'],
-        ConeGeometry: ['radius', 'height']
+        'Union_cylinder': ['radius', 'height'],
+        'Union_box': ['width', 'height', 'depth'],
+        'Union_sphere': ['radius'],
+        'Union_cone': ['radius_top', 'radius_bottom', 'height']
     };
 
     // Get the parameters for the current shape type
-    const shapeParams = shapeParamsMap[geometryType];
-    if (!shapeParams) return;
-
+    const shapeParams = shapeParamsMap[obj.userData.type];
+    if (!shapeParams){ 
+        console.log('Error: ShapeParams not existing');
+        return;
+    }
+    console.log(obj)
     // Loop through each shape parameter and create the UI
     shapeParams.forEach(param => {
         const wrapper = document.createElement('div');
@@ -218,38 +218,38 @@ export function showEditPanel(context) {
 
 
 function updateGeometry(object) {
-    const type = object.geometry?.type;
+    const type = object.userData.type;
     const params = object.userData;
     const geometryParams = object.geometry?.parameters || {};  // Failsafe: Use geometry parameters if available
 
     let newGeometry;
     switch (type) {
-        case 'CylinderGeometry':
+        case 'Union_cylinder':
             newGeometry = new THREE.CylinderGeometry(
-                params.radiusTop ?? geometryParams.radiusTop ?? 1,   // Failsafe first for userData, then for geometry parameters
-                params.radiusBottom ?? geometryParams.radiusBottom ?? 1,
+                params.radius ?? geometryParams.radiusTop ?? 1,   // Failsafe first for userData, then for geometry parameters
+                params.radius ?? geometryParams.radiusBottom ?? 1,
                 params.height ?? geometryParams.height ?? 1,
                 32 // segments
             );
             break;
-        case 'BoxGeometry':
+        case 'Union_box':
             newGeometry = new THREE.BoxGeometry(
                 params.width ?? geometryParams.width ?? 1,  // Failsafe for userData, then for geometry parameters
                 params.height ?? geometryParams.height ?? 1,
                 params.depth ?? geometryParams.depth ?? 1
             );
             break;
-        case 'SphereGeometry':
+        case 'Union_sphere':
             newGeometry = new THREE.SphereGeometry(
                 params.radius ?? geometryParams.radius ?? 1,  // Failsafe for userData, then for geometry parameters
                 32, 32
             );
             break;
-        case 'ConeGeometry':
-            newGeometry = new THREE.ConeGeometry(
-                params.radius ?? geometryParams.radius ?? 1,  // Failsafe for userData, then for geometry parameters
-                params.height ?? geometryParams.height ?? 1,
-                32
+        case 'Union_cone':
+            newGeometry = new THREE.CylinderGeometry(
+                params.radius_top ?? geometryParams.radius ?? 1,  // Failsafe for userData, then for geometry parameters
+                params.radius_bottom ?? geometryParams.radius ?? 1,
+                params.height ?? geometryParams.height ?? 1
             );
             break;
         default:

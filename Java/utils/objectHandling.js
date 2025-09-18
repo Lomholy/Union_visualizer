@@ -21,24 +21,37 @@ export function spawnObject(context) {
 
   let geometry;
   let unionType = "";
+  let params = {}; // geometric parameters to store in userData
 
   switch (shapeType) {
-    case "Box":
-      geometry = new THREE.BoxGeometry();
+    case "Box": {
+      const width = 1, height = 1, depth = 1;
+      geometry = new THREE.BoxGeometry(width, height, depth);
       unionType = "Union_box";
+      params = { width, height, depth };
       break;
-    case "Sphere":
-      geometry = new THREE.SphereGeometry(0.5, 32, 32);
+    }
+    case "Sphere": {
+      const radius = 0.5;
+      geometry = new THREE.SphereGeometry(radius);
       unionType = "Union_sphere";
+      params = { radius };
       break;
-    case "Cylinder":
-      geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+    }
+    case "Cylinder": {
+      const radiusTop = 0.5, radiusBottom = 0.5, height = 1;
+      geometry = new THREE.CylinderGeometry(radiusTop, radiusBottom, height);
       unionType = "Union_cylinder";
+      params = { radius: radiusTop, height }; // cylinder has equal radii
       break;
-    case "Cone":
-      geometry = new THREE.ConeGeometry(0.5, 1, 32);
+    }
+    case "Cone": {
+      const radius = 0.5, height = 1;
+      geometry = new THREE.CylinderGeometry(0,radius, height);
       unionType = "Union_cone";
+      params = { radius_bottom: radius, radius_top: 0, height }; // default to pointed cone
       break;
+    }
     default:
       console.warn("Unknown shape type:", shapeType);
       return;
@@ -49,9 +62,14 @@ export function spawnObject(context) {
   const mesh = new THREE.Mesh(geometry, material);
 
   mesh.position.set(0, 0, 0);
-  mesh.userData.priority = priority;
-  mesh.userData.materialName = '';
-  mesh.userData.type = unionType;
+
+  // Attach metadata
+  mesh.userData = {
+    priority,
+    materialName: '',
+    type: unionType,
+    ...params   // ✅ include shape parameters
+  };
 
   // Assign unique name
   const id = `Object${objects.length + 1}`;
