@@ -96,7 +96,7 @@ AT (0,0,0) RELATIVE arm_sample_position
 
 COMPONENT sample_container_cone = Union_cone(
  material_string = "Al", priority = 130,
- radius_top = 0.013, radius_bottom=0.1,yheight = 0.004)
+ radius_top = 0.33, radius_bottom=0.1,yheight = 0.004)
 AT (0,0.051,0) RELATIVE sample_container
 
 COMPONENT sample_container_box = Union_box(
@@ -106,7 +106,7 @@ AT (0,0.051,0) RELATIVE sample_container
 
 COMPONENT sample_container_sphere = Union_sphere(
  material_string = "Al", priority = 70,
- radius_top=0.8, radius_bottom=0.2, yheight=0.2)
+ radius=0.8 yheight=0.2)
 AT (0,0.051,0) RELATIVE sample_container
 
 COMPONENT logger_space_zx = Union_logger_2D_space(
