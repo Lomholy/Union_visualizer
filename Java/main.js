@@ -70,3 +70,18 @@ function animate(context) {
   context.controls.update();
   context.renderer.render(context.scene, context.camera);
 }
+
+
+
+// Add slice panel 
+
+const toggleBtn = document.getElementById('toggleSecondaryPanel');
+const secondaryPanel = document.getElementById('secondaryPanel');
+
+toggleBtn.addEventListener('click', () => {
+  if (secondaryPanel.style.display === 'none') {
+    secondaryPanel.style.display = 'block';
+  } else {
+    secondaryPanel.style.display = 'none';
+  }
+});

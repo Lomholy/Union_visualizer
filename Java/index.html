@@ -84,6 +84,32 @@
       color: white;
       font-weight: bold;
     }
+    #secondaryPanel {
+      position: absolute;
+      bottom: 10px;          /* anchor to bottom */
+      right: 10px;           /* anchor to right */
+      width: 240px;
+      background: rgba(255,255,255,0.95);
+      padding: 12px;
+      border-radius: 8px;
+      font-family: sans-serif;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+      z-index: 100;          /* higher than #objectUi */
+    }
+
+    #toggleSecondaryPanel {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      z-index: 110;          /* above panel itself so button is clickable */
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+
 
   </style>
 </head>
@@ -186,7 +212,26 @@
 
     
   </div>
+  <!-- Secondary Panel -->
+  <div id="secondaryPanel" style="display:none;">
+    <h3>Secondary Panel</h3>
+    <p>Content goes here...</p>
+    <!-- You can later add buttons, sliders, or info -->
+  </div>
 
-  <script type="module" src="main.js"></script>
+  <!-- Optional toggle button -->
+  <button id="toggleSecondaryPanel" style="
+    position:absolute;
+    bottom:10px;
+    right:10px;
+    z-index:100;
+    padding:6px 12px;
+    border:none;
+    border-radius:4px;
+    background:#007bff;
+    color:white;
+    cursor:pointer;
+  ">Toggle Panel</button>
+    <script type="module" src="main.js"></script>
 </body>
 </html>
