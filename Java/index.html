@@ -84,24 +84,25 @@
       color: white;
       font-weight: bold;
     }
-    #secondaryPanel {
+    #slicePanel {
       position: absolute;
-      bottom: 10px;          /* anchor to bottom */
-      right: 10px;           /* anchor to right */
-      width: 240px;
+      bottom: 10px;        /* distance from bottom */
+      right: 10px;         /* distance from right */
+      width: 40%;     /* 1/6 of the viewport width */
+      height: 40%;    /* 1/6 of the viewport height */
       background: rgba(255,255,255,0.95);
       padding: 12px;
       border-radius: 8px;
       font-family: sans-serif;
       box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-      z-index: 100;          /* higher than #objectUi */
+      z-index: 100;
+      overflow: auto;       /* allows scrolling if content exceeds panel */
     }
-
-    #toggleSecondaryPanel {
+    #toggleSlicePanel {
       position: absolute;
       bottom: 10px;
       right: 10px;
-      z-index: 110;          /* above panel itself so button is clickable */
+      z-index: 110;          /* above the panel */
       padding: 6px 12px;
       border: none;
       border-radius: 4px;
@@ -207,31 +208,18 @@
       
       
       
-    </div>
-
-
-    
+      </div>
   </div>
-  <!-- Secondary Panel -->
-  <div id="secondaryPanel" style="display:none;">
-    <h3>Secondary Panel</h3>
-    <p>Content goes here...</p>
-    <!-- You can later add buttons, sliders, or info -->
+  <!-- Slice Panel -->
+  <div id="slicePanel" style="display:none;">
+      <h3>Slice Panel</h3>
+      <label for="planeHeight">XY Plane Height (Y):</label>
+      <input type="range" id="planeHeight" min="-2" max="2" step="0.01" value="0">
   </div>
 
-  <!-- Optional toggle button -->
-  <button id="toggleSecondaryPanel" style="
-    position:absolute;
-    bottom:10px;
-    right:10px;
-    z-index:100;
-    padding:6px 12px;
-    border:none;
-    border-radius:4px;
-    background:#007bff;
-    color:white;
-    cursor:pointer;
-  ">Toggle Panel</button>
-    <script type="module" src="main.js"></script>
+  <!-- toggle slice panel button -->
+  <button id="toggleSlicePanel">Toggle Slice panel</button>
+  
+  <script type="module" src="main.js"></script>
 </body>
 </html>

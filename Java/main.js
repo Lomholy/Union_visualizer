@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { setupLighting } from './scene.js';
+import { init_slicePanel } from './ui/slicePanel.js';
 import context from './scene.js';
-import { updateObjectList, updateObjectOrder, showEditPanel} from './ui/contextMenu.js';
+import { updateObjectOrder, showEditPanel} from './ui/contextMenu.js';
 import { setupUpdateHandler,setupDeleteHandler, updateAllMaterials, spawnObject} from './utils/objectHandling.js';
 import { loadInstrumentFile,writeInstr } from './utils/importExport.js';
 
@@ -43,6 +44,7 @@ function initScene(context) {
   setupUpdateHandler(context);
   setupDeleteHandler(context);
   loadInstrumentFile(context);
+  init_slicePanel(context);
   document.getElementById('downloadBtn').addEventListener('click', function() {
   writeInstr(context);
   });
@@ -56,7 +58,7 @@ function initScene(context) {
       showEditPanel(context); // Show the edit panel for the newly selected object
     }
   }); 
-  
+
   animate(context);
 }
 
@@ -70,18 +72,3 @@ function animate(context) {
   context.controls.update();
   context.renderer.render(context.scene, context.camera);
 }
-
-
-
-// Add slice panel 
-
-const toggleBtn = document.getElementById('toggleSecondaryPanel');
-const secondaryPanel = document.getElementById('secondaryPanel');
-
-toggleBtn.addEventListener('click', () => {
-  if (secondaryPanel.style.display === 'none') {
-    secondaryPanel.style.display = 'block';
-  } else {
-    secondaryPanel.style.display = 'none';
-  }
-});
