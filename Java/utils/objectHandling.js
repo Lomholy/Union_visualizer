@@ -170,7 +170,7 @@ export function setupUpdateHandler(context) {
 
 export function setupDeleteHandler(context) {
   document.getElementById('deleteBtn').addEventListener('click', () => {
-    const { selectedObject, scene, objects } = context;
+    const { selectedObject, scene, objects, materials } = context;
     if (!selectedObject) return;
 
     // Remove from scene
@@ -190,6 +190,20 @@ export function setupDeleteHandler(context) {
     const item = [...list.children].find(li => li.textContent.includes(selectedObject.name));
     if (item) list.removeChild(item);
 
+    // --- CLEANUP UNUSED MATERIALS ---
+    if (materials) {
+      // Collect names of all materials currently used by remaining objects
+      const usedMaterials = new Set(objects.map(obj => obj.material?.name).filter(Boolean));
+
+      // Remove materials from the dict that are not in use
+      for (const matName of Object.keys(materials)) {
+        if (!usedMaterials.has(matName)) {
+          delete materials[matName];
+          console.log(`Material "${matName}" removed from materials dict.`);
+        }
+      }
+    }
+
     // Update selection: select first remaining object, if any
     context.selectedObject = objects[0] || null;
     if (context.selectedObject) {
@@ -202,6 +216,7 @@ export function setupDeleteHandler(context) {
     console.log("Object deleted.");
   });
 }
+
 
 //==============================================================================
 //========== Update of all materials when switching view styles ================

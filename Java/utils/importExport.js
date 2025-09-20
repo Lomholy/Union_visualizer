@@ -28,7 +28,8 @@ export function loadInstrumentFile(context) {
     };
 
     reader.readAsText(file); // Read the file as text
-    
+    // reset input so same file can be chosen again
+    fileInput.value = '';
   });
 }
 
