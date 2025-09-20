@@ -89,25 +89,25 @@ COMPONENT Sample = Union_make_material(
  process_string = "Sample_inc,Sample_pow", my_absorption = 0)
 AT (0,0,0) RELATIVE arm_sample_position
 
-COMPONENT sample_container = Union_cylinder(
- material_string = "Al", priority = 99,
- radius = 0.0765, yheight = 0.103)
-AT (0,0,0) RELATIVE arm_sample_position
+COMPONENT sample_container_box = Union_box(
+xwidth=0.06, yheight=0.88, zdepth=1.19, material_string="Cu", priority=200
+) AT (0.00, 0.05, 0.00) RELATIVE sample_arm
+ROTATED (0.00, 0.00, 0.00) RELATIVE sample_arm
 
 COMPONENT sample_container_cone = Union_cone(
- material_string = "Al", priority = 130,
- radius_top = 0.33, radius_bottom=0.1,yheight = 0.004)
-AT (0,0.051,0) RELATIVE sample_container
+radius_top=0.33, radius_bottom=0.1, yheight=0.39, material_string="Vana", priority=130
+) AT (0.00, 0.05, 0.00) RELATIVE sample_arm
+ROTATED (0.00, 0.00, 0.00) RELATIVE sample_arm
 
-COMPONENT sample_container_box = Union_box(
- material_string = "Al", priority = 200,
- xwidth = 0.013, yheight = 0.004, zdepth=0.01)
-AT (0,0.051,0) RELATIVE sample_container
+COMPONENT sample_container = Union_cylinder(
+radius=0.3, yheight=1, material_string="Vacuum", priority=99
+) AT (0.00, 0.00, 0.00) RELATIVE sample_arm
+ROTATED (0.00, 0.00, 0.00) RELATIVE sample_arm
 
 COMPONENT sample_container_sphere = Union_sphere(
- material_string = "Al", priority = 70,
- radius=0.8 yheight=0.2)
-AT (0,0.051,0) RELATIVE sample_container
+radius=0.8, material_string="Al", priority=70
+) AT (0.00, 0.05, 0.00) RELATIVE sample_arm
+ROTATED (0.00, 0.00, 0.00) RELATIVE sample_arm
 
 COMPONENT logger_space_zx = Union_logger_2D_space(
  D_direction_1 = "z", D1_min = -0.12,
