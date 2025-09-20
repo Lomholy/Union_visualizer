@@ -70,7 +70,7 @@ function animate(context) {
   updateMaterialUI(context)
   updateObjectOrder(context);
   
-
+  
   context.controls.update();
   context.renderer.render(context.scene, context.camera);
 }

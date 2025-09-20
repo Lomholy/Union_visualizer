@@ -256,33 +256,33 @@ export function writeInstr(context){
 function buildParameters(obj) {
     let params = '';
     // Get the material and priority from userData, defaulting to "default" for material and 0 for priority
-    const material = obj.userData.material || 'default';
+    const material = obj.userData.materialName || 'default';
     const priority = obj.userData.priority || 0;
 
     switch (obj.userData.type) {
         case 'Union_cylinder':
             params += `radius=${obj.userData.radiusTop ?? obj.geometry.parameters.radiusTop ?? obj.userData.radiusBottom ?? obj.geometry.parameters.radiusBottom ?? 1}, ` +
-                      `height=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
-                      `material=${material}, priority=${priority}`;
+                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `material_string=${material}, priority=${priority}`;
             break;
     
         case 'Union_box':
             params += `xwidth=${obj.userData.width ?? obj.geometry.parameters.width ?? 1}, ` +
-                      `height=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
                       `zdepth=${obj.userData.depth ?? obj.geometry.parameters.depth ?? 1}, ` +
-                      `material=${material}, priority=${priority}`;
+                      `material_string=${material}, priority=${priority}`;
             break;
     
         case 'Union_sphere':
             params += `radius=${obj.userData.radius ?? obj.geometry.parameters.radius ?? 1}, ` +
-                      `material=${material}, priority=${priority}`;
+                      `material_string=${material}, priority=${priority}`;
             break;
     
         case 'Union_cone':
             params += `radius_top=${obj.userData.radiusTop ?? obj.geometry.parameters.radiusTop ?? 1}, ` +
                       `radius_bottom=${obj.userData.radiusBottom ?? obj.geometry.parameters.radiusBottom ?? 1}, ` +
-                      `height=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
-                      `material=${material}, priority=${priority}`;
+                      `yheight=${obj.userData.height ?? obj.geometry.parameters.height ?? 1}, ` +
+                      `material_string=${material}, priority=${priority}`;
             break;
     
         default:

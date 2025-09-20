@@ -89,7 +89,7 @@
       bottom: 10px;        /* distance from bottom */
       right: 10px;         /* distance from right */
       width: 40%;     /* 1/6 of the viewport width */
-      height: 40%;    /* 1/6 of the viewport height */
+      height: 50%;    /* 1/6 of the viewport height */
       background: rgba(255,255,255,0.95);
       padding: 12px;
       border-radius: 8px;
@@ -111,8 +111,8 @@
       cursor: pointer;
     }
     #planeCanvas {
-      width: 80%;
-      height: 80%;
+      width: 60%;
+      height: 60%;
       border: 1px solid black; /* optional for visibility */
     }
 
@@ -211,15 +211,34 @@
       </div>
   </div>
   <!-- Slice Panel -->
-  <div id="slicePanel" style="display:none;">
-      <h3>Slice Panel</h3>
-      <canvas id="planeCanvas" width="300" height="300" style="border:1px solid #aaa;"></canvas>
-      <label for="planeHeight">XY Plane Height (Y):</label>
-      <input type="range" id="planeHeight" min="-2" max="2" step="0.001" value="0">
-  </div>
+<div id="slicePanel" style="display:none;">
+  <h3>Slice Panel</h3>
+  <div style="display:flex; align-items:flex-start; gap:1rem;">
+    <!-- Canvas on the left -->
+    <canvas id="planeCanvas" width="300" height="300" style="border:1px solid #aaa;"></canvas>
+    
+    <!-- Controls on the right -->
+    <div>
+      <label for="planeHeight">XY Plane Height (Y):</label><br>
+      <input type="range" id="planeHeight" min="-2" max="2" step="0.001" value="0"><br><br>
 
-  <!-- toggle slice panel button -->
-  <button id="toggleSlicePanel">Toggle Slice panel</button>
+      <label>
+        Width:<br>
+        <input id="planeWidth" type="range" min="0.1" max="10" step="0.1" value="2">
+      </label><br><br>
+
+      <label>
+        Length:<br>
+        <input id="planeHeightSize" type="range" min="0.1" max="10" step="0.1" value="2">
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- toggle slice panel button -->
+<button id="toggleSlicePanel">Toggle Slice panel</button>
+
+
   
   <script type="module" src="main.js"></script>
 </body>
