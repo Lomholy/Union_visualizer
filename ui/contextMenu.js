@@ -3,6 +3,9 @@
 
 
 import * as THREE from 'three';
+import {setupLiveUpdateHandlers} from '../utils/objectHandling.js';
+
+
 
 // The function to update the list of objects
 export function updateObjectList(context) {
@@ -10,7 +13,7 @@ export function updateObjectList(context) {
     console.warn("updateObjectList: Invalid context or missing objects array");
     return;
   }
-  console.log("objectList element:", document.getElementById("objectList"));
+  //console.log("objectList element:", document.getElementById("objectList"));
   
   const list = document.getElementById("objectList");
   list.innerHTML = ""; // Clear the list
@@ -50,11 +53,11 @@ export function updateObjectList(context) {
 
 export function updateObjectOrder(context) {
   // Sort objects by priority (ascending, lowest priority first)
-  context.objects.sort((a, b) => b.userData.priority - a.userData.priority);
+  context.objects.sort((a, b) => a.userData.priority - b.userData.priority);
 
   // Update the renderOrder based on priority
   context.objects.forEach((obj, index) => {
-    obj.renderOrder = index;  // Objects with higher priority will be rendered first
+    obj.renderOrder =context.objects.length -index;  // Objects with higher priority will be rendered first
   });
 }
 
@@ -109,19 +112,19 @@ export function showEditPanel(context) {
     linkSliderAndInput(context, 'posYSlider', 'posY', val => obj.position.y = val);
     linkSliderAndInput(context, 'posZSlider', 'posZ', val => obj.position.z = val);
 
-    document.getElementById('rotX').value = obj.rotation.x.toFixed(2);
-    document.getElementById('rotY').value = obj.rotation.y.toFixed(2);
-    document.getElementById('rotZ').value = obj.rotation.z.toFixed(2);
-
-    document.getElementById('rotXSlider').value = obj.rotation.x;
-    document.getElementById('rotYSlider').value = obj.rotation.y;
-    document.getElementById('rotZSlider').value = obj.rotation.z;
-
+ 
+    document.getElementById('rotX').value = (obj.rotation.x * 180 / Math.PI).toFixed(2);
+    document.getElementById('rotY').value = (obj.rotation.y * 180 / Math.PI).toFixed(2);
+    document.getElementById('rotZ').value = (obj.rotation.z * 180 / Math.PI).toFixed(2);
+    
+    document.getElementById('rotXSlider').value = obj.rotation.x * 180 / Math.PI;
+    document.getElementById('rotYSlider').value = obj.rotation.y * 180 / Math.PI;
+    document.getElementById('rotZSlider').value = obj.rotation.z * 180 / Math.PI;
     // Sync sliders and inputs for rotation
-    linkSliderAndInput(context, 'rotXSlider', 'rotX', val => obj.rotation.x = val);
-    linkSliderAndInput(context, 'rotYSlider', 'rotY', val => obj.rotation.y = val);
-    linkSliderAndInput(context, 'rotZSlider', 'rotZ', val => obj.rotation.z = val);
-
+    linkSliderAndInput(context, 'rotXSlider', 'rotX', val => obj.rotation.x = val * Math.PI / 180);
+    linkSliderAndInput(context, 'rotYSlider', 'rotY', val => obj.rotation.y = val * Math.PI / 180);
+    linkSliderAndInput(context, 'rotZSlider', 'rotZ', val => obj.rotation.z = val * Math.PI / 180);
+    
     document.getElementById('editPriority').value = obj.userData.priority || 0;
 
     // ⬇️ SHAPE PARAMETERS SECTION ⬇️
@@ -203,6 +206,7 @@ export function showEditPanel(context) {
         wrapper.appendChild(sliderInput);
         paramContainer.appendChild(wrapper);
     });
+
 }
 
 
