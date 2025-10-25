@@ -99,9 +99,9 @@ export function showEditPanel(context) {
     document.getElementById('objectName').value = obj.name || '';
     document.getElementById('materialName').value = obj.userData.materialName;
 
-    document.getElementById('posX').value = obj.position.x.toFixed(2);
-    document.getElementById('posY').value = obj.position.y.toFixed(2);
-    document.getElementById('posZ').value = obj.position.z.toFixed(2);
+    document.getElementById('posX').value = obj.position.x.toFixed(5);
+    document.getElementById('posY').value = obj.position.y.toFixed(5);
+    document.getElementById('posZ').value = obj.position.z.toFixed(5);
 
     document.getElementById('posXSlider').value = obj.position.x;
     document.getElementById('posYSlider').value = obj.position.y;
@@ -113,9 +113,9 @@ export function showEditPanel(context) {
     linkSliderAndInput(context, 'posZSlider', 'posZ', val => obj.position.z = val);
 
  
-    document.getElementById('rotX').value = (obj.rotation.x * 180 / Math.PI).toFixed(2);
-    document.getElementById('rotY').value = (obj.rotation.y * 180 / Math.PI).toFixed(2);
-    document.getElementById('rotZ').value = (obj.rotation.z * 180 / Math.PI).toFixed(2);
+    document.getElementById('rotX').value = (obj.rotation.x * 180 / Math.PI).toFixed(5);
+    document.getElementById('rotY').value = (obj.rotation.y * 180 / Math.PI).toFixed(5);
+    document.getElementById('rotZ').value = (obj.rotation.z * 180 / Math.PI).toFixed(5);
     
     document.getElementById('rotXSlider').value = obj.rotation.x * 180 / Math.PI;
     document.getElementById('rotYSlider').value = obj.rotation.y * 180 / Math.PI;
@@ -134,10 +134,10 @@ export function showEditPanel(context) {
 
     // Define which parameters to show for which shapes
     const shapeParamsMap = {
-        'Union_cylinder': ['radius', 'height'],
-        'Union_box': ['width', 'height', 'depth'],
+        'Union_cylinder': ['radius', 'yheight'],
+        'Union_box': ['xwidth', 'yheight', 'zdepth'],
         'Union_sphere': ['radius'],
-        'Union_cone': ['radius_top', 'radius_bottom', 'height']
+        'Union_cone': ['radius_top', 'radius_bottom', 'yheight']
     };
 
     // Get the parameters for the current shape type
@@ -163,7 +163,7 @@ export function showEditPanel(context) {
 
         const numberInput = document.createElement('input');
         numberInput.type = 'number';
-        numberInput.step = '0.01';
+        numberInput.step = '0.001';
         numberInput.min = '0';
         numberInput.id = `shape_${param}`;
 
@@ -174,8 +174,8 @@ export function showEditPanel(context) {
         const sliderInput = document.createElement('input');
         sliderInput.type = 'range';
         sliderInput.min = '0';
-        sliderInput.max = '10';  // Adjust the max as needed
-        sliderInput.step = '0.01';
+        sliderInput.max = '1';  // Adjust the max as needed
+        sliderInput.step = '0.001';
         sliderInput.value = paramValue;
 
         // Sync number input with slider
@@ -221,15 +221,15 @@ function updateGeometry(object) {
             newGeometry = new THREE.CylinderGeometry(
                 params.radius ?? geometryParams.radiusTop ?? 1,   // Failsafe first for userData, then for geometry parameters
                 params.radius ?? geometryParams.radiusBottom ?? 1,
-                params.height ?? geometryParams.height ?? 1,
+                params.yheight ?? geometryParams.height ?? 1,
                 32 // segments
             );
             break;
         case 'Union_box':
             newGeometry = new THREE.BoxGeometry(
-                params.width ?? geometryParams.width ?? 1,  // Failsafe for userData, then for geometry parameters
-                params.height ?? geometryParams.height ?? 1,
-                params.depth ?? geometryParams.depth ?? 1
+                params.xwidth ?? geometryParams.width ?? 1,  // Failsafe for userData, then for geometry parameters
+                params.yheight ?? geometryParams.height ?? 1,
+                params.zdepth ?? geometryParams.depth ?? 1
             );
             break;
         case 'Union_sphere':
@@ -242,7 +242,7 @@ function updateGeometry(object) {
             newGeometry = new THREE.CylinderGeometry(
                 params.radius_top ?? geometryParams.radius ?? 1,  // Failsafe for userData, then for geometry parameters
                 params.radius_bottom ?? geometryParams.radius ?? 1,
-                params.height ?? geometryParams.height ?? 1
+                params.yheight ?? geometryParams.height ?? 1
             );
             break;
         default:

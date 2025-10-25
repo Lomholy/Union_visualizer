@@ -48,8 +48,15 @@ export function writeInstr(context){
 // Helper function to build the parameters string based on geometry type
 function buildParameters(obj) {
     let params = '';
-    // Get the material and priority from userData, defaulting to "default" for material and 0 for priority
-    const material = obj.userData.materialName || 'default';
+    // Get the material and priority. Ensure it has quotation marks at the ends 
+    let material = obj.userData.materialName || 'default';
+    if (!material.startsWith('"')){
+       material = '"'+material;
+    }
+   
+    if (!material.endsWith('"')){
+       material = material + '"';
+    }
     const priority = obj.userData.priority || 0;
 
     switch (obj.userData.type) {

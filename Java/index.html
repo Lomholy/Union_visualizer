@@ -123,7 +123,7 @@
   <div id="ui">
   <div class="import-export-container">
     <label for="importFile" class="file-input-label">Import Union environment</label>
-    <input type="file" id="importFile" accept=".instr" style="display:none;">
+    <input type="file" id="importFile" style="display:none;">
 
     <button id="downloadBtn" class="file-input-label">Export Union environment</button>
   
@@ -180,28 +180,28 @@
         <div id="shapeParams"></div>
         <div>
           <label>X Position:</label>
-          <input type="range" id="posXSlider" min="-0.5" max="0.5" step="0.01">
+          <input type="range" id="posXSlider" min="-0.5" max="0.5" step="0.001">
           <input type="number" id="posX" step="0.001"><br>
         
           <label>Y Position:</label>
-          <input type="range" id="posYSlider" min="-0.5" max="0.5" step="0.01">
+          <input type="range" id="posYSlider" min="-0.5" max="0.5" step="0.001">
           <input type="number" id="posY" step="0.001"><br>
         
           <label>Z Position:</label>
-          <input type="range" id="posZSlider" min="-0.5" max="0.5" step="0.01">
+          <input type="range" id="posZSlider" min="-0.5" max="0.5" step="0.001">
           <input type="number" id="posZ" step="0.001"><br>
 
           <label>X Rotation:</label>
-          <input type="range" id="rotXSlider" min="-180" max="180" step="0.01">
-          <input type="number" id="rotX" step="0.01"><br>
+          <input type="range" id="rotXSlider" min="-180" max="180" step="0.001">
+          <input type="number" id="rotX" step="0.001"><br>
         
           <label>Y Rotation:</label>
-          <input type="range" id="rotYSlider" min="-180" max="180" step="0.01">
-          <input type="number" id="rotY" step="0.01"><br>
+          <input type="range" id="rotYSlider" min="-180" max="180" step="0.001">
+          <input type="number" id="rotY" step="0.001"><br>
         
           <label>Z Rotation:</label>
-          <input type="range" id="rotZSlider" min="-180" max="180" step="0.01">
-          <input type="number" id="rotZ" step="0.01"><br>
+          <input type="range" id="rotZSlider" min="-180" max="180" step="0.001">
+          <input type="number" id="rotZ" step="0.001"><br>
         </div>
       
       
@@ -220,6 +220,13 @@
     <div>
       <label for="planeHeight">XY Plane Height (Y):</label><br>
       <input type="range" id="planeHeight" min="-2" max="2" step="0.001" value="0"><br><br>
+      
+         
+      <div id="planeSelector">
+        <button id="btnXY">XY</button>
+        <button id="btnXZ">XZ</button>
+        <button id="btnYZ">YZ</button>
+      </div>
 
       <label>
         Width:<br>
