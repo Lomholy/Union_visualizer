@@ -27,8 +27,7 @@ def execute_mcstasscript_file(input_file):
     ]
 
     if len(instruments) != 1:
-        raise ValueError(f"Expected exactly one instrument, found {
-                         len(instruments)}.")
+        raise ValueError(f"Expected exactly one instrument, found {len(instruments)}.")
 
     return instruments[0]
 
@@ -37,7 +36,7 @@ def init_build_blender(instr):
     lines = []
     lines.append("import bpy")
     lines.append("import math")
-    lines.append("from mathutils import Matrix")
+    lines.append("import mathutils")
     lines.append("")
     lines.append("# Auto-generated from mcstasscript instrument")
     lines.append("# Author: Daniel Lomholt Christensen @NBI @UCPH 05/03/2026")
@@ -47,8 +46,7 @@ def init_build_blender(instr):
     lines.append("bpy.ops.object.select_all(action='SELECT')")
     lines.append("bpy.ops.object.delete(use_global=False)")
     lines.append("for block in bpy.data.meshes: bpy.data.meshes.remove(block)")
-    lines.append(
-        "for block in bpy.data.objects: bpy.data.objects.remove(block)")
+    lines.append("for block in bpy.data.objects: bpy.data.objects.remove(block)")
     lines.append("")
     return "\n".join(lines)
 
@@ -175,6 +173,25 @@ for obj in objs_sorted:
 """
 
 
+def move_viewport():
+    return """# Move 3D View to frame all visible objects
+for window in bpy.context.window_manager.windows:
+    for area in window.screen.areas:
+        if area.type == 'VIEW_3D':
+            for region in area.regions:
+                if region.type == 'WINDOW':
+                    override = {
+                        "window": window,
+                        "screen": window.screen,
+                        "area": area,
+                        "region": region,
+                        "space_data": area.spaces.active,
+                    }
+                    bpy.ops.view3d.view_all(override, center=True)
+                    break
+"""
+
+
 def write_blender_script(result, args):
     # Write the result to the given file
     output = args.output_file
@@ -186,32 +203,51 @@ def write_blender_script(result, args):
 # =================== Add in for components
 # ===============================================================================
 
-def attempt_single_param_conversion(var_map, name, comp, instr):
+
+def attempt_single_param_conversion(var_map, name, value, comp, instr):
     # Check dictionary of parameters
-    if name in instr.parameters and instr.parameters[name] is not None:
-        param_value = instr.parameters[name].value
+    if value in instr.parameters and instr.parameters[value] is not None:
+        print(value)
+        param_value = instr.parameters[value].value
         setattr(comp, name, param_value)
     elif name in var_map:
-        setattr(comp, name, var_map[name])
+        setattr(comp, name, var_map[value])
+
+
+def attempt_iterable_conversion(var_map, name, param_iter, comp, instr):
+    for i, val in enumerate(param_iter):
+        # overwrite param iter, and then set comp name to param iter
+        if val in instr.parameters and instr.parameters[val] is not None:
+            param_iter[i] = float(instr.parameters[val].value)
+        elif type(val) == str:
+            # attempt to just convert to number
+            try:
+                param_iter[i] = float(val)
+            except ValueError:
+                # Value is not numeric, so keep as string
+                continue
+    setattr(comp, name, param_iter)
+
 
 def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
     all_vars = list(instr.declare_list) + list(instr.user_var_list)
     var_map = {v.name: v.value for v in all_vars}
 
-    for name in (a for a in dir(comp) if not a.startswith('__')):
+    for name in (a for a in dir(comp) if not a.startswith("__")):
         value = getattr(comp, name)
         if isinstance(value, (str, int, float)):
-            attempt_single_param_conversion(var_map, name, comp, instr)
+            attempt_single_param_conversion(var_map, name, value, comp, instr)
+
+        if isinstance(value, (list, tuple, set)):
+            attempt_iterable_conversion(var_map, name, value, comp, instr)
 
     return comp
 
 
-def build_cylinder(comp, instr):
+def build_cylinder(world_matrices, comp, instr):
     name = comp.name
     rad = comp.radius
     yheight = comp.yheight
-    px, py, pz = comp.AT_data[0], comp.AT_data[2], comp.AT_data[1]
-    rx, ry, rz = comp.ROTATED_data[0], comp.ROTATED_data[2], comp.ROTATED_data[1]
     rel = comp.AT_relative
     if rel.startswith("RELATIVE"):
         rel = rel.split(" ")[1]
@@ -226,20 +262,41 @@ def build_cylinder(comp, instr):
     lines.append("obj = bpy.context.active_object")
     lines.append(f"obj.name = '{name}'")
     lines.append(f"obj['priority'] = {comp.priority}")
-    lines.append(f"obj.location = ({px}, {py}, {pz})")
+    # print(comp.name, world_matrices[comp.name.lower()])
+    # print(world_matrices.keys())
+    print(f"Writing {world_matrices[comp.name.lower()]} to file!")
     lines.append(
-        f"obj.rotation_euler = (math.radians({rx}), math.radians({ry}), math.radians({
-            rz
-        }))"
+        "M = mathutils.Matrix(("
+        f"({world_matrices[comp.name.lower()][0, 0]}, {
+            world_matrices[comp.name.lower()][0, 1]
+        }, {world_matrices[comp.name.lower()][0, 2]}, {
+            world_matrices[comp.name.lower()][0, 3]
+        }),"
+        f"({world_matrices[comp.name.lower()][1, 0]}, {
+            world_matrices[comp.name.lower()][1, 1]
+        }, {world_matrices[comp.name.lower()][1, 2]}, {
+            world_matrices[comp.name.lower()][1, 3]
+        }),"
+        f"({world_matrices[comp.name.lower()][2, 0]}, {
+            world_matrices[comp.name.lower()][2, 1]
+        }, {world_matrices[comp.name.lower()][2, 2]}, {
+            world_matrices[comp.name.lower()][2, 3]
+        }),"
+        f"({world_matrices[comp.name.lower()][3, 0]}, {
+            world_matrices[comp.name.lower()][3, 1]
+        }, {world_matrices[comp.name.lower()][3, 2]}, {
+            world_matrices[comp.name.lower()][3, 3]
+        })))"
     )
-    if rel and str(rel).lower() != "absolute":
-        lines.append(f"parent_obj = bpy.data.objects.get('{rel}')")
-        lines.append("if parent_obj: obj.parent = parent_obj")
+
+    lines.append("obj.matrix_parent_inverse.identity()")
+    lines.append("obj.matrix_world = M")
+
     material = comp.material_string
     if material.startswith('"'):
         material = material[1:-1]
-    print(comp.material_string)
-    print(material)
+    # print(comp.material_string)
+    # print(material)
     mat_name = f"Union_Make_Material_{material}"
     lines.append(
         f"mat = bpy.data.materials.get('{
@@ -257,47 +314,70 @@ def build_cylinder(comp, instr):
     return lines
 
 
-def build_secret_comp(comp, instr):
-    name = comp.name
-    px, py, pz = comp.AT_data[0], comp.AT_data[2], comp.AT_data[1]
-    rx, ry, rz = comp.ROTATED_data[0], comp.ROTATED_data[2], comp.ROTATED_data[1]
-    # Check through that the data is in numbers, and attempt conversion
-    rel = comp.AT_relative
-    if rel.startswith("RELATIVE"):
-        rel = rel.split(" ")[1]
-
-    lines = []
-    lines.append(f"# Empty for {name} (coordinate system only)")
-    lines.append(f"empty = bpy.data.objects.new('{name}', None)")
-    lines.append("bpy.context.scene.collection.objects.link(empty)")
-    lines.append(f"empty.location = ({px}, {py}, {pz})")
-    lines.append(
-        f"empty.rotation_euler = (math.radians({rx}), math.radians({ry}), math.radians({
-            rz
-        }))"
+def calculate_world_matrix(
+    world_matrices, rel, comp: mshelp.Component, instr: ms.McStas_instr
+):
+    # World matrix is a 4x4 matrix, with M[0:2,0:2] being the rotation matrix,
+    # and M[0:2,3] is the translation. M[3,0:3] is 0,0,0,1.
+    world_mat = np.zeros((4, 4))
+    theta_x = comp.ROTATED_data[0]
+    theta_y = comp.ROTATED_data[1]
+    theta_z = comp.ROTATED_data[2]
+    rx = np.array(
+        [
+            [1, 0, 0],
+            [0, np.cos(theta_x), -np.sin(theta_x)],
+            [0, np.sin(theta_x), np.cos(theta_x)],
+        ]
     )
-    if rel and str(rel).lower() != "absolute":
-        lines.append(f"parent_obj = bpy.data.objects.get('{rel}')")
-        lines.append("if parent_obj: empty.parent = parent_obj")
-    return lines
+
+    ry = np.array(
+        [
+            [np.cos(theta_y), 0, np.sin(theta_y)],
+            [0, 1, 0],
+            [-np.sin(theta_y), 0, np.cos(theta_y)],
+        ]
+    )
+    rz = np.array(
+        [
+            [np.cos(theta_z), -np.sin(theta_z), 0],
+            [np.sin(theta_z), np.cos(theta_z), 0],
+            [0, 0, 1],
+        ]
+    )
+    rot = rx * ry * rz
+    world_mat[0:3, 0:3] = rot
+    world_mat[0:3, 3] = comp.AT_data
+    world_mat[3, :] = [0, 0, 0, 1]
+    if rel.lower() != "absolute":
+        world_mat = world_matrices[rel] @ world_mat
+    print(f"Attempting to print the rel! {rel}")
+    if rel.lower() != "absolute":
+        print(world_mat)
+    world_matrices[comp.name.lower()] = world_mat
 
 
-def add_single_comp(comp: mshelp.Component, instr: ms.McStas_instr):
+def add_single_comp(
+    world_matrices, rel, comp: mshelp.Component, instr: ms.McStas_instr
+):
     supported_components = ["Union_cylinder"]
     # Attempt to convert parameters
     attempt_conversion(comp, instr)
-    print(comp.component_name)
+    calculate_world_matrix(world_matrices, rel, comp, instr)
+    # print(comp.component_name)
+    lines = []
     if comp.component_name in supported_components:
-        print("Now building the geometry")
+        print(f"Now building the geometry of {comp.name}")
         if comp.component_name == supported_components[0]:
-            lines = build_cylinder(comp, instr)
+            lines = build_cylinder(world_matrices, comp, instr)
         else:
             raise RuntimeError()
+        comp_bpy = "\n".join(lines) + "\n"
     else:
-        print("Adding in a secret object, that merely serves as a coordinate system")
-        lines = build_secret_comp(comp, instr)
+        comp_bpy = ""
+    # else:
+    # print(f"Component {comp.name}not being drawn")
     # print(lines)
-    comp_bpy = "\n".join(lines) + "\n"
     return comp_bpy
 
 
@@ -314,8 +394,7 @@ def build_materials(instr, result):
                 }') or bpy.data.materials.new(name='{mat_var}')"
             )
             result.append(
-                f"nodes = {mat_var}.node_tree.nodes; links = {
-                    mat_var}.node_tree.links"
+                f"nodes = {mat_var}.node_tree.nodes; links = {mat_var}.node_tree.links"
             )
             result.append("nodes.clear()")
             result.append(
@@ -329,11 +408,9 @@ def build_materials(instr, result):
                     np.random.uniform()
                 }"
             )
-            result.append(
-                "bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)")
+            result.append("bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)")
             result.append("bsdf.inputs['Roughness'].default_value = 0.4")
-            result.append(
-                "links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])")
+            result.append("links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])")
     # Vacuum material (invisible)
     result.append(
         "Union_Vacuum = bpy.data.materials.get('Union_Vacuum') or bpy.data.materials.new(name='Union_Vacuum')"
@@ -346,10 +423,8 @@ def build_materials(instr, result):
     )
     result.append("nodes.clear()")
 
-    result.append(
-        "out = nodes.new('ShaderNodeOutputMaterial'); out.location = (300,0)")
-    result.append(
-        "mix = nodes.new('ShaderNodeMixShader'); mix.location = (100,0)")
+    result.append("out = nodes.new('ShaderNodeOutputMaterial'); out.location = (300,0)")
+    result.append("mix = nodes.new('ShaderNodeMixShader'); mix.location = (100,0)")
     result.append(
         "transp = nodes.new('ShaderNodeBsdfTransparent'); transp.location = (-100,50)"
     )
@@ -380,6 +455,26 @@ def build_materials(instr, result):
     return "\n".join(result) + "\n"
 
 
+def find_relative(comp: mshelp.Component):
+    AT_rel = comp.AT_relative
+    ROT_rel = comp.ROTATED_relative
+    if AT_rel.startswith("RELATIVE"):
+        AT_rel = AT_rel.split(" ")[1]
+    if ROT_rel.startswith("RELATIVE"):
+        ROT_rel = ROT_rel.split(" ")[1]
+    if AT_rel != ROT_rel and AT_rel != None and ROT_rel.lower() != "absolute":
+        print(
+            f"Error, {
+                comp.name
+            } has differing relatives in AT and ROT not yet supported"
+        )
+    if ROT_rel.lower() != "absolute":
+        rel = ROT_rel
+    else:
+        rel = AT_rel.lower()
+    return rel
+
+
 def add_all_components(result: list, instr: ms.McStas_instr):
     # we add components in the following algorithm:
     # First add all components relative to absolute.
@@ -387,6 +482,7 @@ def add_all_components(result: list, instr: ms.McStas_instr):
     # Continue to do this until no more components are being added with a new pass.
     # Then if more are missing, raise an error.
     remaining = instr.component_list
+    world_matrices = {}
 
     # Components successfully added
     added = set()
@@ -398,32 +494,11 @@ def add_all_components(result: list, instr: ms.McStas_instr):
         start_count = len(added)
 
         for comp in remaining[:]:
-            AT_rel = comp.AT_relative
-            ROT_rel = comp.ROTATED_relative
-            if AT_rel.startswith("RELATIVE"):
-                AT_rel = AT_rel.split(" ")[1]
-            if ROT_rel.startswith("RELATIVE"):
-                ROT_rel = ROT_rel.split(" ")[1]
+            rel = find_relative(comp)
 
-            if AT_rel != ROT_rel and AT_rel != None and ROT_rel.lower() != "absolute":
-                print(
-                    f"Error, {
-                        comp.name} has differing relatives in AT and ROT not yet supported"
-                )
-                continue
-            # Case 1: relative to ABSOLUTE
-            if AT_rel is None or AT_rel.lower() == "absolute":
-                result.append(add_single_comp(comp, instr))
-                added.add(comp.name)
-                remaining.remove(comp)
-                continue
-
-            # Case 2: AT_relative to previously-added component
-            if AT_rel in added:
-                result.append(add_single_comp(comp, instr))
-                added.add(comp.name)
-                remaining.remove(comp)
-                continue
+            result.append(add_single_comp(world_matrices, rel, comp, instr))
+            added.add(comp.name)
+            remaining.remove(comp)
 
         # Stop if no new components were added in this pass
         if len(added) == start_count:
@@ -431,8 +506,7 @@ def add_all_components(result: list, instr: ms.McStas_instr):
     # If anything is still missing, dependency graph is broken
     if remaining:
         names = ", ".join(c.name for c in remaining)
-        raise ValueError(
-            f"Could not place all components. Unresolved: {names}")
+        raise ValueError(f"Could not place all components. Unresolved: {names}")
     return "\n".join(result)
 
 
@@ -457,8 +531,10 @@ def main():
     instr = execute_mcstasscript_file(args.input_file)
     result = init_build_blender(instr)
     result = add_all_components([result], instr)
-    end_string = priority_cuts()
-    result += "\n" + end_string
+    priority_cutting = priority_cuts()
+    result += "\n" + priority_cutting
+    move_view = move_viewport()
+    result += "\n" + move_view
 
     write_blender_script(result, args)
 
