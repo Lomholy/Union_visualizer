@@ -174,21 +174,18 @@ for obj in objs_sorted:
 
 
 def move_viewport():
-    return """# Move 3D View to frame all visible objects
-for window in bpy.context.window_manager.windows:
-    for area in window.screen.areas:
-        if area.type == 'VIEW_3D':
-            for region in area.regions:
-                if region.type == 'WINDOW':
-                    override = {
-                        "window": window,
-                        "screen": window.screen,
-                        "area": area,
-                        "region": region,
-                        "space_data": area.spaces.active,
-                    }
-                    bpy.ops.view3d.view_all(override, center=True)
-                    break
+    return """
+objs = [o for o in bpy.data.objects if o.type == "MESH"]
+
+min_corner = mathutils.Vector((1e9, 1e9, 1e9))
+max_corner = mathutils.Vector((-1e9, -1e9, -1e9))
+
+for o in objs:
+    for v in o.bound_box:
+        world_v = o.matrix_world @ mathutils.Vector(v)
+        min_corner = mathutils.Vector((min(min_corner[i], world_v[i]) for i in range(3)))
+        max_corner = mathutils.Vector((max(max_corner[i], world_v[i]) for i in range(3)))
+
 """
 
 
