@@ -256,56 +256,6 @@ def build_cylinder(world_matrices, comp, instr):
             yheight
         }, enter_editmode=False)"
     )
-    lines.append("obj = bpy.context.active_object")
-    lines.append(f"obj.name = '{name}'")
-    lines.append(f"obj['priority'] = {comp.priority}")
-    # print(comp.name, world_matrices[comp.name.lower()])
-    # print(world_matrices.keys())
-    print(f"Writing {world_matrices[comp.name.lower()]} to file!")
-    lines.append(
-        "M = mathutils.Matrix(("
-        f"({world_matrices[comp.name.lower()][0, 0]}, {
-            world_matrices[comp.name.lower()][0, 1]
-        }, {world_matrices[comp.name.lower()][0, 2]}, {
-            world_matrices[comp.name.lower()][0, 3]
-        }),"
-        f"({world_matrices[comp.name.lower()][1, 0]}, {
-            world_matrices[comp.name.lower()][1, 1]
-        }, {world_matrices[comp.name.lower()][1, 2]}, {
-            world_matrices[comp.name.lower()][1, 3]
-        }),"
-        f"({world_matrices[comp.name.lower()][2, 0]}, {
-            world_matrices[comp.name.lower()][2, 1]
-        }, {world_matrices[comp.name.lower()][2, 2]}, {
-            world_matrices[comp.name.lower()][2, 3]
-        }),"
-        f"({world_matrices[comp.name.lower()][3, 0]}, {
-            world_matrices[comp.name.lower()][3, 1]
-        }, {world_matrices[comp.name.lower()][3, 2]}, {
-            world_matrices[comp.name.lower()][3, 3]
-        })))"
-    )
-
-    lines.append("obj.matrix_parent_inverse.identity()")
-    lines.append("obj.matrix_world = M")
-
-    material = comp.material_string
-    if material.startswith('"'):
-        material = material[1:-1]
-    # print(comp.material_string)
-    # print(material)
-    mat_name = f"Union_Make_Material_{material}"
-    lines.append(
-        f"mat = bpy.data.materials.get('{
-            mat_name
-        }') or bpy.data.materials.get('Union_Vacuum')"
-    )
-    lines.append("if mat:")
-    lines.append("    if obj.data.materials:")
-    lines.append("        obj.data.materials[0] = mat")
-    lines.append("    else:")
-    lines.append("        obj.data.materials.append(mat)")
-
     # print(comp.material_string)
 
     return lines
@@ -369,6 +319,59 @@ def add_single_comp(
             lines = build_cylinder(world_matrices, comp, instr)
         else:
             raise RuntimeError()
+        lines.append("obj = bpy.context.active_object")
+        lines.append(f"obj.name = '{comp.name}'")
+        lines.append(f"obj['priority'] = {comp.priority}")
+        # print(comp.name, world_matrices[comp.name.lower()])
+        # print(world_matrices.keys())
+        print(f"Writing {world_matrices[comp.name.lower()]} to file!")
+        lines.append(
+            "M = mathutils.Matrix(("
+            f"({world_matrices[comp.name.lower()][0, 0]}, {
+                world_matrices[comp.name.lower()][0, 1]
+            }, {world_matrices[comp.name.lower()][0, 2]}, {
+                world_matrices[comp.name.lower()][0, 3]
+            }),"
+            f"({world_matrices[comp.name.lower()][1, 0]}, {
+                world_matrices[comp.name.lower()][1, 1]
+            }, {world_matrices[comp.name.lower()][1, 2]}, {
+                world_matrices[comp.name.lower()][1, 3]
+            }),"
+            f"({world_matrices[comp.name.lower()][2, 0]}, {
+                world_matrices[comp.name.lower()][2, 1]
+            }, {world_matrices[comp.name.lower()][2, 2]}, {
+                world_matrices[comp.name.lower()][2, 3]
+            }),"
+            f"({world_matrices[comp.name.lower()][3, 0]}, {
+                world_matrices[comp.name.lower()][3, 1]
+            }, {world_matrices[comp.name.lower()][3, 2]}, {
+                world_matrices[comp.name.lower()][3, 3]
+            })))"
+        )
+        lines.append("obj.matrix_parent_inverse.identity()")
+        lines.append("obj.matrix_world = M")
+
+        if comp.component_name == "Union_cylinder":
+            lines.append("obj.rotation_euler.rotate_axis('X',math.radians(90))")
+
+
+        material = comp.material_string
+        if material.startswith('"'):
+            material = material[1:-1]
+        # print(comp.material_string)
+        # print(material)
+        mat_name = f"Union_Make_Material_{material}"
+        lines.append(
+            f"mat = bpy.data.materials.get('{
+                mat_name
+            }') or bpy.data.materials.get('Union_Vacuum')"
+        )
+        lines.append("if mat:")
+        lines.append("    if obj.data.materials:")
+        lines.append("        obj.data.materials[0] = mat")
+        lines.append("    else:")
+        lines.append("        obj.data.materials.append(mat)")
+
         comp_bpy = "\n".join(lines) + "\n"
     else:
         comp_bpy = ""
