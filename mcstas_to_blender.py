@@ -145,7 +145,8 @@ for obj in objs_sorted:
         bpy.ops.object.modifier_apply(modifier=mod.name)
 
     # Weld tiny cracks (relative threshold)
-    mx = max(obj.dimensions[0], obj.dimensions[1], obj.dimensions[2]) if obj.dimensions.length else 1.0
+    mx = max(obj.dimensions[0], obj.dimensions[1],
+             obj.dimensions[2]) if obj.dimensions.length else 1.0
     weld = obj.modifiers.new(name="weld_fix", type="WELD")
     weld.merge_threshold = max(1e-6, mx * 1e-5)
     bpy.ops.object.select_all(action="DESELECT")
@@ -154,7 +155,8 @@ for obj in objs_sorted:
     bpy.ops.object.modifier_apply(modifier=weld.name)
 
     # Voxel remesh to guarantee watertight mesh
-    mx = max(obj.dimensions[0], obj.dimensions[1], obj.dimensions[2]) if obj.dimensions.length else 1.0
+    mx = max(obj.dimensions[0], obj.dimensions[1],
+             obj.dimensions[2]) if obj.dimensions.length else 1.0
     vs = max(mx / 512.0, 1e-4)  # adaptive voxel size
     rem = obj.modifiers.new(name="remesh_voxel", type="REMESH")
     rem.mode = "VOXEL"
@@ -183,8 +185,10 @@ max_corner = mathutils.Vector((-1e9, -1e9, -1e9))
 for o in objs:
     for v in o.bound_box:
         world_v = o.matrix_world @ mathutils.Vector(v)
-        min_corner = mathutils.Vector((min(min_corner[i], world_v[i]) for i in range(3)))
-        max_corner = mathutils.Vector((max(max_corner[i], world_v[i]) for i in range(3)))
+        min_corner = mathutils.Vector(
+            (min(min_corner[i], world_v[i]) for i in range(3)))
+        max_corner = mathutils.Vector(
+            (max(max_corner[i], world_v[i]) for i in range(3)))
 
 """
 
@@ -241,6 +245,56 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
     return comp
 
 
+def build_box(world_matrices, comp, instr):
+    name = comp.name
+    # Expecting xwidth, yheight, zdepth (lengths along X/Y/Z)
+    xw = comp.xwidth
+    yh = comp.yheight
+    zd = comp.zwidth
+
+    lines = []
+    lines.append(f"# Create box for {name}")
+    # Create a unit cube (size=2 gives 2x2x2). We will set dimensions after placement.
+    lines.append("bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False)")
+    # We will set obj.dimensions = (xw, yh, zd) after we define 'obj' and place it.
+    # (done in add_single_comp)
+    # Store dims in temp variables to use later
+    lines.append(f"__box_dims__ = ({xw}, {yh}, {zd})")
+    return lines
+
+
+def build_sphere(world_matrices, comp, instr):
+    name = comp.name
+    rad = comp.radius
+    segments = 32
+    rings = 16
+
+    lines = []
+    lines.append(f"# Create sphere for {name}")
+    lines.append(
+        f"bpy.ops.mesh.primitive_uv_sphere_add(radius={rad}, segments={
+            segments
+        }, ring_count={rings}, enter_editmode=False)"
+    )
+    return lines
+
+
+def build_cone(world_matrices, comp, instr):
+    name = comp.name
+    r_bot = comp.radius_bottom
+    r_top = comp.radius_top
+    yheight = comp.yheight
+    verts = 32
+
+    lines = []
+    lines.append(f"# Create cone for {name}")
+    lines.append(
+        f"bpy.ops.mesh.primitive_cone_add(vertices={verts}, radius1={r_bot}, radius2={
+            r_top
+        }, depth={yheight}, enter_editmode=False)"
+    )
+
+
 def build_cylinder(world_matrices, comp, instr):
     name = comp.name
     rad = comp.radius
@@ -292,7 +346,7 @@ def calculate_world_matrix(
             [0, 0, 1],
         ]
     )
-    rot = rx * ry * rz
+    rot = rx @ ry @ rz
     world_mat[0:3, 0:3] = rot
     world_mat[0:3, 3] = comp.AT_data
     world_mat[3, :] = [0, 0, 0, 1]
@@ -307,8 +361,7 @@ def calculate_world_matrix(
 def add_single_comp(
     world_matrices, rel, comp: mshelp.Component, instr: ms.McStas_instr
 ):
-    supported_components = ["Union_cylinder"]
-    # Attempt to convert parameters
+    supported_components = ["Union_cylinder", "Union_box", "Union_sphere", "Union_cone"]
     attempt_conversion(comp, instr)
     calculate_world_matrix(world_matrices, rel, comp, instr)
     # print(comp.component_name)
@@ -317,6 +370,12 @@ def add_single_comp(
         print(f"Now building the geometry of {comp.name}")
         if comp.component_name == supported_components[0]:
             lines = build_cylinder(world_matrices, comp, instr)
+        elif comp.component_name == "Union_box":
+            lines += build_box(world_matrices, comp, instr)
+        elif comp.component_name == "Union_sphere":
+            lines += build_sphere(world_matrices, comp, instr)
+        elif comp.component_name == "Union_cone":
+            lines += build_cone(world_matrices, comp, instr)
         else:
             raise RuntimeError()
         lines.append("obj = bpy.context.active_object")
@@ -351,10 +410,16 @@ def add_single_comp(
         lines.append("obj.matrix_parent_inverse.identity()")
         lines.append("obj.matrix_world = M")
 
-        if comp.component_name == "Union_cylinder":
-            lines.append("obj.rotation_euler.rotate_axis('X',math.radians(90))")
+        if comp.component_name in ("Union_cylinder", "Union_cone"):
+            # Align Z-axis primitive to Y (like your existing cylinder)
+            lines.append("obj.rotation_euler.rotate_axis('X', math.radians(90))")
 
-
+        if comp.component_name == "Union_box":
+            # Use dimensions set earlier in build_box (in __box_dims__)
+            # Setting dimensions AFTER matrix_world applies a clean scale in local space
+            lines.append("if '.__box_dims__' in locals():")
+            lines.append("    obj.dimensions = __box_dims__")
+            lines.append("    del __box_dims__")
         material = comp.material_string
         if material.startswith('"'):
             material = material[1:-1]
