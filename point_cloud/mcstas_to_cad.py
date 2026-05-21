@@ -33,7 +33,7 @@ def parse():
         "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas"
     )
     parser.add_argument("--out", help="Name of output file.", default="union_env")
-    parser.add_argument("--n_points", help="Number of points on geometries", default=30_000)
+    parser.add_argument("--n_points", help="Number of points on geometries", default=10_000)
     return parser
 
 
@@ -137,6 +137,80 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
 # =============================================================================
 
 
+
+def sdf_cylinder(comp, p):
+    # p: (N, 3) or (3,)
+    r = comp.radius
+    h = comp.yheight / 2
+
+    d_xy = np.linalg.norm(p[..., :2], axis=-1) - r
+    d_z = np.abs(p[..., 2]) - h
+
+    outside = np.maximum(d_xy, 0)**2 + np.maximum(d_z, 0)**2
+    inside = np.minimum(np.maximum(d_xy, d_z), 0)
+
+    return np.sqrt(outside) + inside
+
+
+
+def sdf_box(comp, p):
+    b = np.array([comp.xwidth, comp.yheight, comp.zdepth]) / 2
+    d = np.abs(p) - b
+
+    outside = np.maximum(d, 0)
+    inside = np.minimum(np.maximum.reduce(d, axis=-1), 0)
+
+    return np.linalg.norm(outside, axis=-1) + inside
+
+
+def sdf_sphere(comp, p):
+    return np.linalg.norm(p, axis=-1) - comp.radius
+
+
+
+def sdf_cone(comp, p):
+    r1 = comp.radius_bottom
+    r2 = comp.radius_top
+    h = comp.yheight
+
+    y = p[..., 2] + h / 2
+    t = np.clip(y / h, 0, 1)
+
+    r = r1 * (1 - t) + r2 * t
+    d_xy = np.linalg.norm(p[..., :2], axis=-1) - r
+    d_y = np.maximum(np.maximum(-y, y - h), 0)
+
+    return np.maximum(d_xy, d_y)
+
+
+def sdf_mesh(comp, p):
+    if not hasattr(comp, "_mesh"):
+        comp._mesh = trimesh.load(comp.filename)
+
+    sdf = trimesh.proximity.signed_distance(comp._mesh, p)
+    return sdf
+
+
+def make_sdf(comp, sdf_func, inv_world):
+    def f(x_world):
+        x_local = (inv_world @ x_world.T).T
+        return sdf_func(comp, x_local[:,:3])
+
+    return f
+
+
+def sdf_difference(f, g):
+    return lambda x: np.maximum(f(x), -g(x))
+
+
+def sdf_subtract_all(f_i, higher_priority_fs):
+    if not higher_priority_fs:
+        return f_i
+
+    f_block = lambda x: np.min([f(x) for f in higher_priority_fs], axis=0)
+    return lambda x: np.maximum(f_i(x), -f_block(x))
+
+
 def sample_union_cylinder(comp: mshelp.Component, n_points):
     radius = comp.radius
     height = comp.yheight
@@ -221,7 +295,7 @@ def sample_union_mesh(comp: mshelp.Component, n_points):
     return np.asarray(pcd.points)
 
 
-def generate_point_clouds(geometries, instr, world_matrices, n_points):
+def generate_point_clouds(geometries, world_matrices, n_points):
     point_clouds = np.zeros((n_points, 4, len(geometries)))
     for i, geometry in enumerate(geometries):
         sample_func = GEOMETRY_FUNCS[geometry.component_name.lower()]["generate_surface_points"]
@@ -234,153 +308,97 @@ def generate_point_clouds(geometries, instr, world_matrices, n_points):
     return point_clouds
 
 
-def cylinder_point_within(comp, point):
-    x, y, z = point
-    r2 = x**2 + y**2
-
-    return (
-        r2 <= comp.radius**2 and
-        -comp.yheight / 2 <= z <= comp.yheight / 2
-    )
-
-
-def box_point_within(comp, point):
-    x, y, z = point
-
-    return (
-        -comp.xwidth / 2 <= x <= comp.xwidth / 2 and
-        -comp.yheight / 2 <= y <= comp.yheight / 2 and
-        -comp.zdepth / 2 <= z <= comp.zdepth / 2
-    )
-
-
-def sphere_point_within(comp, point):
-    x, y, z = point
-    return x**2 + y**2 + z**2 <= comp.radius**2
-
-
-def cone_point_within(comp, point):
-    x, y, z = point
-
-    if not (-comp.yheight / 2 <= z <= comp.yheight / 2):
-        return False
-
-    # interpolation factor
-    t = (z + comp.yheight / 2) / comp.yheight
-
-    # radius at this height
-    r = comp.radius_bottom * (1 - t) + comp.radius_top * t
-
-    return x**2 + y**2 <= r**2
-
-
-def mesh_point_within(comp, point):
-    if not hasattr(comp, "_mesh"):
-        comp._mesh = trimesh.load(comp.filename)
-
-    return comp._mesh.contains([point])[0]
-
-
 GEOMETRY_FUNCS = {
     "union_cylinder": {
-        "point_within": cylinder_point_within,
+        "sdf": sdf_cylinder,
         "generate_surface_points": sample_union_cylinder,
     },
     "union_box": {
-        "point_within": box_point_within,
+        "sdf": sdf_box,
         "generate_surface_points": sample_union_box,
     },
     "union_sphere": {
-        "point_within": sphere_point_within,
+        "sdf": sdf_sphere,
         "generate_surface_points": sample_union_sphere,
     },
     "union_cone": {
-        "point_within": cone_point_within,
+        "sdf": sdf_cone,
         "generate_surface_points": sample_union_cone,
     },
     "union_mesh": {
-        "point_within": mesh_point_within,
+        "sdf": sdf_mesh,
         "generate_surface_points": sample_union_mesh,
     },
 }
-# =============================================================================
-# =========================== PRIORITY CHANGE OF POINTS========================
-# =============================================================================
 
-def prioritise_points(point_clouds, geometries, world_matrices):
+
+def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=10):
     """
-    Re-assign points between geometries based on containment and priority.
+    For each geometry:
+    - generate initial samples
+    - project onto sdf=0 surface (Newton-style)
+    - filter valid points
 
-    Parameters
-    ----------
-    point_clouds : np.ndarray
-        Shape (N, 4, K)
-    geometries : list
-        List of component objects
-    world_matrices : dict
-        Mapping from geometry.name.lower() -> 4x4 transform
-
-    Returns
-    -------
-    np.ndarray
-        Updated point_clouds
+    Returns: list of arrays (points per geometry)
     """
 
-    P, D, K = point_clouds.shape
-
-    # Precompute inverse transforms for efficiency
-    inv_world_matrices = {
-        name: np.linalg.inv(mat)
-        for name, mat in world_matrices.items()
-    }
-    # Make a P*K X 4 X K matrix to store the points in
-    final_points = np.zeros((P*K, D, K))
-
-    final_points_tracker = np.zeros(K, dtype=int)
-    # Loop over each geometry's points
-    for i in range(K):
-        comp_i = geometries[i]
-        for p_idx in range(point_clouds.shape[0]):
-            point_world = point_clouds[p_idx, :, i]
-            reassigned = False
-
-            # Check against ALL other geometries
-            for j in range(K):
-                if i == j:
-                    continue
-
-                comp_j = geometries[j]
-                name_j = comp_j.name.lower()
-                ops_j = GEOMETRY_FUNCS[comp_j.component_name.lower()]
-
-                # Transform point into geometry j's LOCAL frame
-                point_local_j = inv_world_matrices[name_j] @ point_world
-                # print(point_local_j)
-                # Check containment
-                if ops_j["point_within"](comp_j, point_local_j[:3]):
-                    reassigned = True
-                    if comp_i.priority > comp_j.priority:
-                        #  The original priority is higher: keep point 
-                        # and add it to the other geometry as well
-                        final_points[final_points_tracker[i], :, i] = point_world
-                        final_points[final_points_tracker[j], :, j] = point_world
-                        final_points_tracker[i] += 1
-                        final_points_tracker[j] += 1
-
-            if reassigned is False:
-                final_points[final_points_tracker[i], :, i] = point_world
-                final_points_tracker[i] += 1
-
-
-        print(f"Processed geometry {i}")
-
-    # Make final points into a list of arrays
     clouds = []
-    for i in range(K):
-        cloud = final_points[:final_points_tracker[i],:,i]
-        clouds.append(cloud)
+
+    for comp in geometries:
+        print(f"SAMPLING {comp.name}")
+
+        # initial samples (world space)
+        sampler = GEOMETRY_FUNCS[comp.component_name.lower()]["generate_surface_points"]
+        
+        pts = sampler(comp, n_points)
+        print(pts)
+        pts = np.concatenate([pts, np.ones((len(pts), 1))], axis=1)
+        pts = (world_matrices[comp.name.lower()] @ pts.T).T
+
+        # make homogeneous → world transform
+
+        f = final_sdfs[comp.name]
+
+        # --- project to surface ---
+        for _ in range(steps):
+            sdf_vals = f(pts)
+
+            grads = sdf_normal(f, pts)
+
+            pts -= sdf_vals[:, None] * grads  # Newton projection
+
+        # --- keep only near-surface points ---
+        sdf_vals = f(pts)
+        mask = np.abs(sdf_vals) < 1e-3
+
+        points = pts[mask]
+
+        clouds.append(points)
 
     return clouds
+
+# =============================================================================
+# =========================== GRADIENT OF SIGNED DIST FNC =====================
+# =============================================================================
+
+
+def sdf_normal(sdf_func, pts, eps=1e-5):
+    grads = np.zeros((pts.shape[0],4))
+    dp = np.zeros_like(pts)
+
+    for i in range(3):
+        dp = np.zeros_like(pts)
+        dp[:, i] = eps
+
+        f_plus  = sdf_func(pts + dp)
+        f_minus = sdf_func(pts - dp)
+
+        grads[:, i] = (f_plus - f_minus) / (2 * eps)
+
+    # normalize per point
+    norms = np.linalg.norm(grads, axis=1, keepdims=True) + 1e-12
+    grads = grads / norms
+    return grads
 
 
 # =============================================================================
@@ -462,7 +480,7 @@ def compute_world_matrices(instr):
             # Relative → need parent first
             if rel in world:
                 world[comp.name.lower()] = world[rel] @ local_matrix(comp)
-                print(f"COMPONENT {comp.name} MATRIX IS : {world[comp.name.lower()]}")
+                print(f"COMPONENT {comp.name} MATRIX IS : \n{world[comp.name.lower()]}")
                 remaining.remove(comp)
                 progressed = True
 
@@ -537,6 +555,73 @@ def plot_multiple_clouds(cloud_list, size=2):
     fig.show()
 
 
+def visualize_sdf_field(geometries, final_sdfs, bounds=(-2, 2), res=400):
+    """
+    Visualize SDF fields using a 3D scatter:
+    - points near surface colored
+    - inside/outside shown differently
+    """
+
+    x = np.linspace(bounds[0], bounds[1], res)
+    y = np.linspace(bounds[0], bounds[1], res)
+    
+    X, Y = np.meshgrid(x, y)
+    Z = np.zeros_like(X)
+
+    pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
+
+    for comp in geometries:
+        name = comp.name
+        print(name)
+        f = final_sdfs[name]
+        print(f)
+
+        sdf_vals = f(pts).reshape(res, res)
+
+        fig = go.Figure()
+
+        print(sdf_vals.min())
+        # surface points (highlighted)
+        
+        fig.add_trace(go.Contour(
+            x=x,
+            y=y,
+            z=sdf_vals,
+            colorscale="RdBu",
+            colorbar=dict(title="SDF"),
+            contours=dict(
+                showlines=True
+            )
+        ))
+        
+        # fig.add_trace(go.Contour(
+        #     x=x,
+        #     y=y,
+        #     z=sdf_vals,
+        #     contours=dict(
+        #         start=0,
+        #         end=0,
+        #         size=1e-6,
+        #         coloring="lines"
+        #     ),
+        #     line=dict(color="black", width=3),
+        #     showscale=False
+        # ))
+
+
+        fig.update_layout(
+            title=f"SDF field: {name}",
+            scene=dict(
+                xaxis_title="X",
+                yaxis_title="Y",
+                zaxis_title="Z"
+            )
+        )
+
+
+        fig.show()
+        # break
+
 # =============================================================================
 # =========================== MAIN CODE EXECUTION =============================
 # =============================================================================
@@ -551,34 +636,22 @@ if __name__ == "__main__":
 
     world_matrices = compute_world_matrices(instr)
     union_geometries = get_union_geometries(instr)
-    point_clouds = generate_point_clouds(union_geometries, instr, world_matrices, args.n_points)
-    point_clouds = prioritise_points(point_clouds, union_geometries, world_matrices)
+    sdfs = {}
+    final_sdfs = {}
+    for comp in union_geometries:
+        comp_type = comp.component_name.lower()
+        sdf = GEOMETRY_FUNCS[comp_type]["sdf"]
+        inv_mat = np.linalg.inv(world_matrices[comp.name.lower()])
+        sdfs[comp.name] = make_sdf(comp, sdf, inv_mat)
+
+    for comp in union_geometries:
+        higher_comps = [sdfs[x.name] for x in union_geometries if x.priority > comp.priority]
+        final_sdfs[comp.name] = sdf_subtract_all(sdfs[comp.name], higher_comps)
+        print(final_sdfs[comp.name], comp.name)
+    print(final_sdfs)
+    # visualize_sdf_field(union_geometries, final_sdfs, bounds=(-1, 1))
+    point_clouds = sample_sdf_surfaces(union_geometries, final_sdfs, world_matrices, args.n_points)
     plot_multiple_clouds(point_clouds)
-
-    for i in range(len(point_clouds)):
-        point_cloud = o3d.geometry.PointCloud()
-        point_cloud.points = o3d.utility.Vector3dVector(point_clouds[i][:, :3])
-        point_cloud.estimate_normals(
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.2, max_nn=30)
-        )
-        point_cloud.orient_normals_consistent_tangent_plane(100)
-        # o3d.visualization.draw_geometries([point_cloud], point_show_normal=True)
-        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-            point_cloud, depth=6, linear_fit=True
-        )
-        # radii = [0.005, 0.01, 0.02, 0.04]
-        # mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(point_cloud,o3d.utility.DoubleVector(radii))
-
-        mesh.compute_vertex_normals()
-        mesh.compute_triangle_normals()
-        if i == 0:
-            combined_mesh = mesh
-        else:
-            combined_mesh += mesh
-
-        o3d.io.write_triangle_mesh(f"{args.out}_{i}.stl", mesh)
-
-    o3d.io.write_triangle_mesh(f"{args.out}.stl", combined_mesh)
     # print(vertices.shape)
     # print(faces.shape)
     # mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
