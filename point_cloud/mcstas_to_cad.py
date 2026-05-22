@@ -534,7 +534,7 @@ def plot_point_cloud(points, colors=None, size=2, title="3D Point Cloud"):
     fig.show()
 
 
-def plot_multiple_clouds(cloud_list, size=2):
+def plot_multiple_clouds(cloud_list, size=3):
     fig = go.Figure()
 
     for i in range(len(cloud_list)):
@@ -547,80 +547,84 @@ def plot_multiple_clouds(cloud_list, size=2):
                 mode="markers",
                 marker=dict(size=size),
                 name=f"Cloud {i}",
+                opacity = 0.7
             )
         )
+        break
 
     fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z"))
 
     fig.show()
 
 
-def visualize_sdf_field(geometries, final_sdfs, bounds=(-2, 2), res=400):
-    """
-    Visualize SDF fields using a 3D scatter:
-    - points near surface colored
-    - inside/outside shown differently
-    """
+# =============================================================================
+# =========================== PRIORITY CHANGE OF POINTS========================
+# =============================================================================
 
-    x = np.linspace(bounds[0], bounds[1], res)
-    y = np.linspace(bounds[0], bounds[1], res)
+
+def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices):
+    K = len(point_clouds)
+
+    P = 0
+    for x in point_clouds:
+        if x.shape[0] > P:
+            P = x.shape[0]
+    final_points = np.zeros((P * K, 4, K))
+    final_points_tracker = np.zeros(K, dtype=int)
+
+    for i in range(K):
+        comp_i = geometries[i]
+        f_i = sdfs[comp_i.name]
+
+        point_world = point_clouds[i]
+        p = point_clouds[i]
+        reassigned = np.zeros(point_world.shape[0])
+
+
+        for j in range(K):
+            if i == j:
+                continue
+
+            comp_j = geometries[j]
+            print(comp_j.name)
+            f_j = sdfs[comp_j.name]
+
+            val_j = f_j(p)
+            print(val_j)
+            mask = np.where(val_j<0, True, False)
+            print(mask.sum())
+            reassigned += mask
+            print(reassigned.sum())
+            added_pts = point_world[mask]
+
+            if comp_i.priority > comp_j.priority:
+                final_points[final_points_tracker[j]:final_points_tracker[j] + added_pts.shape[0], :, j] = added_pts
+                final_points_tracker[j] += added_pts.shape[0]
+        mask = np.where(reassigned==0, True, False)
+        print(f"Points not added are being added {mask.sum()}")
+        test = point_world[mask]
+        print(test.shape)
+        final_points[final_points_tracker[i]:final_points_tracker[i] + point_world.shape[0], :, i] = point_world
+        final_points_tracker[i] += point_world.shape[0]
+
+
+
+
+
+        print(f"Processed geometry {i}")
     
-    X, Y = np.meshgrid(x, y)
-    Z = np.zeros_like(X)
-
-    pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
-
-    for comp in geometries:
-        name = comp.name
-        print(name)
-        f = final_sdfs[name]
-        print(f)
-
-        sdf_vals = f(pts).reshape(res, res)
-
-        fig = go.Figure()
-
-        print(sdf_vals.min())
-        # surface points (highlighted)
+    clouds = []
+    for i in range(K):
         
-        fig.add_trace(go.Contour(
-            x=x,
-            y=y,
-            z=sdf_vals,
-            colorscale="RdBu",
-            colorbar=dict(title="SDF"),
-            contours=dict(
-                showlines=True
-            )
-        ))
-        
-        # fig.add_trace(go.Contour(
-        #     x=x,
-        #     y=y,
-        #     z=sdf_vals,
-        #     contours=dict(
-        #         start=0,
-        #         end=0,
-        #         size=1e-6,
-        #         coloring="lines"
-        #     ),
-        #     line=dict(color="black", width=3),
-        #     showscale=False
-        # ))
+        # Do A final wipe, to remove any points not on the edge of the final sdf
+        sdf_fin = final_sdfs[geometries[i].name]
+        p = final_points[:final_points_tracker[i], :, i]
+        vals = sdf_fin(p)
+        mask = np.where(abs(vals)<1e-3, True, False)
+        cloud = p[mask]
+        clouds.append(cloud)
 
-
-        fig.update_layout(
-            title=f"SDF field: {name}",
-            scene=dict(
-                xaxis_title="X",
-                yaxis_title="Y",
-                zaxis_title="Z"
-            )
-        )
-
-
-        fig.show()
-        # break
+    return clouds
 
 # =============================================================================
 # =========================== MAIN CODE EXECUTION =============================
@@ -651,6 +655,7 @@ if __name__ == "__main__":
     print(final_sdfs)
     # visualize_sdf_field(union_geometries, final_sdfs, bounds=(-1, 1))
     point_clouds = sample_sdf_surfaces(union_geometries, final_sdfs, world_matrices, args.n_points)
+    point_clouds = prioritise_points(point_clouds, sdfs, final_sdfs, union_geometries, world_matrices)
     plot_multiple_clouds(point_clouds)
     # print(vertices.shape)
     # print(faces.shape)
