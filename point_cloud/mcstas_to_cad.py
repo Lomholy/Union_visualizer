@@ -11,7 +11,6 @@
 #  3. Assign and discard points from geometries according to the priority algorithm
 #  4. Use the poisson algorithm from a mesh from the point clouds
 #  5. Export the entire environment as a .stl file
-#
 
 import numpy as np
 import trimesh
@@ -137,20 +136,18 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
 # =============================================================================
 
 
-
 def sdf_cylinder(comp, p):
     # p: (N, 3) or (3,)
     r = comp.radius
     h = comp.yheight / 2
 
-    d_xy = np.linalg.norm(p[..., :2], axis=-1) - r
-    d_z = np.abs(p[..., 2]) - h
+    d_xz = np.linalg.norm(p[..., 0:3:2], axis=-1) - r
+    d_y = np.abs(p[..., 1]) - h
 
-    outside = np.maximum(d_xy, 0)**2 + np.maximum(d_z, 0)**2
-    inside = np.minimum(np.maximum(d_xy, d_z), 0)
+    outside = np.maximum(d_xz, 0)**2 + np.maximum(d_y, 0)**2
+    inside = np.minimum(np.maximum(d_xz, d_y), 0)
 
     return np.sqrt(outside) + inside
-
 
 
 def sdf_box(comp, p):
@@ -165,7 +162,6 @@ def sdf_box(comp, p):
 
 def sdf_sphere(comp, p):
     return np.linalg.norm(p, axis=-1) - comp.radius
-
 
 
 def sdf_cone(comp, p):
@@ -212,14 +208,26 @@ def sdf_subtract_all(f_i, higher_priority_fs):
 
 
 def sample_union_cylinder(comp: mshelp.Component, n_points):
+    # Sample a fraction on the sides, and a fraction on the ends
     radius = comp.radius
     height = comp.yheight
+    frac_side = int(n_points*0.6)
+    frac_ends = int(n_points*0.4)
 
-    theta = np.random.uniform(0, 2 * np.pi, n_points)
-    z = np.random.uniform(-height / 2, height / 2, n_points)
+    theta = np.random.uniform(0, 2 * np.pi, frac_side)
+    y = np.random.uniform(-height / 2, height / 2, frac_side)
     x = radius * np.cos(theta)
-    y = radius * np.sin(theta)
-    return np.column_stack((x, y, z))
+    z = radius * np.sin(theta)
+    tmp = np.column_stack((x, y, z))
+
+    theta = np.random.uniform(0, 2 * np.pi, frac_ends)
+    rand_rad = np.random.rand(frac_ends)*radius
+    y = height/2 * np.random.choice((-1, 1), size=frac_ends)
+    x = np.cos(theta)*rand_rad
+    z = np.sin(theta)*rand_rad
+    tmp_2 = np.column_stack((x, y, z))
+
+    return np.row_stack((tmp, tmp_2))
 
 
 def sample_union_box(comp: mshelp.Component, n_points):
@@ -295,19 +303,6 @@ def sample_union_mesh(comp: mshelp.Component, n_points):
     return np.asarray(pcd.points)
 
 
-def generate_point_clouds(geometries, world_matrices, n_points):
-    point_clouds = np.zeros((n_points, 4, len(geometries)))
-    for i, geometry in enumerate(geometries):
-        sample_func = GEOMETRY_FUNCS[geometry.component_name.lower()]["generate_surface_points"]
-        point_clouds[:, :3, i] = sample_func(geometry, n_points)
-        point_clouds[:, 3, i] = 1
-        print(world_matrices[geometry.name.lower()].shape, point_clouds[:, :, i].shape)
-        point_clouds[:, :, i] = (
-            world_matrices[geometry.name.lower()] @ point_clouds[:, :, i].T
-        ).T
-    return point_clouds
-
-
 GEOMETRY_FUNCS = {
     "union_cylinder": {
         "sdf": sdf_cylinder,
@@ -372,6 +367,7 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
         mask = np.abs(sdf_vals) < 1e-3
 
         points = pts[mask]
+        # points = pts
 
         clouds.append(points)
 
@@ -550,7 +546,6 @@ def plot_multiple_clouds(cloud_list, size=3):
                 opacity = 0.7
             )
         )
-        break
 
     fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z"))
 
@@ -655,8 +650,38 @@ if __name__ == "__main__":
     print(final_sdfs)
     # visualize_sdf_field(union_geometries, final_sdfs, bounds=(-1, 1))
     point_clouds = sample_sdf_surfaces(union_geometries, final_sdfs, world_matrices, args.n_points)
-    point_clouds = prioritise_points(point_clouds, sdfs, final_sdfs, union_geometries, world_matrices)
+    # point_clouds = prioritise_points(point_clouds, sdfs, final_sdfs, union_geometries, world_matrices)
     plot_multiple_clouds(point_clouds)
+    
+    meshes = []
+    
+    for i, cloud in enumerate(point_clouds):
+        if cloud.shape[0] == 0:
+            continue
+    
+        pts = cloud[:, :3]
+    
+        # normals from SDF
+        f = final_sdfs[union_geometries[i].name]
+        normals = sdf_normal(f, cloud)
+    
+        # build Open3D point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(pts)
+        pcd.normals = o3d.utility.Vector3dVector(normals[:, :3])
+    
+        # Poisson
+        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+            pcd,
+            depth=6
+        )
+    
+        mesh.compute_vertex_normals()
+        meshes.append(mesh)
+    
+        o3d.io.write_triangle_mesh(f"{args.out}_{i}.stl", mesh)
+        # NOTE!!! FAILS ON CRYOSTAT TEST!!!
+    
     # print(vertices.shape)
     # print(faces.shape)
     # mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
