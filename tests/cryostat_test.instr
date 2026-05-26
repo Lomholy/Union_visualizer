@@ -1,0 +1,1022 @@
+/********************************************************************************
+* 
+* McStas, neutron ray-tracing package
+*         Copyright (C) 1997-2008, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+* 
+* This file was written by McStasScript, which is a 
+* python based McStas instrument generator written by 
+* Mads Bertelsen in 2019 while employed at the 
+* European Spallation Source Data Management and 
+* Software Centre
+* 
+* Instrument cryostat_test
+* 
+* %Identification
+* Written by: Python McStas Instrument Generator
+* Date: 09:19:45 on March 06, 2026
+* Origin: ESS DMSC
+* %INSTRUMENT_SITE: Generated_instruments
+* 
+* 
+* %Parameters
+* 
+* %End 
+********************************************************************************/
+
+DEFINE INSTRUMENT cryostat_test (
+E0 = 13.725, 
+dE = 0.05, 
+A3_angle = 18.656, 
+phi = 57, 
+tag_angle = -142.5, 
+tag_time = 0.0016015, 
+tag_interval = 5E-06, 
+double conditional_xwidth = 0.13 
+)
+
+DECLARE 
+%{
+double q_min;
+double q_max;
+double max_speed;
+double min_speed;
+double tmin_cryo;
+double tmax_cryo;
+int flag1;
+int n_scattering;
+double tmin;
+double tmax;
+char option_string[1024];
+%}
+
+INITIALIZE 
+%{
+// Start of initialize for generated cryostat_test
+q_max = 1.05*2*V2K*SE2V*sqrt(E0+dE);
+q_min = -q_max;
+q_max = 1.05*2*V2K*SE2V*sqrt(E0+dE);
+q_min = -q_max;
+max_speed = sqrt(E0 + dE)*SE2V;
+min_speed = sqrt(E0 - dE)*SE2V;
+tmin_cryo = (2.0-0.15)/max_speed;
+tmax_cryo = (2.0+0.45)/min_speed;
+tmin = (2.5-0.15)/max_speed;
+tmax = (2.5+0.65)/min_speed;
+sprintf(option_string, "banana, theta limits=[-180,180] bins=721, t limits=[%lf %lf] bins=1000", tmin, tmax);
+%}
+
+TRACE 
+COMPONENT progress = Progress_bar()
+AT (0,0,0) ABSOLUTE
+
+COMPONENT source = Source_simple(
+ yheight = 0.01, xwidth = 0.01,
+ dist = 2, focus_xw = 0.01,
+ focus_yh = 0.01, E0 = E0,
+ dE = dE)
+AT (0,0,0) ABSOLUTE
+
+COMPONENT init = Union_init()
+AT (0,0,0) ABSOLUTE
+
+COMPONENT orange = Arm()
+AT (0,0,2) RELATIVE source
+
+COMPONENT Al_inc = Incoherent_process(
+ sigma = 0.0328, unit_cell_volume = 66.4)
+AT (0,0,0) ABSOLUTE
+
+COMPONENT Al_pow = Powder_process(
+ reflections = "Al.laz")
+AT (0,0,0) ABSOLUTE
+
+COMPONENT Al = Union_make_material(
+ process_string = "Al_inc,Al_pow", my_absorption = 100*4*0.231/66.4)
+AT (0,0,0) ABSOLUTE
+
+COMPONENT orange_layer_0_layer = Union_cylinder(
+ material_string = "Al", priority = 81.5385,
+ radius = 0.037725, yheight = 0.286,
+ p_interact = 0.2)
+AT (0,0.05489999999999999,0) RELATIVE orange
+
+COMPONENT orange_layer_0_layer_vac = Union_cylinder(
+ material_string = "Vacuum", priority = 100,
+ radius = 0.035, yheight = 0.28147)
+AT (0,0.058164999999999994,0) RELATIVE orange
+
+COMPONENT orange_layer_0_outer_cut_0 = Union_cylinder(
+ material_string = "Vacuum", priority = 87.6923,
+ radius = 0.037726, yheight = 0.132621)
+AT (0,-0.02189,0) RELATIVE orange
+
+COMPONENT orange_layer_0_outer_cut_replace_0 = Union_cylinder(
+ material_string = "Al", priority = 93.8462,
+ radius = 0.0365, yheight = 0.132625,
+ p_interact = 0.2)
+AT (0,-0.02189,0) RELATIVE orange
+
+COMPONENT orange_layer_1_layer = Union_cylinder(
+ material_string = "Al", priority = 69.2308,
+ radius = 0.0405, yheight = 0.33726,
+ p_interact = 0.2)
+AT (0,0.07718,0) RELATIVE orange
+
+COMPONENT orange_layer_1_layer_vac = Union_cylinder(
+ material_string = "Vacuum", priority = 75.3846,
+ radius = 0.04, yheight = 0.32742)
+AT (0,0.07391,0) RELATIVE orange
+
+COMPONENT orange_layer_2_layer = Union_cylinder(
+ material_string = "Al", priority = 44.6154,
+ radius = 0.04975, yheight = 0.33091,
+ p_interact = 0.2)
+AT (0,0.066835,0) RELATIVE orange
+
+COMPONENT orange_layer_2_layer_vac = Union_cylinder(
+ material_string = "Vacuum", priority = 63.0769,
+ radius = 0.0475, yheight = 0.31641)
+AT (0,0.065445,0) RELATIVE orange
+
+COMPONENT orange_layer_2_outer_cut_0 = Union_cylinder(
+ material_string = "Vacuum", priority = 50.7692,
+ radius = 0.049751, yheight = 0.150421)
+AT (0,-0.023419999999999996,0) RELATIVE orange
+
+COMPONENT orange_layer_2_outer_cut_replace_0 = Union_cylinder(
+ material_string = "Al", priority = 56.9231,
+ radius = 0.0485, yheight = 0.150425,
+ p_interact = 0.2)
+AT (0,-0.023419999999999996,0) RELATIVE orange
+
+COMPONENT orange_layer_3_layer = Union_cylinder(
+ material_string = "Al", priority = 20,
+ radius = 0.063315, yheight = 0.34153,
+ p_interact = 0.2)
+AT (0,0.051375000000000004,0) RELATIVE orange
+
+COMPONENT orange_layer_3_layer_vac = Union_cylinder(
+ material_string = "Vacuum", priority = 38.4615,
+ radius = 0.06, yheight = 0.30897)
+AT (0,0.045915,0) RELATIVE orange
+
+COMPONENT orange_layer_3_outer_cut_0 = Union_cylinder(
+ material_string = "Vacuum", priority = 26.1538,
+ radius = 0.063316, yheight = 0.149241)
+AT (0,-0.01892,0) RELATIVE orange
+
+COMPONENT orange_layer_3_outer_cut_replace_0 = Union_cylinder(
+ material_string = "Al", priority = 32.3077,
+ radius = 0.0615, yheight = 0.149245,
+ p_interact = 0.2)
+AT (0,-0.01892,0) RELATIVE orange
+
+COMPONENT orange_logger_time = Union_logger_1D(
+ min_value = 0.0018, max_value = 0.004,
+ n1 = 1000, variable = "time")
+AT (0,0,0) ABSOLUTE
+
+COMPONENT orange_logger_space_zx = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.0696465,
+ D1_max = 0.0696465, n1 = 500,
+ D_direction_2 = "x", D2_min = -0.0696465,
+ D2_max = 0.0696465, n2 = 500,
+ filename = "orange_space_zx.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT orange_logger_space_zy = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.0696465,
+ D1_max = 0.0696465, n1 = 500,
+ D_direction_2 = "y", D2_min = -0.131329,
+ D2_max = 0.244354, n2 = 500,
+ filename = "orange_space_zy.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT orange_logger_space_xy = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.0696465,
+ D1_max = 0.0696465, n1 = 500,
+ D_direction_2 = "y", D2_min = -0.131329,
+ D2_max = 0.244354, n2 = 500,
+ filename = "orange_space_xy.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT orange_logger_space_zy_close = Union_logger_3D_space(
+ D1_min = -0.0645813, D1_max = -0.0315,
+ D2_min = -0.131329, D2_max = 0.244354,
+ D3_min = -0.005, D3_max = 0.005,
+ D_direction_1 = "z", D_direction_2 = "y",
+ D_direction_3 = "x", filename = "orange_space_zy_close.dat",
+ n1 = 500, n2 = 500,
+ n3 = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_all = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_1 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_2 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_3 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_4 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_5 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zx_6 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 1000,
+ filename = "logger_2D_space_zx_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_all = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_1 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_2 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_3 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_4 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_5 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_zy_6 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_zy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_all = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_1 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_2 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_3 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_4 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_5 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_xy_6 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 1000,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 1000,
+ filename = "logger_2D_space_xy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_all = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_1 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_2 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_3 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_4 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_5 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zx_6 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zx_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_all = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_1 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_2 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_3 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_4 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_5 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_zy_6 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_zy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_all = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_1 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_2 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_3 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_4 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_5 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_xy_6 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 1000,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 1000,
+ filename = "logger_2DQ_xy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_all = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_all.dat", logger_conditional_extend_index = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_1 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_2 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_3 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_4 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_5 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zx_6 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.07,
+ D2_max = 0.07, n2 = 300,
+ filename = "logger_2D_space_con_zx_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_all = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_1 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_2 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_3 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_4 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_5 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_zy_6 = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_zy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_all = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_1 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_2 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_3 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_4 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_5 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2D_space_con_xy_6 = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.07,
+ D1_max = 0.07, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.13,
+ D2_max = 0.13, n2 = 300,
+ filename = "logger_2D_space_con_xy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_all = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_1 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_2 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_3 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_4 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_5 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zx_6 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "x", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zx_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_all = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_1 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_2 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_3 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_4 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_5 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_zy_6 = Union_logger_2DQ(
+ Q_direction_1 = "z", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_zy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_all = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_all.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_1 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_1.dat", order_total = 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_2 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_2.dat", order_total = 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_3 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_3.dat", order_total = 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_4 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_4.dat", order_total = 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_5 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_5.dat", order_total = 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT logger_2DQ_con_xy_6 = Union_logger_2DQ(
+ Q_direction_1 = "x", Q1_min = q_min,
+ Q1_max = q_max, n1 = 300,
+ Q_direction_2 = "y", Q2_min = q_min,
+ Q2_max = q_max, n2 = 300,
+ filename = "logger_2DQ_con_xy_6.dat", order_total = 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT YBaCuO_incoherent = Incoherent_process(
+ sigma = 2.105, unit_cell_volume = 173.28)
+AT (0,0,0) ABSOLUTE
+
+COMPONENT YBaCuO_crystal = Single_crystal_process(
+ reflections = "YBaCuO.lau", delta_d_d = 0.0005,
+ mosaic = 30, barns = 1,
+ ax = 3.816, ay = 0,
+ az = 0, bx = 0,
+ by = 3.886, bz = 0,
+ cx = 0, cy = 0,
+ cz = 11.677)
+AT (0,0,0) ABSOLUTE
+
+COMPONENT YBaCuO = Union_make_material(
+ process_string = "YBaCuO_incoherent,YBaCuO_crystal", my_absorption = 8.55263)
+AT (0,0,0) ABSOLUTE
+
+COMPONENT sample_position_y_rotated = Arm()
+AT (0,0,0) RELATIVE orange
+ROTATED (0,A3_angle,0) RELATIVE orange
+
+COMPONENT sample_position = Arm()
+AT (0,0,0) RELATIVE sample_position_y_rotated
+ROTATED (phi,0,0) RELATIVE sample_position_y_rotated
+
+COMPONENT sample = Union_box(
+ material_string = "YBaCuO", priority = 200,
+ xwidth = 0.006, yheight = 0.012,
+ zdepth = 0.005)
+AT (0,0,0) RELATIVE sample_position
+
+COMPONENT vertical = Union_box(
+ material_string = "Al", priority = 300,
+ xwidth = 0.0025, yheight = 0.012,
+ zdepth = 0.007)
+AT (0.004350000000000001,0.0065,0) RELATIVE sample_position_y_rotated
+
+COMPONENT top = Union_cylinder(
+ material_string = "Al", priority = 290,
+ radius = 0.0036, yheight = 0.002)
+AT (0,0.012,0) RELATIVE sample_position_y_rotated
+
+COMPONENT sample_rod = Union_cylinder(
+ material_string = "Al", priority = 310,
+ radius = 0.006, yheight = 1.2)
+AT (0,0.60098,0) RELATIVE top
+
+COMPONENT spot_dir = Arm()
+AT (0,0,0) RELATIVE orange
+ROTATED (0,tag_angle,0) RELATIVE orange
+
+COMPONENT space_all_PSD_conditional = Union_conditional_PSD(
+ target_loggers = "logger_2D_space_con_zx_all,logger_2D_space_con_zx_1,logger_2D_space_con_zx_2,logger_2D_space_con_zx_3,logger_2D_space_con_zx_4,logger_2D_space_con_zx_5,logger_2D_space_con_zx_6,logger_2D_space_con_zy_all,logger_2D_space_con_zy_1,logger_2D_space_con_zy_2,logger_2D_space_con_zy_3,logger_2D_space_con_zy_4,logger_2D_space_con_zy_5,logger_2D_space_con_zy_6,logger_2D_space_con_xy_all,logger_2D_space_con_xy_1,logger_2D_space_con_xy_2,logger_2D_space_con_xy_3,logger_2D_space_con_xy_4,logger_2D_space_con_xy_5,logger_2D_space_con_xy_6,logger_2DQ_con_zx_all,logger_2DQ_con_zx_1,logger_2DQ_con_zx_2,logger_2DQ_con_zx_3,logger_2DQ_con_zx_4,logger_2DQ_con_zx_5,logger_2DQ_con_zx_6,logger_2DQ_con_zy_all,logger_2DQ_con_zy_1,logger_2DQ_con_zy_2,logger_2DQ_con_zy_3,logger_2DQ_con_zy_4,logger_2DQ_con_zy_5,logger_2DQ_con_zy_6,logger_2DQ_con_xy_all,logger_2DQ_con_xy_1,logger_2DQ_con_xy_2,logger_2DQ_con_xy_3,logger_2DQ_con_xy_4,logger_2DQ_con_xy_5,logger_2DQ_con_xy_6", xwidth = conditional_xwidth,
+ yheight = 0.2, time_min = tag_time-0.5*tag_interval,
+ time_max = tag_time+0.5*tag_interval)
+AT (0,0,0.5) RELATIVE spot_dir
+
+COMPONENT master = Union_master(
+ verbal = 0)
+AT (0,0,0) ABSOLUTE
+EXTEND %{
+flag1 = logger_conditional_extend_array[1];
+n_scattering = number_of_scattering_events;
+%}
+
+COMPONENT stop = Union_stop()
+AT (0,0,0) ABSOLUTE
+
+COMPONENT banana_detector = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b.dat")
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_1 = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_1.dat")
+WHEN (n_scattering == 1)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_2 = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_2.dat")
+WHEN (n_scattering == 2)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_3 = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_3.dat")
+WHEN (n_scattering == 3)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_4 = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_4.dat")
+WHEN (n_scattering == 4)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_5 = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_5.dat")
+WHEN (n_scattering == 5)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_6 = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_6.dat")
+WHEN (n_scattering == 6)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT banana_detector_limited = Monitor_nD(
+ yheight = 0.2, restore_neutron = 1,
+ radius = 0.5, options = option_string,
+ filename = "tof_b_limited.dat")
+WHEN (flag1 > 0)
+AT (0,0,0) RELATIVE orange
+
+COMPONENT Emon = E_monitor(
+ nE = 300, xwidth = 0.04,
+ yheight = 0.04, Emin = E0 - dE,
+ Emax = E0 + dE, restore_neutron = 1)
+AT (0,0,0.5) RELATIVE orange
+
+FINALLY 
+%{
+// Start of finally for generated cryostat_test
+%}
+
+END
