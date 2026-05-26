@@ -36,8 +36,8 @@ def parse():
     parser.add_argument(
         "--n_points", help="Number of points on geometries", default=10_000
     )
-    parser.add_argument("--plot_point_cloud", store=True, default=False)
-    parser.add_argument("--save_vacuum_geometries", store=True, default=True)
+    parser.add_argument("--plot_point_cloud", action="store_true", default=False)
+    parser.add_argument("--save_vacuum_geometries", action="store_true", default=True)
     return parser
 
 
@@ -174,19 +174,18 @@ def sdf_cone(comp, p):
     r2 = comp.radius_top
     h = comp.yheight
 
-    y = p[..., 2] + h / 2
+    y = p[..., 1] + h / 2
     t = np.clip(y / h, 0, 1)
 
     r = r1 * (1 - t) + r2 * t
-    d_xy = np.linalg.norm(p[..., :2], axis=-1) - r
-    d_y = np.maximum(np.maximum(-y, y - h), 0)
+    d_xz = np.linalg.norm(p[..., 0:3:2], axis=-1) - r
+    d_y = np.maximum(-y, y - h)
 
-    return np.maximum(d_xy, d_y)
+    return np.maximum(d_xz, d_y)
 
 
 def sdf_mesh(comp, p):
-    if not hasattr(comp, "_mesh"):
-        comp._mesh = trimesh.load(comp.filename)
+    comp._mesh = trimesh.load(comp.filename)
 
     sdf = trimesh.proximity.signed_distance(comp._mesh, p)
     return sdf
@@ -282,16 +281,28 @@ def sample_union_cone(comp: mshelp.Component, n_points):
     radius_bottom = comp.radius_bottom
     radius_top = comp.radius_top
     height = comp.yheight
+    frac_side = int(n_points * 0.6)
+    frac_ends = int(n_points * 0.4)
     # Truncated cone (frustum) surface sampling
-    z = np.random.uniform(-height / 2, height / 2, n_points)
-    t = (z + height / 2) / height  # 0 → bottom, 1 → top
+    y = np.random.uniform(-height / 2, height / 2, frac_side)
+    t = (y + height / 2) / height  # 0 → bottom, 1 → top
     r = radius_bottom * (1 - t) + radius_top * t
 
-    theta = np.random.uniform(0, 2 * np.pi, n_points)
+    theta = np.random.uniform(0, 2 * np.pi, frac_side)
     x = r * np.cos(theta)
-    y = r * np.sin(theta)
+    z = r * np.sin(theta)
+    tmp_pts = np.column_stack((x, y, z))
 
-    return np.column_stack((x, y, z))
+    theta = np.random.uniform(0, 2 * np.pi, frac_ends)
+    y = np.random.choice([-height / 2, height / 2], frac_ends)
+    rand_rad = np.where(y > 0, radius_top, radius_bottom)
+    rand_rad *= np.random.rand(frac_ends)
+
+    x = rand_rad * np.cos(theta)
+    z = rand_rad * np.sin(theta)
+    tmp_pts_2 = np.column_stack((x, y, z))
+
+    return np.concatenate((tmp_pts, tmp_pts_2))
 
 
 def sample_union_mesh(comp: mshelp.Component, n_points):
@@ -358,9 +369,7 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
         pts = sampler(comp, n_points)
         print(pts)
         pts = np.concatenate([pts, np.ones((len(pts), 1))], axis=1)
-        pts = (world_matrices[comp.name.lower()] @ pts.T).T
-
-        # make homogeneous → world transform
+        pts = (world_matrices[comp.name] @ pts.T).T
 
         f = final_sdfs[comp.name]
 
@@ -374,7 +383,7 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
 
         # --- keep only near-surface points ---
         sdf_vals = f(pts)
-        mask = np.abs(sdf_vals) < 1e-3
+        mask = np.abs(sdf_vals) < 1e-6
 
         points = pts[mask]
         # points = pts
@@ -452,7 +461,7 @@ def compute_world_bbox(comp, world_matrices, margin=0.05):
 
     local_min, local_max = compute_local_bbox(comp)
     world_min, world_max = transform_bbox(
-        local_min, local_max, world_matrices[comp.name.lower()]
+        local_min, local_max, world_matrices[comp.name]
     )
 
     # Expand a bit such that marching cubes can get gradient correctly
@@ -578,15 +587,15 @@ def compute_world_matrices(instr):
 
             # Absolute → no dependency
             if rel == "absolute":
-                world[comp.name.lower()] = local_matrix(comp)
+                world[comp.name] = local_matrix(comp)
                 remaining.remove(comp)
                 progressed = True
                 continue
 
             # Relative → need parent first
             if rel in world:
-                world[comp.name.lower()] = world[rel] @ local_matrix(comp)
-                print(f"COMPONENT {comp.name} MATRIX IS : \n{world[comp.name.lower()]}")
+                world[comp.name] = world[rel] @ local_matrix(comp)
+                print(f"COMPONENT {comp.name} MATRIX IS : \n{world[comp.name]}")
                 remaining.remove(comp)
                 progressed = True
 
@@ -601,10 +610,12 @@ def compute_world_matrices(instr):
 # =========================== PLOT OF POINT CLOUD WITH PLOTLY =================
 # =============================================================================
 
-def plot_multiple_clouds(cloud_list, size=3):
+def plot_multiple_clouds(cloud_list, geoms, size=3):
     fig = go.Figure()
 
     for i in range(len(cloud_list)):
+        # if geoms[i].component_name != "Union_cone":
+        #     continue
         pts = cloud_list[i]
         fig.add_trace(
             go.Scatter3d(
@@ -709,7 +720,7 @@ if __name__ == "__main__":
     for comp in union_geometries:
         comp_type = comp.component_name.lower()
         sdf = GEOMETRY_FUNCS[comp_type]["sdf"]
-        inv_mat = np.linalg.inv(world_matrices[comp.name.lower()])
+        inv_mat = np.linalg.inv(world_matrices[comp.name])
         sdfs[comp.name] = make_sdf(comp, sdf, inv_mat)
 
     for comp in union_geometries:
@@ -724,8 +735,7 @@ if __name__ == "__main__":
         point_clouds = prioritise_points(
             point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
         )
-        plot_multiple_clouds(point_clouds)
-
+        plot_multiple_clouds(point_clouds, union_geometries)
     meshes = []
     for i, comp in enumerate(union_geometries):
         name = comp.name
