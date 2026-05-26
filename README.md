@@ -11,6 +11,7 @@ And see your union environment become a CAD model!
 
 ### cmdline options:
 plot_point_cloud | plots a point cloud over all the geometries
+
 dont_save_vacuum | A flag that can be set, in order to not save the geometries made from the vacuum material.
 
 ---
