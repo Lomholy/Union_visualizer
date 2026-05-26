@@ -14,11 +14,12 @@
 
 import numpy as np
 import trimesh
-import open3d as o3d
 import plotly.graph_objects as go
 import argparse
 import mcstasscript as ms
 import mcstasscript.helper.mcstas_objects as mshelp
+
+from skimage.measure import marching_cubes
 
 
 # ==============================================================================
@@ -32,7 +33,11 @@ def parse():
         "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas"
     )
     parser.add_argument("--out", help="Name of output file.", default="union_env")
-    parser.add_argument("--n_points", help="Number of points on geometries", default=10_000)
+    parser.add_argument(
+        "--n_points", help="Number of points on geometries", default=10_000
+    )
+    parser.add_argument("--plot_point_cloud", store=True, default=False)
+    parser.add_argument("--save_vacuum_geometries", store=True, default=True)
     return parser
 
 
@@ -144,7 +149,7 @@ def sdf_cylinder(comp, p):
     d_xz = np.linalg.norm(p[..., 0:3:2], axis=-1) - r
     d_y = np.abs(p[..., 1]) - h
 
-    outside = np.maximum(d_xz, 0)**2 + np.maximum(d_y, 0)**2
+    outside = np.maximum(d_xz, 0) ** 2 + np.maximum(d_y, 0) ** 2
     inside = np.minimum(np.maximum(d_xz, d_y), 0)
 
     return np.sqrt(outside) + inside
@@ -190,7 +195,7 @@ def sdf_mesh(comp, p):
 def make_sdf(comp, sdf_func, inv_world):
     def f(x_world):
         x_local = (inv_world @ x_world.T).T
-        return sdf_func(comp, x_local[:,:3])
+        return sdf_func(comp, x_local[:, :3])
 
     return f
 
@@ -203,7 +208,9 @@ def sdf_subtract_all(f_i, higher_priority_fs):
     if not higher_priority_fs:
         return f_i
 
-    f_block = lambda x: np.min([f(x) for f in higher_priority_fs], axis=0)
+    def f_block(x):
+        return np.min([f(x) for f in higher_priority_fs], axis=0)
+
     return lambda x: np.maximum(f_i(x), -f_block(x))
 
 
@@ -211,8 +218,8 @@ def sample_union_cylinder(comp: mshelp.Component, n_points):
     # Sample a fraction on the sides, and a fraction on the ends
     radius = comp.radius
     height = comp.yheight
-    frac_side = int(n_points*0.6)
-    frac_ends = int(n_points*0.4)
+    frac_side = int(n_points * 0.6)
+    frac_ends = int(n_points * 0.4)
 
     theta = np.random.uniform(0, 2 * np.pi, frac_side)
     y = np.random.uniform(-height / 2, height / 2, frac_side)
@@ -221,10 +228,10 @@ def sample_union_cylinder(comp: mshelp.Component, n_points):
     tmp = np.column_stack((x, y, z))
 
     theta = np.random.uniform(0, 2 * np.pi, frac_ends)
-    rand_rad = np.random.rand(frac_ends)*radius
-    y = height/2 * np.random.choice((-1, 1), size=frac_ends)
-    x = np.cos(theta)*rand_rad
-    z = np.sin(theta)*rand_rad
+    rand_rad = np.random.rand(frac_ends) * radius
+    y = height / 2 * np.random.choice((-1, 1), size=frac_ends)
+    x = np.cos(theta) * rand_rad
+    z = np.sin(theta) * rand_rad
     tmp_2 = np.column_stack((x, y, z))
 
     return np.row_stack((tmp, tmp_2))
@@ -303,6 +310,9 @@ def sample_union_mesh(comp: mshelp.Component, n_points):
     return np.asarray(pcd.points)
 
 
+
+
+
 GEOMETRY_FUNCS = {
     "union_cylinder": {
         "sdf": sdf_cylinder,
@@ -344,7 +354,7 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
 
         # initial samples (world space)
         sampler = GEOMETRY_FUNCS[comp.component_name.lower()]["generate_surface_points"]
-        
+
         pts = sampler(comp, n_points)
         print(pts)
         pts = np.concatenate([pts, np.ones((len(pts), 1))], axis=1)
@@ -373,20 +383,120 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
 
     return clouds
 
+#
+# =============================================================================
+# =========================== MARCHING CUBES PIPELINE =========================
+# =============================================================================
+
+
+def compute_local_bbox(comp):
+    """Return local AABB (min, max) in local coordinates."""
+
+    t = comp.component_name.lower()
+
+    if t == "union_box":
+        b = np.array([comp.xwidth, comp.yheight, comp.zdepth]) / 2
+        return -b, b
+
+    elif t == "union_sphere":
+        r = comp.radius
+        b = np.array([r, r, r])
+        return -b, b
+
+    elif t == "union_cylinder":
+        r = comp.radius
+        h = comp.yheight / 2
+        b = np.array([r, h, r])
+        return -b, b
+
+    elif t == "union_cone":
+        r = max(comp.radius_bottom, comp.radius_top)
+        h = comp.yheight / 2
+        b = np.array([r, h, r])
+        return -b, b
+
+    elif t == "union_mesh":
+        if not hasattr(comp, "_mesh"):
+            comp._mesh = trimesh.load(comp.filename)
+
+        bounds = comp._mesh.bounds  # (min, max)
+        return bounds[0], bounds[1]
+
+    else:
+        raise ValueError(f"Unknown geometry: {t}")
+
+
+def transform_bbox(min_corner, max_corner, world_matrix):
+    """Transform AABB to world space AABB."""
+
+    corners = np.array(
+        [
+            [min_corner[0], min_corner[1], min_corner[2], 1],
+            [min_corner[0], min_corner[1], max_corner[2], 1],
+            [min_corner[0], max_corner[1], min_corner[2], 1],
+            [min_corner[0], max_corner[1], max_corner[2], 1],
+            [max_corner[0], min_corner[1], min_corner[2], 1],
+            [max_corner[0], min_corner[1], max_corner[2], 1],
+            [max_corner[0], max_corner[1], min_corner[2], 1],
+            [max_corner[0], max_corner[1], max_corner[2], 1],
+        ]
+    )
+
+    world_corners = (world_matrix @ corners.T).T[:, :3]
+
+    return world_corners.min(axis=0), world_corners.max(axis=0)
+
+
+def compute_world_bbox(comp, world_matrices, margin=0.05):
+    """Compute slightly expanded world-space bounding box."""
+
+    local_min, local_max = compute_local_bbox(comp)
+    world_min, world_max = transform_bbox(
+        local_min, local_max, world_matrices[comp.name.lower()]
+    )
+
+    # Expand a bit such that marching cubes can get gradient correctly
+    size = world_max - world_min
+    world_min -= margin * size
+    world_max += margin * size
+
+    return world_min, world_max
+
+
+def sdf_to_mesh(sdf_func, bbox_min, bbox_max, resolution=64):
+    xs = np.linspace(bbox_min[0], bbox_max[0], resolution)
+    ys = np.linspace(bbox_min[1], bbox_max[1], resolution)
+    zs = np.linspace(bbox_min[2], bbox_max[2], resolution)
+
+    X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
+    pts = np.stack([X, Y, Z], axis=-1).reshape(-1, 3)
+    pts = np.concatenate([pts, np.ones((len(pts), 1))], axis=1)
+
+    sdf_vals = sdf_func(pts).reshape((resolution, resolution, resolution))
+
+    verts, faces, normals, _ = marching_cubes(sdf_vals, level=0.0)
+
+    # map voxel coords to world coords
+    scale = (bbox_max - bbox_min) / (resolution - 1)
+    verts = verts * scale + bbox_min
+
+    return verts, faces
+
+
 # =============================================================================
 # =========================== GRADIENT OF SIGNED DIST FNC =====================
 # =============================================================================
 
 
 def sdf_normal(sdf_func, pts, eps=1e-5):
-    grads = np.zeros((pts.shape[0],4))
+    grads = np.zeros((pts.shape[0], 4))
     dp = np.zeros_like(pts)
 
     for i in range(3):
         dp = np.zeros_like(pts)
         dp[:, i] = eps
 
-        f_plus  = sdf_func(pts + dp)
+        f_plus = sdf_func(pts + dp)
         f_minus = sdf_func(pts - dp)
 
         grads[:, i] = (f_plus - f_minus) / (2 * eps)
@@ -491,45 +601,6 @@ def compute_world_matrices(instr):
 # =========================== PLOT OF POINT CLOUD WITH PLOTLY =================
 # =============================================================================
 
-
-def plot_point_cloud(points, colors=None, size=2, title="3D Point Cloud"):
-    """
-    Plot a 3D point cloud using Plotly.
-
-    Parameters
-    ----------
-    points : np.ndarray
-        Shape (N, 3) array of XYZ coordinates.
-    colors : np.ndarray or None
-        Shape (N,) or (N, 3). Optional color per point.
-    size : int
-        Marker size.
-    title : str
-        Plot title.
-    """
-
-    x, y, z = points[:, 0], points[:, 1], points[:, 2]
-
-    marker_kwargs = dict(size=size)
-
-    if colors is not None:
-        marker_kwargs["color"] = colors
-        marker_kwargs["colorscale"] = "Viridis"
-        marker_kwargs["colorbar"] = dict(title="Color")
-
-    fig = go.Figure(
-        data=[go.Scatter3d(x=x, y=y, z=z, mode="markers", marker=marker_kwargs)]
-    )
-
-    fig.update_layout(
-        title=title,
-        scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z"),
-        margin=dict(l=0, r=0, b=0, t=40),
-    )
-
-    fig.show()
-
-
 def plot_multiple_clouds(cloud_list, size=3):
     fig = go.Figure()
 
@@ -543,7 +614,7 @@ def plot_multiple_clouds(cloud_list, size=3):
                 mode="markers",
                 marker=dict(size=size),
                 name=f"Cloud {i}",
-                opacity = 0.7
+                opacity=0.7,
             )
         )
 
@@ -569,12 +640,9 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
 
     for i in range(K):
         comp_i = geometries[i]
-        f_i = sdfs[comp_i.name]
-
         point_world = point_clouds[i]
         p = point_clouds[i]
         reassigned = np.zeros(point_world.shape[0])
-
 
         for j in range(K):
             if i == j:
@@ -586,40 +654,41 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
 
             val_j = f_j(p)
             print(val_j)
-            mask = np.where(val_j<0, True, False)
+            mask = np.where(val_j < 0, True, False)
             print(mask.sum())
             reassigned += mask
             print(reassigned.sum())
             added_pts = point_world[mask]
 
             if comp_i.priority > comp_j.priority:
-                final_points[final_points_tracker[j]:final_points_tracker[j] + added_pts.shape[0], :, j] = added_pts
+                final_points[
+                    final_points_tracker[j] : final_points_tracker[j]
+                    + added_pts.shape[0],
+                    :,
+                    j,
+                ] = added_pts
                 final_points_tracker[j] += added_pts.shape[0]
-        mask = np.where(reassigned==0, True, False)
+        mask = np.where(reassigned == 0, True, False)
         print(f"Points not added are being added {mask.sum()}")
-        test = point_world[mask]
-        print(test.shape)
-        final_points[final_points_tracker[i]:final_points_tracker[i] + point_world.shape[0], :, i] = point_world
+        final_points[
+            final_points_tracker[i] : final_points_tracker[i] + point_world.shape[0],
+            :,
+            i,
+        ] = point_world
         final_points_tracker[i] += point_world.shape[0]
-
-
-
-
-
         print(f"Processed geometry {i}")
-    
     clouds = []
     for i in range(K):
-        
         # Do A final wipe, to remove any points not on the edge of the final sdf
         sdf_fin = final_sdfs[geometries[i].name]
-        p = final_points[:final_points_tracker[i], :, i]
+        p = final_points[: final_points_tracker[i], :, i]
         vals = sdf_fin(p)
-        mask = np.where(abs(vals)<1e-3, True, False)
+        mask = np.where(abs(vals) < 1e-3, True, False)
         cloud = p[mask]
         clouds.append(cloud)
 
     return clouds
+
 
 # =============================================================================
 # =========================== MAIN CODE EXECUTION =============================
@@ -644,45 +713,39 @@ if __name__ == "__main__":
         sdfs[comp.name] = make_sdf(comp, sdf, inv_mat)
 
     for comp in union_geometries:
-        higher_comps = [sdfs[x.name] for x in union_geometries if x.priority > comp.priority]
+        higher_comps = [
+            sdfs[x.name] for x in union_geometries if x.priority > comp.priority
+        ]
         final_sdfs[comp.name] = sdf_subtract_all(sdfs[comp.name], higher_comps)
-        print(final_sdfs[comp.name], comp.name)
-    print(final_sdfs)
-    # visualize_sdf_field(union_geometries, final_sdfs, bounds=(-1, 1))
-    point_clouds = sample_sdf_surfaces(union_geometries, final_sdfs, world_matrices, args.n_points)
-    # point_clouds = prioritise_points(point_clouds, sdfs, final_sdfs, union_geometries, world_matrices)
-    plot_multiple_clouds(point_clouds)
-    
-    meshes = []
-    
-    for i, cloud in enumerate(point_clouds):
-        if cloud.shape[0] == 0:
-            continue
-    
-        pts = cloud[:, :3]
-    
-        # normals from SDF
-        f = final_sdfs[union_geometries[i].name]
-        normals = sdf_normal(f, cloud)
-    
-        # build Open3D point cloud
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pts)
-        pcd.normals = o3d.utility.Vector3dVector(normals[:, :3])
-    
-        # Poisson
-        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-            pcd,
-            depth=6
+    if args.plot_point_cloud:
+        point_clouds = sample_sdf_surfaces(
+            union_geometries, final_sdfs, world_matrices, args.n_points
         )
-    
-        mesh.compute_vertex_normals()
-        meshes.append(mesh)
-    
-        o3d.io.write_triangle_mesh(f"{args.out}_{i}.stl", mesh)
-        # NOTE!!! FAILS ON CRYOSTAT TEST!!!
-    
-    # print(vertices.shape)
-    # print(faces.shape)
-    # mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    # mesh.export(f'{args.out}.stl')
+        point_clouds = prioritise_points(
+            point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
+        )
+        plot_multiple_clouds(point_clouds)
+
+    meshes = []
+    for i, comp in enumerate(union_geometries):
+        name = comp.name
+        if comp.material_string == "Vacuum" and not args.save_vacuum_geometries:
+            continue
+        print(name, i)
+        sdf_func = final_sdfs[name]
+        try:
+            bmin, bmax = compute_world_bbox(comp, world_matrices)
+            print(f"BBOX {name}: {bmin} → {bmax}")
+
+            verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=256)
+            if verts is None:
+                print("verts is none")
+                continue
+            mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+            mesh.export(f"{args.out}_{comp.name}.stl")
+            meshes.append(mesh)
+        except Exception as e:
+            print(f"Adaptive MC failed for {name}: {e}")
+    comb_mesh = trimesh.util.concatenate(meshes)
+    comb_mesh.export(f"{args.out}.stl")
+
