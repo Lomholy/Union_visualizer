@@ -17,8 +17,14 @@ dont_save_vacuum | A flag that can be set, in order to not save the geometries m
 
 ---
 ### Dependencies:
-numpy (For general math)
-trimesh (For loading and outputting meshes)
-plotly.graph_objects (For debugging currently)
-mcstasscript (For loading the mcstas files)
-scikit-image (For applying the marching cubes algorithm)
+
+- numpy (For general math)
+
+- trimesh (For loading and outputting meshes)
+
+- plotly.graph_objects (For debugging currently)
+
+- mcstasscript (For loading the mcstas files)
+
+- scikit-image (For applying the marching cubes algorithm)
+
