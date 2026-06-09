@@ -193,7 +193,7 @@ def create_var_map(instr: ms.McStas_instr):
             value = eval_expr(expr, var_map)
             var_map[name] = value
         except Exception as e:
-            print(f"Failed to evaluate {line}: {e}")
+            print(f"Warning: Failed to evaluate {line}: {e}")
     return var_map
 
 
