@@ -30,5 +30,5 @@ jobs:
         run: |
           for file in tests/*; do
             echo "Running on $file"
-            python3 src/mcstas-to-cad.py --input_file="tests/$file"
+            python3 src/mcstas_to_cad.py --input_file="$file"
           done
