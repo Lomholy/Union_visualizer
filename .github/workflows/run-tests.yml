@@ -27,6 +27,7 @@ jobs:
           conda list
 
       - name: Run script on all test files
+        shell: bash -l {0}
         run: |
           for file in tests/*; do
             echo "Running on $file"
