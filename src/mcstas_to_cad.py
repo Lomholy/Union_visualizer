@@ -13,13 +13,16 @@
 #  5. Export the entire environment as a .stl file
 
 import numpy as np
+import ast
 import trimesh
 import plotly.graph_objects as go
 import argparse
 import mcstasscript as ms
 import mcstasscript.helper.mcstas_objects as mshelp
-
 from skimage.measure import marching_cubes
+import operator
+import math
+
 
 
 # ==============================================================================
@@ -32,12 +35,12 @@ def parse():
     parser.add_argument(
         "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas"
     )
-    parser.add_argument("--out", help="Name of output file.", default="union_env")
+    parser.add_argument("--out_file", help="Name of output file.", default="union_env")
     parser.add_argument(
         "--n_points", help="Number of points on geometries", default=10_000
     )
     parser.add_argument("--plot_point_cloud", action="store_true", default=False)
-    parser.add_argument("--save_vacuum_geometries", action="store_true", default=True)
+    parser.add_argument("--dont_save_vacuum", action="store_true", default=False)
     return parser
 
 
@@ -82,7 +85,12 @@ def get_union_geometries(instr: ms.McStas_instr):
 
 
 def load_McStas_file(input_file):
-    instr = execute_mcstasscript_file(input_file)
+    if input_file.endswith(".py"):
+        instr = execute_mcstasscript_file(input_file)
+    elif input_file.endswith(".instr"):
+        file = ms.McStas_file(input_file)
+        instr = ms.McStas_instr("union_cad")
+        file.add_to_instr(instr)
     return instr
 
 
@@ -91,48 +99,90 @@ def load_McStas_file(input_file):
 # =============================================================================
 
 
-def attempt_single_param_conversion(var_map, name, value, comp, instr):
-    # Check dictionary of parameters
-    if value in instr.parameters and instr.parameters[value] is not None:
-        print(value)
-        param_value = instr.parameters[value].value
-        setattr(comp, name, param_value)
-    elif name in var_map:
-        setattr(comp, name, var_map[value])
-    if type(value) == str:
-        try:
-            setattr(comp, name, float(value))
-        except Exception:
-            setattr(comp, name, value)
+
+# Supported operators
+OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.Mod: operator.mod,
+}
+
+# Supported unary operators
+UNARY = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+# Allowed math functions/constants
+MATH_ENV = {
+    name: getattr(math, name)
+    for name in dir(math)
+    if not name.startswith("_")
+}
 
 
-def attempt_iterable_conversion(var_map, name, param_iter, comp, instr):
-    for i, val in enumerate(param_iter):
-        # overwrite param iter, and then set comp name to param iter
-        if val in instr.parameters and instr.parameters[val] is not None:
-            param_iter[i] = float(instr.parameters[val].value)
-        elif type(val) == str:
-            # attempt to just convert to number
-            try:
-                param_iter[i] = float(val)
-            except ValueError:
-                # Value is not numeric, so keep as string
-                continue
-    setattr(comp, name, param_iter)
+def eval_expr(expr, var_map=None):
+    if var_map is None:
+        var_map = {}
+
+    def _eval(node):
+        if isinstance(node, ast.Constant):  # numbers
+            return node.value
+
+        elif isinstance(node, ast.BinOp):  # x + y
+            return OPERATORS[type(node.op)](_eval(node.left), _eval(node.right))
+
+        elif isinstance(node, ast.UnaryOp):  # -x
+            return UNARY[type(node.op)](_eval(node.operand))
+
+        elif isinstance(node, ast.Name):  # variables
+            if node.id in var_map:
+                return var_map[node.id]
+            elif node.id in MATH_ENV:
+                return MATH_ENV[node.id]
+            else:
+                raise ValueError(f"Unknown variable: {node.id}")
+
+        elif isinstance(node, ast.Call):  # function calls
+            func = _eval(node.func)
+            args = [_eval(arg) for arg in node.args]
+            return func(*args)
+
+        else:
+            raise TypeError(f"Unsupported expression: {expr}")
+
+    tree = ast.parse(expr, mode='eval')
+    return _eval(tree.body)
+
+
+def parse_param(expr, var_map):
+    try:
+        return eval_expr(expr, var_map)
+    except Exception:
+        return expr
+
 
 
 def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
-    all_vars = list(instr.declare_list) + list(instr.user_var_list)
+    all_vars = list(instr.declare_list) + list(instr.user_var_list) + list(instr.parameters)
     var_map = {v.name: v.value for v in all_vars}
 
     for name in (a for a in dir(comp) if not a.startswith("__")):
         value = getattr(comp, name)
         if isinstance(value, (str, int, float)):
-            attempt_single_param_conversion(var_map, name, value, comp, instr)
+            val = parse_param(value, var_map)
+            setattr(comp, name, val)
+        elif isinstance(value, (list, tuple, set)):
+            converted = []
 
-        if isinstance(value, (list, tuple, set)):
-            attempt_iterable_conversion(var_map, name, value, comp, instr)
+            for val in value:
+                res = parse_param(val, var_map)
+                converted.append(res)
 
+            setattr(comp, name, type(value)(converted))
     return comp
 
 
@@ -184,19 +234,27 @@ def sdf_cone(comp, p):
     return np.maximum(d_xz, d_y)
 
 
-def sdf_mesh(comp, p):
-    comp._mesh = trimesh.load(comp.filename)
-
-    sdf = trimesh.proximity.signed_distance(comp._mesh, p)
+def sdf_mesh(mesh, p):
+    sdf = trimesh.proximity.signed_distance(mesh, p)
     return sdf
 
 
 def make_sdf(comp, sdf_func, inv_world):
+    mesh = None
+
+    if comp.component_name == "Union_mesh":
+        mesh = trimesh.load(comp.filename.strip('"'))
+
     def f(x_world):
         x_local = (inv_world @ x_world.T).T
-        return sdf_func(comp, x_local[:, :3])
+
+        if mesh is not None:
+            return sdf_func(mesh, x_local[:, :3])
+        else:
+            return sdf_func(comp, x_local[:, :3])
 
     return f
+
 
 
 def sdf_difference(f, g):
@@ -425,10 +483,8 @@ def compute_local_bbox(comp):
         return -b, b
 
     elif t == "union_mesh":
-        if not hasattr(comp, "_mesh"):
-            comp._mesh = trimesh.load(comp.filename)
-
-        bounds = comp._mesh.bounds  # (min, max)
+        mesh = trimesh.load(comp.filename)
+        bounds = mesh.bounds  # (min, max)
         return bounds[0], bounds[1]
 
     else:
@@ -705,11 +761,8 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
 # =========================== MAIN CODE EXECUTION =============================
 # =============================================================================
 
-
-if __name__ == "__main__":
-    parser = parse()
-    args = parser.parse_args()
-    instr = load_McStas_file(args.input_file)
+def convert_instrument_to_stl(input_file, out_file, res=64, dont_save_vacuum=True, plot_point_cloud=False, n_points = 10000):
+    instr = load_McStas_file(input_file)
     for comp in instr.component_list:
         comp = attempt_conversion(comp, instr)
 
@@ -725,12 +778,13 @@ if __name__ == "__main__":
 
     for comp in union_geometries:
         higher_comps = [
-            sdfs[x.name] for x in union_geometries if x.priority > comp.priority
+            sdfs[x.name] for x in union_geometries if x.priority > comp.priority and x.component_name != "Union_mesh"
         ]
         final_sdfs[comp.name] = sdf_subtract_all(sdfs[comp.name], higher_comps)
-    if args.plot_point_cloud:
+
+    if plot_point_cloud:
         point_clouds = sample_sdf_surfaces(
-            union_geometries, final_sdfs, world_matrices, args.n_points
+            union_geometries, final_sdfs, world_matrices, n_points
         )
         point_clouds = prioritise_points(
             point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
@@ -739,23 +793,37 @@ if __name__ == "__main__":
     meshes = []
     for i, comp in enumerate(union_geometries):
         name = comp.name
-        if comp.material_string == "Vacuum" and not args.save_vacuum_geometries:
-            continue
         print(name, i)
-        sdf_func = final_sdfs[name]
-        try:
-            bmin, bmax = compute_world_bbox(comp, world_matrices)
-            print(f"BBOX {name}: {bmin} → {bmax}")
-
-            verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=256)
-            if verts is None:
-                print("verts is none")
-                continue
-            mesh = trimesh.Trimesh(vertices=verts, faces=faces)
-            mesh.export(f"{args.out}_{comp.name}.stl")
+        if comp.material_string == "Vacuum" and not dont_save_vacuum:
+            continue
+        if comp.component_name == "Union_mesh":
+            mesh = trimesh.load_mesh(comp.filename.strip('"'))
+            if comp.coordinate_scale is None:
+                comp.coordinate_scale = 1e-3
+            print(comp.coordinate_scale)
+            mesh.apply_scale(float(comp.coordinate_scale))
+            mesh.apply_transform(world_matrices[comp.name])
+            mesh.export(f"{out_file}_{comp.name}.stl")
             meshes.append(mesh)
-        except Exception as e:
-            print(f"Adaptive MC failed for {name}: {e}")
+            continue
+        
+        sdf_func = final_sdfs[name]
+        bmin, bmax = compute_world_bbox(comp, world_matrices)
+        print(f"BBOX {name}: {bmin} → {bmax}")
+
+        verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=res)
+        if verts is None:
+            print("verts is none")
+            continue
+        mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+        mesh.export(f"{out_file}_{comp.name}.stl")
+        meshes.append(mesh)
     comb_mesh = trimesh.util.concatenate(meshes)
-    comb_mesh.export(f"{args.out}.stl")
+    comb_mesh.export(f"{out_file}.stl")
+
+
+if __name__ == "__main__":
+    parser = parse()
+    args = parser.parse_args()
+    convert_instrument_to_stl(args.input_file, args.out_file)
 
