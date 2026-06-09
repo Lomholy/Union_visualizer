@@ -1,0 +1,29 @@
+name: Run Python Script On Test Files
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14.4"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run script on all test files
+        run: |
+          for file in tests/*; do
+            echo "Running on $file"
+            python src/mcstas-to-cad.py --input_file="tests/$file"
+          done
