@@ -12,24 +12,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Conda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.14"
-          activate-environment: unviz
-          environment-file: unviz_env.yml
 
-      - name: Verify conda
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: unviz_env.yml
+          environment-name: unviz
+          cache-environment: true
+          init-shell: bash
+
+
+      - name: Verify environment
         shell: bash -l {0}
         run: |
-          conda info
-          conda list
+          micromamba info
+          which python
+          python --version
+          micromamba list
+
 
       - name: Run script on all test files
         shell: bash -l {0}
         run: |
           for file in tests/*; do
             echo "Running on $file"
-            python3 src/mcstas_to_cad.py --input_file="$file"
+            python src/mcstas_to_cad.py --input_file="$file"
           done
