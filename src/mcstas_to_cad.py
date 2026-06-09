@@ -41,12 +41,14 @@ def parse():
     )
     parser.add_argument("--plot_point_cloud", action="store_true", default=False)
     parser.add_argument("--dont_save_vacuum", action="store_true", default=False)
+    parser.add_argument("--verbose", action="store_true", default=False)
     return parser
 
 
 # ==============================================================================
 # ============================ Load in McStas file =============================
 # ==============================================================================
+
 
 
 def execute_mcstasscript_file(input_file):
@@ -577,7 +579,7 @@ def sdf_normal(sdf_func, pts, eps=1e-5):
 # =============================================================================
 
 
-def compute_world_matrices(instr):
+def compute_world_matrices(instr, verbose=False):
     """
     Returns:
         dict: {component_name_lower: 4x4 world matrix}
@@ -651,7 +653,8 @@ def compute_world_matrices(instr):
             # Relative → need parent first
             if rel in world:
                 world[comp.name] = world[rel] @ local_matrix(comp)
-                print(f"COMPONENT {comp.name} MATRIX IS : \n{world[comp.name]}")
+                if verbose:
+                    print(f"COMPONENT {comp.name} MATRIX IS : \n{world[comp.name]}")
                 remaining.remove(comp)
                 progressed = True
 
@@ -716,15 +719,11 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
                 continue
 
             comp_j = geometries[j]
-            print(comp_j.name)
             f_j = sdfs[comp_j.name]
 
             val_j = f_j(p)
-            print(val_j)
             mask = np.where(val_j < 0, True, False)
-            print(mask.sum())
             reassigned += mask
-            print(reassigned.sum())
             added_pts = point_world[mask]
 
             if comp_i.priority > comp_j.priority:
@@ -736,7 +735,6 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
                 ] = added_pts
                 final_points_tracker[j] += added_pts.shape[0]
         mask = np.where(reassigned == 0, True, False)
-        print(f"Points not added are being added {mask.sum()}")
         final_points[
             final_points_tracker[i] : final_points_tracker[i] + point_world.shape[0],
             :,
@@ -761,12 +759,12 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
 # =========================== MAIN CODE EXECUTION =============================
 # =============================================================================
 
-def convert_instrument_to_stl(input_file, out_file, res=64, dont_save_vacuum=True, plot_point_cloud=False, n_points = 10000):
+def convert_instrument_to_stl(input_file, out_file, verbose=False, res=64, dont_save_vacuum=True, plot_point_cloud=False, n_points = 10000):
     instr = load_McStas_file(input_file)
     for comp in instr.component_list:
         comp = attempt_conversion(comp, instr)
 
-    world_matrices = compute_world_matrices(instr)
+    world_matrices = compute_world_matrices(instr, verbose)
     union_geometries = get_union_geometries(instr)
     sdfs = {}
     final_sdfs = {}
@@ -793,23 +791,25 @@ def convert_instrument_to_stl(input_file, out_file, res=64, dont_save_vacuum=Tru
     meshes = []
     for i, comp in enumerate(union_geometries):
         name = comp.name
-        print(name, i)
+        if verbose:
+            print(name, i)
         if comp.material_string == "Vacuum" and not dont_save_vacuum:
             continue
         if comp.component_name == "Union_mesh":
             mesh = trimesh.load_mesh(comp.filename.strip('"'))
             if comp.coordinate_scale is None:
                 comp.coordinate_scale = 1e-3
-            print(comp.coordinate_scale)
+            if verbose:
+                print(comp.coordinate_scale)
             mesh.apply_scale(float(comp.coordinate_scale))
             mesh.apply_transform(world_matrices[comp.name])
             mesh.export(f"{out_file}_{comp.name}.stl")
             meshes.append(mesh)
             continue
-        
         sdf_func = final_sdfs[name]
         bmin, bmax = compute_world_bbox(comp, world_matrices)
-        print(f"BBOX {name}: {bmin} → {bmax}")
+        if verbose:
+            print(f"BBOX {name}: {bmin} → {bmax}")
 
         verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=res)
         if verts is None:
@@ -825,5 +825,5 @@ def convert_instrument_to_stl(input_file, out_file, res=64, dont_save_vacuum=Tru
 if __name__ == "__main__":
     parser = parse()
     args = parser.parse_args()
-    convert_instrument_to_stl(args.input_file, args.out_file)
+    convert_instrument_to_stl(args.input_file, args.out_file, args.verbose)
 
