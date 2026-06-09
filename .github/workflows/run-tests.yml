@@ -12,18 +12,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: "3.14.4"
+          auto-update-conda: true
+          python-version: "3.14"
+          activate-environment: unviz
+          environment-file: unviz_env.yml
 
-      - name: Install dependencies
+      - name: Verify conda
+        shell: bash -l {0}
         run: |
-          pip install -r requirements.txt
+          conda info
+          conda list
 
       - name: Run script on all test files
         run: |
           for file in tests/*; do
             echo "Running on $file"
-            python src/mcstas-to-cad.py --input_file="tests/$file"
+            python3 src/mcstas-to-cad.py --input_file="tests/$file"
           done

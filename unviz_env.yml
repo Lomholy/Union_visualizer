@@ -1,0 +1,11 @@
+name: unviz
+channels:
+  - conda-forge
+dependencies:
+  - python=3.14
+  - numpy
+  - mcstas
+  - trimesh
+  - plotly
+  - scikit-image
+
