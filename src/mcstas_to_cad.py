@@ -13,6 +13,7 @@
 #  5. Export the entire environment as a .stl file
 
 import numpy as np
+import re
 import ast
 import trimesh
 import plotly.graph_objects as go
@@ -163,16 +164,45 @@ def eval_expr(expr, var_map=None):
 def parse_param(expr, var_map):
     try:
         return eval_expr(expr, var_map)
-    except Exception:
+    except Exception as e:
+        # print(e)
         return expr
 
 
-
-def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
+def create_var_map(instr: ms.McStas_instr):
     all_vars = list(instr.declare_list) + list(instr.user_var_list) + list(instr.parameters)
     var_map = {v.name: v.value for v in all_vars}
+    ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*;$")
 
-    for name in (a for a in dir(comp) if not a.startswith("__")):
+    lines = instr.initialize_section.splitlines()
+
+    for line in lines:
+        line = line.strip()
+
+        if not line or line.startswith("//"):
+            continue
+
+        match = ASSIGNMENT_RE.match(line)
+
+        if not match:
+            continue
+
+        name, expr = match.groups()
+
+        try:
+            value = eval_expr(expr, var_map)
+            var_map[name] = value
+        except Exception as e:
+            print(f"Failed to evaluate {line}: {e}")
+    return var_map
+
+
+def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr, var_map: dict):
+    # Parameters exist in the following spaces in each component:
+    # AT vector, the ROT vector,
+    # the component_parameters
+    # First loop over comp params:
+    for name in comp.parameter_names:
         value = getattr(comp, name)
         if isinstance(value, (str, int, float)):
             val = parse_param(value, var_map)
@@ -185,6 +215,14 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr):
                 converted.append(res)
 
             setattr(comp, name, type(value)(converted))
+    # Then go over AT and ROT vector
+    for i, val in enumerate(comp.AT_data):
+        value = parse_param(val, var_map)
+        comp.AT_data[i] = value
+    for i, val in enumerate(comp.ROTATED_data):
+        value = parse_param(val, var_map)
+        comp.ROTATED_data[i] = value
+
     return comp
 
 
@@ -761,8 +799,9 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
 
 def convert_instrument_to_stl(input_file, out_file, verbose=False, res=64, dont_save_vacuum=True, plot_point_cloud=False, n_points = 10000):
     instr = load_McStas_file(input_file)
+    var_map = create_var_map(instr)
     for comp in instr.component_list:
-        comp = attempt_conversion(comp, instr)
+        comp = attempt_conversion(comp, instr, var_map)
 
     world_matrices = compute_world_matrices(instr, verbose)
     union_geometries = get_union_geometries(instr)
