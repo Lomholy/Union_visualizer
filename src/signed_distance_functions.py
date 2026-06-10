@@ -55,6 +55,28 @@ def sdf_mesh(mesh, p):
     return sdf
 
 
+def sdf_halfspace(axis, threshold, keep_above=True):
+    """
+    axis:
+        0 -> X
+        1 -> Y
+        2 -> Z
+    """
+
+    def f(p):
+        coord = p[:, axis]
+
+        if keep_above:
+            # Keep coord > threshold
+            return threshold - coord
+
+        else:
+            # Keep coord < threshold
+            return coord - threshold
+
+    return f
+
+
 def make_sdf(comp, sdf_func, inv_world):
     mesh = None
 
@@ -74,6 +96,10 @@ def make_sdf(comp, sdf_func, inv_world):
 
 def sdf_difference(f, g):
     return lambda x: np.maximum(f(x), -g(x))
+
+
+def sdf_intersection(f, g):
+    return lambda x: np.maximum(f(x), g(x))
 
 
 def sdf_subtract_all(f_i, higher_priority_fs):
@@ -105,7 +131,7 @@ GEOMETRY_SDF = {
 }
 
 
-def build_sdfs(union_geometries, world_matrices):
+def build_sdfs(union_geometries, world_matrices, clip={}):
     sdfs = {}
     final_sdfs = {}
     for comp in union_geometries:
@@ -121,6 +147,25 @@ def build_sdfs(union_geometries, world_matrices):
             if x.priority > comp.priority and x.component_name != "Union_mesh"
         ]
         final_sdfs[comp.name] = sdf_subtract_all(sdfs[comp.name], higher_comps)
+
+    if clip.get("enabled", False):
+        axis_map = {
+            "X": 0,
+            "Y": 1,
+            "Z": 2,
+        }
+        axis = axis_map[clip["axis"]]
+        threshold = clip["position"]
+        keep_above = clip["mode"] == "Above"
+        clip_sdf = sdf_halfspace(
+            axis,
+            threshold,
+            keep_above,
+        )
+        for name in final_sdfs:
+            final_sdfs[name] = sdf_intersection(
+                final_sdfs[name],
+                clip_sdf,
+            )
+
     return final_sdfs, sdfs
-
-

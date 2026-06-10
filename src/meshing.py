@@ -1,6 +1,7 @@
 import trimesh
 import numpy as np
 from skimage.measure import marching_cubes
+from plot_union_cloud import sdf_normal
 
 
 def compute_local_bbox(comp):
@@ -130,6 +131,9 @@ def build_meshes(
             print(f"BBOX {name}: {bmin} → {bmax}")
 
         verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=res)
+        # Calculate the normal of each vert
+        vert_norms = sdf_normal(sdf_func, np.concatenate([verts, np.ones((len(verts), 1))], axis=1))[:, :3]
+        verts += vert_norms * 1e-4
         if verts is None:
             print("verts is none")
             continue
