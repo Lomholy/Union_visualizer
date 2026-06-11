@@ -112,7 +112,7 @@ def build_meshes(
         name = comp.name
         if verbose:
             print(name, i)
-        if comp.material_string == "Vacuum" and not dont_save_vacuum:
+        if comp.material_string == "Vacuum" and dont_save_vacuum:
             continue
         if comp.component_name == "Union_mesh":
             mesh = trimesh.load_mesh(comp.filename.strip('"'))
@@ -129,19 +129,21 @@ def build_meshes(
         bmin, bmax = compute_world_bbox(comp, world_matrices)
         if verbose:
             print(f"BBOX {name}: {bmin} → {bmax}")
-
-        verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=res)
-        # Calculate the normal of each vert
-        vert_norms = sdf_normal(sdf_func, np.concatenate([verts, np.ones((len(verts), 1))], axis=1))[:, :3]
-        verts += vert_norms * 1e-4
-        if verts is None:
-            print("verts is none")
-            continue
-        mesh = trimesh.Trimesh(vertices=verts, faces=faces)
-        if export:
-            mesh.export(f"{out_file}_{comp.name}.stl")
-        meshes.append(mesh)
-        meshes_dict[comp.name.lower()] = mesh
+        try:
+            verts, faces = sdf_to_mesh(sdf_func, bmin, bmax, resolution=res)
+            # Calculate the normal of each vert
+            vert_norms = sdf_normal(sdf_func, np.concatenate([verts, np.ones((len(verts), 1))], axis=1))[:, :3]
+            verts += vert_norms * 1e-4
+            if verts is None:
+                print("verts is none")
+                continue
+            mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+            if export:
+                mesh.export(f"{out_file}_{comp.name}.stl")
+            meshes.append(mesh)
+            meshes_dict[comp.name.lower()] = mesh
+        except Exception as e:
+            print(e)
     if export:
         comb_mesh = trimesh.util.concatenate(meshes)
         comb_mesh.export(f"{out_file}.stl")
