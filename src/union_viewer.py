@@ -1,5 +1,4 @@
 import sys
-import time
 import random
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from pygfx.utils.viewport import Viewport
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_meshes
-
+import argparse
 
 # ============================================================
 # Geometry generation
@@ -163,12 +162,14 @@ def fit_camera_to_scene(camera, controller, scene, scale=2.0):
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, input_file=None):
         super().__init__()
         self.setWindowTitle("Union Viewer")
         self.resize(1400, 900)
         self.colors = {}
-        self.input_file = None
+        self.input_file = input_file
+        if input_file:
+            self.start_input = True
         self.last_mtime = None
         self.current_group = None
 
@@ -402,7 +403,7 @@ class Viewer(QtWidgets.QMainWindow):
                 self.clip,
                 self.colors,
                 use_colors=self.color_checkbox.isChecked(),
-                res=self.res_val.currentData()
+                res=self.res_val.currentData(),
             )
             if self.current_group is not None:
                 self.scene.remove(self.current_group)
@@ -429,6 +430,14 @@ class Viewer(QtWidgets.QMainWindow):
                 self.last_mtime = new_mtime
                 print("File changed -> rebuilding")
                 self.reload_meshes()
+                if self.start_input:
+                    fit_camera_to_scene(
+                        self.camera,
+                        self.controller,
+                        self.current_group,
+                    )
+                    self.start_input = False
+
         except Exception as e:
             print(e)
 
@@ -469,11 +478,22 @@ class Viewer(QtWidgets.QMainWindow):
 # ============================================================
 
 
+def parse():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas"
+    )
+    return parser
+
+
 if __name__ == "__main__":
+    parser = parse()
+    args = parser.parse_args()
+    input_file = args.input_file
     app = QtWidgets.QApplication(sys.argv)
 
     app.setAttribute(QtCore.Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
 
-    viewer = Viewer()
+    viewer = Viewer(input_file=input_file)
     viewer.show()
     sys.exit(app.exec())
