@@ -1,0 +1,291 @@
+/********************************************************************************
+* 
+* McStas, neutron ray-tracing package
+*         Copyright (C) 1997-2008, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+* 
+* This file was written by McStasScript, which is a 
+* python based McStas instrument generator written by 
+* Mads Bertelsen in 2019 while employed at the 
+* European Spallation Source Data Management and 
+* Software Centre
+* 
+* Instrument: ODIN
+* 
+* %Identification
+* Written by: Python McStas Instrument Generator
+* Date: 13:23:57 on February 26, 2026
+* Origin: ESS DMSC
+* %INSTRUMENT_SITE: Generated_instruments
+* 
+* !!Please write a short instrument description (1 line) here!!
+* 
+* %Description
+* Please write a longer instrument description here!
+* 
+* 
+* %Parameters
+* l_min: [unit] Minimum simulated wavelength [AA]
+* l_max: [unit] Maximum simulated wavelength [AA]
+* n_pulses: [unit] Number of simulated pulses
+* wfm_delta: [unit] Distance between WFM choppers [m]
+* bp_frequency: [unit] Frequency of bandpass choppers [Hz]
+* bp1_phase_offset: [unit] Offset of bp1 phase [deg]
+* jitter_bp1: [unit] Jitter of bp1 chopper
+* bp2_phase_offset: [unit] Offset of bp2 phase [deg]
+* jitter_bp2: [unit] Jitter of bp2 chopper
+* t0_phase_offset: [unit] Offset of t0 phase [deg]
+* jit_t0_sec: [unit] Jitter of t0 chopper
+* run_from_mcpl: [unit] 
+* 
+* %Link 
+* 
+* %End 
+********************************************************************************/
+
+DEFINE INSTRUMENT ODIN (
+l_min = 1.0, // Minimum simulated wavelength [AA]
+l_max = 11.0, // Maximum simulated wavelength [AA]
+int n_pulses = 1, // Number of simulated pulses
+wfm_delta = 0.3, // Distance between WFM choppers [m]
+bp_frequency = 7, // Frequency of bandpass choppers [Hz]
+bp1_phase_offset = 0, // Offset of bp1 phase [deg]
+jitter_bp1 = 0, // Jitter of bp1 chopper
+bp2_phase_offset = 0, // Offset of bp2 phase [deg]
+jitter_bp2 = 0, // Jitter of bp2 chopper
+t0_phase_offset = 0, // Offset of t0 phase [deg]
+jit_t0_sec = 0, // Jitter of t0 chopper
+string sample = "sample_0", // enumeration over sample. 0= Iron gamma, 1 = Iron alpha, 2 = Titanium, 3 = Aluminum
+crack_height = 1e-4
+)
+
+DECLARE 
+%{
+double bp1_phase = 0; // Phase of bp1 chopper at t=0 center of gap
+double bp2_phase = 0; // Phase of bp2 chopper at t=0 center of gap
+double t0_phase = 0; // Phase of t0 chopper at t=0 center of gap
+%}
+
+INITIALIZE 
+%{
+// Start of initialize for generated ODIN
+bp1_phase = bp1_phase_offset;
+bp1_phase += -11.475;
+bp2_phase = bp2_phase_offset;
+bp2_phase += 185.195;
+t0_phase = t0_phase_offset;
+
+
+
+
+%}
+
+TRACE 
+// Automatically inserted to split instrument into parts
+COMPONENT src = Source_simple(
+lambda0 = 3,
+dlambda = 0.5,
+radius = 0.2,
+focus_xw = 0.3,
+focus_yh = 0.3,
+dist = 6
+)
+AT (0,0,57) RELATIVE ABSOLUTE
+
+
+COMPONENT optical_axis_backend = Arm()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_monitor_arm = Arm()
+AT (0, 0, 60.5) RELATIVE optical_axis_backend
+
+COMPONENT sample_PSD = PSD_monitor(
+ nx = 300, ny = 300,
+ filename = "image.dat", xwidth = 0.3,
+ yheight = 0.3, restore_neutron = 1)
+AT (0, 0, 0) RELATIVE sample_monitor_arm
+
+COMPONENT profile_x = PSDlin_monitor(
+ nbins = 300, filename = "profile_x.dat",
+ xwidth = 0.3, yheight = 0.3,
+ restore_neutron = 1)
+AT (0, 0, 0) RELATIVE sample_monitor_arm
+
+COMPONENT profile_y = PSDlin_monitor(
+ nbins = 300, filename = "profile_y.dat",
+ xwidth = 0.3, yheight = 0.3,
+ restore_neutron = 1, vertical = 1)
+AT (0, 0, 0) RELATIVE sample_monitor_arm
+
+COMPONENT wavelength = L_monitor(
+ nL = 1200, filename = "wavelength.dat",
+ xwidth = 0.3, yheight = 0.3,
+ Lmin = l_min, Lmax = l_max,
+ restore_neutron = 1)
+AT (0, 0, 0) RELATIVE sample_monitor_arm
+
+
+COMPONENT sample_position = Arm()
+AT (0, 0, 60.5) RELATIVE optical_axis_backend
+
+COMPONENT init = Union_init()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT al_pow = Powder_process(
+ reflections = "Al.laz")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT al_inc = Incoherent_process(
+ sigma = 0.0328, unit_cell_volume = 66.4)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT al = Union_make_material(
+ process_string = "al_inc,al_pow", my_absorption = 1.391566265060241)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_0_total = NCrystal_process(
+ cfg = "Fe_sg225_Iron-gamma.ncmat;temp=25C", interact_fraction = 0.2)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_0 = Union_make_material(
+ process_string = "sample_0_total", my_absorption = 20.920345527964606)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_1_total = NCrystal_process(
+ cfg = "Fe_sg229_Iron-alpha.ncmat;temp=25C", interact_fraction = 0.2)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_1 = Union_make_material(
+ process_string = "sample_1_total", my_absorption = 21.71272069744888)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_2_total = NCrystal_process(
+ cfg = "Ti_sg194.ncmat;temp=25C", interact_fraction = 0.2)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_2 = Union_make_material(
+ process_string = "sample_2_total", my_absorption = 34.488185072134854)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_3_total = NCrystal_process(
+ cfg = "Al_sg225.ncmat;temp=25C", interact_fraction = 0.2)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT sample_3 = Union_make_material(
+ process_string = "sample_3_total", my_absorption = 1.3913680371664054)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT gas_total = NCrystal_process(
+ cfg = "gasmix::H2/10bar", interact_fraction = 0.2)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT gas = Union_make_material(
+ process_string = "gas_total", my_absorption = 0.016435353870952598)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT metal_cyl_env = Union_cylinder(
+ material_string = "al", priority = 40,
+ radius = 0.017, yheight = 0.075)
+AT (0, 0, 0) RELATIVE sample_position
+
+/*
+COMPONENT test_box = Union_box(
+    priority = 80,
+    xwidth = 1e-4,
+    yheight = 1e-4,
+    zdepth = 1e-3,
+    material_string = "al"
+)
+AT (0,0,0) RELATIVE sample_position
+ROTATED (0,0,45) RELATIVE sample_position
+
+COMPONENT test_sphere = Union_sphere(
+    priority = 81,
+    radius = 1e-3,
+    material_string = "gas"
+)
+AT (0.017,0,0) RELATIVE sample_position
+
+
+COMPONENT test_cone = Union_cone(
+    priority = 90,
+    yheight = 1e-3,
+    radius_top = 1e-3,
+    radius_bottom = 2e-3,
+    material_string = "gas"
+)
+AT (-0.017,0,0) RELATIVE sample_position
+*/
+
+
+COMPONENT vacuum_cyl_env = Union_cylinder(
+ material_string = "Vacuum", priority = 41,
+ radius = 0.024/2, yheight = 0.055)
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT vacuum_cyl_narrow = Union_cylinder(
+ material_string = "Vacuum", priority = 42,
+ radius = 0.007, yheight = 0.080)
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT sample_cyl_metal = Union_cylinder(
+ material_string = sample, priority = 50,
+ radius = 0.0025, yheight = 0.034)
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT sample_cyl_gas = Union_cylinder(
+ material_string = "gas", priority = 51,
+ radius = 0.002, yheight = 0.033)
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT mask_cryst = Union_mesh(
+ filename = "./crack_cryst.stl", material_string = sample,
+ priority = 53, skip_convex_check = 1)
+AT (0,crack_height, 0) RELATIVE sample_position
+
+COMPONENT cryst = Union_mesh(
+ filename = "./crack_cryst.stl", material_string = "gas",
+ priority = 52, skip_convex_check = 1,
+ coordinate_scale = 0.0009997390124560307)
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT logger_space_zx = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.05,
+ D1_max = 0.05, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.05,
+ D2_max = 0.05, n2 = 300,
+ filename = "logger_zx.dat")
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0.0, 0.0, 0.0) RELATIVE sample_position
+
+COMPONENT logger_space_zy = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.05,
+ D1_max = 0.05, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.05,
+ D2_max = 0.05, n2 = 300,
+ filename = "logger_zy.dat")
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0.0, 0.0, 0.0) RELATIVE sample_position
+
+COMPONENT Sample_environment = Union_master(
+ verbal = 1)
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0.0, 0.0, 0.0) RELATIVE sample_position
+
+COMPONENT stop = Union_stop()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0.0, 0.0, 0.0) RELATIVE sample_position
+
+COMPONENT detector = Monitor_nD(
+ xwidth = 0.006, yheight = 0.035,
+ restore_neutron = 1, options = "square x bins=750 y bins=700",
+ filename = "detector.dat")
+AT (0, 0, 0.0175) RELATIVE sample_position
+
+FINALLY 
+%{
+// Start of finally for generated ODIN
+%}
+
+END
