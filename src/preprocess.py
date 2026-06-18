@@ -239,9 +239,6 @@ def compute_world_matrices(instr, verbose=False):
 
     def local_matrix(comp):
         M = np.eye(4)
-        print(comp.name)
-        print(comp.ROTATED_data)
-        print(type(comp.ROTATED_data))
         rx, ry, rz = np.array(comp.ROTATED_data) * np.pi / 180
         M[:3, :3] = rotation_matrix(rx, ry, rz)
         M[:3, 3] = comp.AT_data
