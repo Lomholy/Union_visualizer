@@ -1,6 +1,7 @@
 import sys
 import random
 from pathlib import Path
+import traceback
 
 import numpy as np
 
@@ -49,6 +50,7 @@ def generate_group(
 
     print("Defining group")
     group = gfx.Group()
+    group.geometry_meshes = {}
 
     for name, mesh in meshes.items():
         if name not in colors and use_colors:
@@ -70,6 +72,7 @@ def generate_group(
         )
 
         group.add(gfx_mesh)
+        group.geometry_meshes[name] = gfx_mesh
 
     return group
 
@@ -345,6 +348,11 @@ class Viewer(QtWidgets.QMainWindow):
         resolution_layout.addWidget(self.res_val)
         dock_layout.addLayout(resolution_layout)
 
+        self.reset_visibility_button = QtWidgets.QPushButton("Reset all hidden geometries")
+        self.reset_visibility_button.clicked.connect(self.reset_geometry_visibility)
+        visibility_layout = QtWidgets.QHBoxLayout()
+        visibility_layout.addWidget(self.reset_visibility_button)
+        dock_layout.addLayout(visibility_layout)
         # ----------------------------------------
         # Position value display
         # ----------------------------------------
@@ -355,6 +363,27 @@ class Viewer(QtWidgets.QMainWindow):
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
             dock,
         )
+
+        # ----------------------------------------------------
+        # Geometry visibility dock
+        # ----------------------------------------------------
+
+        self.geometry_checkboxes = {}
+        self.geometry_visibility = {}
+
+        self.geometry_dock = QtWidgets.QDockWidget("Visible Geometries", self)
+        self.geometry_widget = QtWidgets.QWidget()
+        self.geometry_layout = QtWidgets.QVBoxLayout(self.geometry_widget)
+
+        self.geometry_layout.addStretch()
+
+        self.geometry_dock.setWidget(self.geometry_widget)
+
+        self.addDockWidget(
+            QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
+            self.geometry_dock,
+        )
+
 
         # ----------------------------------------------------
         # Clipping signals
@@ -389,6 +418,51 @@ class Viewer(QtWidgets.QMainWindow):
             self.current_group,
         )
 
+    def on_geometry_visibility_changed(self, name, mesh, checked):
+        self.geometry_visibility[name] = checked
+        mesh.visible = checked
+
+    def reset_geometry_visibility(self):
+        self.geometry_visibility.clear()
+        if self.current_group is None:
+            return
+        for name, mesh in self.current_group.geometry_meshes.items():
+            mesh.visible = True
+            if name in self.geometry_checkboxes:
+                self.geometry_checkboxes[name].blockSignals(True)
+                self.geometry_checkboxes[name].setChecked(True)
+                self.geometry_checkboxes[name].blockSignals(False)
+
+    def rebuild_geometry_panel(self):
+        while self.geometry_layout.count() > 1:
+            item = self.geometry_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self.geometry_checkboxes.clear()
+
+        if self.current_group is None:
+            return
+
+        for name, mesh in self.current_group.geometry_meshes.items():
+            visible = self.geometry_visibility.get(name, True)
+            mesh.visible = visible
+
+            cb = QtWidgets.QCheckBox(name)
+            cb.setChecked(visible)
+
+            cb.toggled.connect(
+                lambda checked, n=name, m=mesh: self.on_geometry_visibility_changed(
+                    n, m, checked
+                )
+            )
+            self.geometry_layout.insertWidget(
+                self.geometry_layout.count() - 1,
+                cb,
+            )
+
+            self.geometry_checkboxes[name] = cb
+
     # ========================================================
     # Reload geometry
     # ========================================================
@@ -405,6 +479,8 @@ class Viewer(QtWidgets.QMainWindow):
                 use_colors=self.color_checkbox.isChecked(),
                 res=self.res_val.currentData(),
             )
+            for name, mesh in new_group.geometry_meshes.items():
+                mesh.visible = self.geometry_visibility.get(name, True)
             if self.current_group is not None:
                 self.scene.remove(self.current_group)
 
@@ -412,9 +488,11 @@ class Viewer(QtWidgets.QMainWindow):
 
             self.scene.add(self.current_group)
 
+            self.rebuild_geometry_panel()
             print("Reload complete")
         except Exception as e:
             print("Mesh rebuild failed:")
+            traceback.print_exc()
             print(e)
 
     # ========================================================

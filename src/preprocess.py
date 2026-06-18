@@ -117,6 +117,8 @@ def eval_expr(expr, var_map=None):
 
 
 def parse_param(expr, var_map):
+    if type(expr) is str:
+        expr = "".join(expr.split())
     try:
         return eval_expr(expr, var_map)
     except Exception:
@@ -237,6 +239,9 @@ def compute_world_matrices(instr, verbose=False):
 
     def local_matrix(comp):
         M = np.eye(4)
+        print(comp.name)
+        print(comp.ROTATED_data)
+        print(type(comp.ROTATED_data))
         rx, ry, rz = np.array(comp.ROTATED_data) * np.pi / 180
         M[:3, :3] = rotation_matrix(rx, ry, rz)
         M[:3, 3] = comp.AT_data
