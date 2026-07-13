@@ -41,9 +41,9 @@ def generate_group(
     meshes = build_meshes(
         union_geometries,
         world_matrices,
+        sdfs,
         final_sdfs,
         res,
-        dont_save_vacuum=True,
         export=False,
         verbose=False,
     )

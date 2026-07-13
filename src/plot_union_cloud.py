@@ -116,7 +116,6 @@ def sample_union_mesh(comp: mshelp.Component, n_points):
 
 def sdf_normal(sdf_func, pts, eps=1e-5):
     grads = np.zeros((pts.shape[0], 4))
-    dp = np.zeros_like(pts)
 
     for i in range(3):
         dp = np.zeros_like(pts)
@@ -125,7 +124,7 @@ def sdf_normal(sdf_func, pts, eps=1e-5):
         f_plus = sdf_func(pts + dp)
         f_minus = sdf_func(pts - dp)
 
-        grads[:, i] = (f_plus - f_minus) / (2 * eps)
+        grads[:, i] = (f_plus - f_minus)# / (2 * eps)
 
     # normalize per point
     norms = np.linalg.norm(grads, axis=1, keepdims=True) + 1e-12
@@ -205,10 +204,10 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
 def plot_multiple_clouds(cloud_list, geoms, size=3):
     fig = go.Figure()
 
-    for i in range(len(cloud_list)):
+    print(cloud_list)
+    for name, pts in cloud_list.items():
         # if geoms[i].component_name != "Union_cone":
         #     continue
-        pts = cloud_list[i]
         fig.add_trace(
             go.Scatter3d(
                 x=pts[:, 0],
@@ -216,7 +215,7 @@ def plot_multiple_clouds(cloud_list, geoms, size=3):
                 z=pts[:, 2],
                 mode="markers",
                 marker=dict(size=size),
-                name=f"Cloud {i}",
+                name=f"Cloud {name}",
                 opacity=0.7,
             )
         )
@@ -270,7 +269,7 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
         ] = point_world
         final_points_tracker[i] += point_world.shape[0]
         print(f"Processed geometry {i}")
-    clouds = []
+    clouds = {}
     for i in range(K):
         # Do A final wipe, to remove any points not on the edge of the final sdf
         sdf_fin = final_sdfs[geometries[i].name]
@@ -278,9 +277,20 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
         vals = sdf_fin(p)
         mask = np.where(abs(vals) < 1e-3, True, False)
         cloud = p[mask]
-        clouds.append(cloud)
+        clouds[geometries[i].name] = cloud
 
     return clouds
+
+def generate_points(union_geometries, sdfs, final_sdfs, world_matrices, n_points):
+    point_clouds = sample_sdf_surfaces(
+        union_geometries, final_sdfs, world_matrices, n_points
+    )
+    point_clouds = prioritise_points(
+        point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
+    )
+    return point_clouds
+
+
 
 
 def plot_point_clouds(union_geometries, sdfs, final_sdfs, world_matrices, n_points):

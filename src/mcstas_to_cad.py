@@ -11,7 +11,6 @@ from signed_distance_functions import build_sdfs
 from plot_union_cloud import plot_point_clouds
 from meshing import build_meshes
 
-
 # ==============================================================================
 # ============================ PARSE ARGUMENTS =================================
 # ==============================================================================
@@ -32,7 +31,6 @@ def parse():
         default=10_000,
     )
     parser.add_argument("--plot_point_cloud", action="store_true", default=False)
-    parser.add_argument("--dont_save_vacuum", action="store_true", default=False)
     parser.add_argument("--verbose", action="store_true", default=False)
     return parser
 
@@ -49,7 +47,6 @@ if __name__ == "__main__":
     out_file = args.out_file
     plot_point_cloud = args.plot_point_cloud
     n_points = args.n_points
-    dont_save_vacuum = args.dont_save_vacuum
     verbose = args.verbose
     res = args.resolution
 
@@ -57,13 +54,14 @@ if __name__ == "__main__":
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices)
     if plot_point_cloud:
         plot_point_clouds(union_geometries, sdfs, final_sdfs, world_matrices, n_points)
+
     build_meshes(
         union_geometries,
         world_matrices,
+        sdfs,
         final_sdfs,
         res,
         out_file = out_file,
-        dont_save_vacuum = dont_save_vacuum,
-        export=True,
+        export=False,
         verbose=False,
     )

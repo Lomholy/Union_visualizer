@@ -228,14 +228,14 @@ def compute_world_matrices(instr, verbose=False):
         if ROT_rel.startswith("RELATIVE"):
             ROT_rel = ROT_rel.split(" ")[1]
 
-        if AT_rel.lower().startswith("previous"):
+        if AT_rel.startswith("PREVIOUS"):
             idx = instr.component_list.index(comp)
             AT_rel = instr.component_list[idx - 1].name
 
-        if ROT_rel.lower() != "absolute":
-            return ROT_rel.lower()
+        if ROT_rel != "ABSOLUTE":
+            return ROT_rel
 
-        return AT_rel.lower()
+        return AT_rel
 
     def local_matrix(comp):
         M = np.eye(4)
@@ -254,7 +254,7 @@ def compute_world_matrices(instr, verbose=False):
             rel = find_relative(comp, instr)
 
             # Absolute → no dependency
-            if rel == "absolute":
+            if rel == "ABSOLUTE":
                 world[comp.name] = local_matrix(comp)
                 remaining.remove(comp)
                 progressed = True
