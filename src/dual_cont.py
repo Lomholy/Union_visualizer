@@ -1,17 +1,30 @@
 from plot_union_cloud import sdf_normal
+import trimesh
 from dataclasses import dataclass
 import numpy as np
-import trimesh
 from plot_union_cloud import generate_points
 import plotly.graph_objects as go
 
 
 @dataclass
 class OctreeNode:
+    """
+    A single node in the octree.
+
+    Each node represents an axis-aligned bounding box from bmin to bmax.
+    If the node has children, it is an internal octree node.
+    If children is empty, the node is a leaf cell.
+
+    The dual contouring data is stored only for leaf nodes that contain
+    a sign change of the SDF.
+    """
+
     bmin: np.ndarray
     bmax: np.ndarray
     depth: int
     children: list
+
+    # Optional dual contouring / Hermite data.
     corner_signs: np.ndarray | None = None
     hermite_points: list | None = None
     hermite_normals: list | None = None
@@ -25,12 +38,49 @@ def build_octree_from_points(
     max_depth=6,
     min_points=20,
 ):
+    """
+    Build an adaptive octree around a point cloud.
+
+    The tree is refined only in regions that contain enough points.
+    This gives more octree resolution near sampled geometry and avoids
+    subdividing empty regions.
+
+    Parameters
+    ----------
+    points:
+        Input point cloud. Only the first three columns are used as xyz.
+    bbox_min, bbox_max:
+        Root bounding box of the octree.
+    max_depth:
+        Maximum subdivision depth.
+    min_points:
+        Minimum number of points needed before a node is subdivided.
+
+    Returns
+    -------
+    OctreeNode | None
+        Root node of the octree.
+    """
+
+    # Keep only xyz coordinates in case the input contains normals,
+    # colors, SDF values, or other extra per-point data.
     points = points[:, :3]
 
     def recurse(points, bmin, bmax, depth):
+        """
+        Recursively subdivide a bounding box into up to eight children.
+
+        A node becomes a leaf if:
+        - it contains no points,
+        - it reaches max_depth,
+        - or it contains too few points to justify further refinement.
+        """
+
+        # Empty cells are ignored completely.
         if len(points) == 0:
             return None
 
+        # Create an octree node for the current bounding box.
         node = OctreeNode(
             bmin=np.asarray(bmin),
             bmax=np.asarray(bmax),
@@ -38,17 +88,23 @@ def build_octree_from_points(
             children=[],
         )
 
+        # Stop refining once the maximum tree depth is reached.
         if depth >= max_depth:
             return node
 
+        # Stop refining if the current cell contains only a small number
+        # of points. This makes the octree adaptive to point density.
         if len(points) <= min_points:
             return node
 
+        # Split the current box into eight children around its center.
         center = 0.5 * (bmin + bmax)
 
+        # Iterate over the 2 x 2 x 2 octants.
         for ix in range(2):
             for iy in range(2):
                 for iz in range(2):
+                    # Lower bound of the child cell.
                     child_min = np.array(
                         [
                             bmin[0] if ix == 0 else center[0],
@@ -57,6 +113,7 @@ def build_octree_from_points(
                         ]
                     )
 
+                    # Upper bound of the child cell.
                     child_max = np.array(
                         [
                             center[0] if ix == 0 else bmax[0],
@@ -65,6 +122,13 @@ def build_octree_from_points(
                         ]
                     )
 
+                    # Select all points inside this child bounding box.
+                    #
+                    # Note:
+                    # Using <= on both child sides can assign points on
+                    # shared boundaries to more than one child. This is
+                    # usually harmless for visualization, but for strict
+                    # octree partitioning one may want half-open intervals.
                     mask = np.all(
                         (points[:, :3] >= child_min) & (points[:, :3] <= child_max),
                         axis=1,
@@ -72,6 +136,7 @@ def build_octree_from_points(
 
                     child_points = points[mask]
 
+                    # Recursively build the child subtree.
                     child = recurse(
                         child_points,
                         child_min,
@@ -79,11 +144,13 @@ def build_octree_from_points(
                         depth + 1,
                     )
 
+                    # Only store non-empty children.
                     if child is not None:
                         node.children.append(child)
 
         return node
 
+    # Start recursion from the root bounding box.
     return recurse(
         points,
         np.asarray(bbox_min),
@@ -92,17 +159,159 @@ def build_octree_from_points(
     )
 
 
+def build_uniform_octree_from_points(
+    points,
+    bbox_min,
+    bbox_max,
+    max_depth=6,
+    min_points=20,
+):
+    """
+    Build a uniform octree over the given bounding box.
+
+    Unlike the previous adaptive version, this function does not refine
+    based on point density. Instead, every cell is subdivided until
+    max_depth is reached.
+
+    This gives a regular grid of cells with resolution:
+
+        n = 2 ** max_depth
+
+    along each axis, for a total of:
+
+        n^3 = 8 ** max_depth
+
+    leaf cells.
+
+    Parameters
+    ----------
+    points:
+        Input point cloud. This argument is kept for compatibility with
+        the old function signature, but is not used for subdivision.
+    bbox_min, bbox_max:
+        Root bounding box of the octree.
+    max_depth:
+        Uniform subdivision depth.
+    min_points:
+        Ignored. Kept only so existing calls do not break.
+
+    Returns
+    -------
+    OctreeNode
+        Root node of the uniformly subdivided octree.
+    """
+
+    bbox_min = np.asarray(bbox_min, dtype=float)
+    bbox_max = np.asarray(bbox_max, dtype=float)
+
+    def recurse(bmin, bmax, depth, grid_index=None):
+        """
+        Recursively subdivide every cell until max_depth.
+
+        Because this is a uniform octree, every node at depth < max_depth
+        gets exactly eight children.
+        """
+
+        node = OctreeNode(
+            bmin=np.asarray(bmin, dtype=float),
+            bmax=np.asarray(bmax, dtype=float),
+            depth=depth,
+            children=[],
+        )
+
+        # Optional but very useful later:
+        # store the integer grid index of this cell.
+        #
+        # At depth == max_depth, grid_index identifies the leaf cell in a
+        # regular grid with dimensions:
+        #
+        #     2**max_depth x 2**max_depth x 2**max_depth
+        #
+        # This makes connectivity generation much easier.
+        if grid_index is not None:
+            node.grid_index = grid_index
+
+        # Stop once all cells have reached the same target depth.
+        if depth >= max_depth:
+            return node
+
+        center = 0.5 * (bmin + bmax)
+
+        # At each subdivision, the grid index is doubled and offset by
+        # the local child octant index.
+        #
+        # Example:
+        # parent index (i, j, k)
+        # child index = (2*i + ix, 2*j + iy, 2*k + iz)
+        for ix in range(2):
+            for iy in range(2):
+                for iz in range(2):
+                    child_min = np.array(
+                        [
+                            bmin[0] if ix == 0 else center[0],
+                            bmin[1] if iy == 0 else center[1],
+                            bmin[2] if iz == 0 else center[2],
+                        ],
+                        dtype=float,
+                    )
+
+                    child_max = np.array(
+                        [
+                            center[0] if ix == 0 else bmax[0],
+                            center[1] if iy == 0 else bmax[1],
+                            center[2] if iz == 0 else bmax[2],
+                        ],
+                        dtype=float,
+                    )
+
+                    if grid_index is None:
+                        child_grid_index = (ix, iy, iz)
+                    else:
+                        child_grid_index = (
+                            2 * grid_index[0] + ix,
+                            2 * grid_index[1] + iy,
+                            2 * grid_index[2] + iz,
+                        )
+
+                    child = recurse(
+                        child_min,
+                        child_max,
+                        depth + 1,
+                        child_grid_index,
+                    )
+
+                    node.children.append(child)
+
+        return node
+
+    return recurse(
+        bbox_min,
+        bbox_max,
+        depth=0,
+        grid_index=None,
+    )
+
+
 def get_octree_leaves(node):
+    """
+    Collect all leaf nodes in the octree.
+
+    A leaf node is any node with no children.
+    These are the cells where dual contouring vertices will be computed.
+    """
+
     leaves = []
 
     def recurse(n):
         if n is None:
             return
 
+        # No children means this node is a leaf cell.
         if len(n.children) == 0:
             leaves.append(n)
             return
 
+        # Otherwise continue descending through the tree.
         for child in n.children:
             recurse(child)
 
@@ -111,6 +320,18 @@ def get_octree_leaves(node):
     return leaves
 
 
+# Edge list for a hexahedral cell.
+#
+# The corners are assumed to be ordered as:
+#
+#   7 ----- 6
+#  /|      /|
+# 4 ----- 5 |
+# | 3 ---|- 2
+# |/     |/
+# 0 ----- 1
+#
+# Edges are pairs of corner indices.
 EDGE_VERTS = [
     (0, 1),
     (1, 2),
@@ -128,9 +349,30 @@ EDGE_VERTS = [
 
 
 def calc_vert(leaf, sdf):
+    """
+    Compute the dual contouring vertex for a single octree leaf cell.
+
+    The method is:
+
+    1. Evaluate the SDF at the eight cell corners.
+    2. If all corners have the same sign, the surface does not cross
+       this cell, so no vertex is created.
+    3. For every edge with a sign change, find an approximate zero
+       crossing of the SDF.
+    4. Estimate the SDF normal at each crossing. These point-normal pairs
+       are the Hermite data.
+    5. Solve a regularized least-squares system, similar to a QEF solve,
+       to place one representative dual contouring vertex inside the cell.
+    """
+
+    # Extract the axis-aligned bounds of the current leaf cell.
     x0, y0, z0 = leaf.bmin
     x1, y1, z1 = leaf.bmax
 
+    # Coordinates of the eight cell corners.
+    #
+    # The fourth coordinate is set to 1, presumably because the SDF expects
+    # homogeneous coordinates or points compatible with 4D transform logic.
     corners = np.array(
         [
             [x0, y0, z0, 1],
@@ -143,32 +385,56 @@ def calc_vert(leaf, sdf):
             [x0, y1, z1, 1],
         ]
     )
-    values = sdf(corners)
-    if np.all(values > 0) or np.all(values < 0):
-        return None  # No sign change
 
+    # Evaluate the signed distance field at the cell corners.
+    values = sdf(corners)
+
+    # If all corners lie on the same side of the implicit surface,
+    # there is no detected surface crossing in this cell.
+    if np.all(values > 0) or np.all(values < 0):
+        return None
+
+    # Hermite data consists of:
+    # - surface intersection points on cell edges,
+    # - estimated surface normals at those points.
     hermite_points = []
     hermite_normals = []
+
+    # Small offset used later when constructing p.
+    # Be careful: adding eps * pa biases the point slightly in the pa direction.
     eps = 1e-8
 
+    # Check every cell edge for an SDF sign change.
     for a, b in EDGE_VERTS:
         va = values[a]
         vb = values[b]
 
+        # If the edge endpoints have the same sign, the implicit surface
+        # does not cross this edge.
         if va * vb >= 0:
             continue
 
-        # t = va / (va - vb)
+        # The commented-out expression below would compute the zero crossing
+        # using linear interpolation:
+        #
+        #     t = va / (va - vb)
+        #     p = corners[a] + t * (corners[b] - corners[a])
+        #
+        # Instead, this code uses a few bisection iterations, which can be
+        # more robust if the SDF is nonlinear along the edge.
 
-        # p = corners[a] + t * (corners[b] - corners[a])
         pa = corners[a].copy()
         pb = corners[b].copy()
 
-        for _ in range(4):
+        # Refine the edge intersection using bisection.
+        #
+        # Four iterations gives a coarse approximation. Increasing this
+        # number gives more accurate Hermite points at modest cost.
+        for _ in range(8):
             pm = 0.5 * (pa + pb)
-
             vm = sdf(pm[None])[0]
 
+            # Keep the sub-interval that contains the sign change.
             if va * vm <= 0:
                 pb = pm
                 vb = vm
@@ -176,34 +442,76 @@ def calc_vert(leaf, sdf):
                 pa = pm
                 va = vm
 
+        # Use the midpoint of the final interval as the approximate
+        # surface intersection point.
         p = 0.5 * (pa + pb) + eps * pa
+
+        # Reshape to match the expected input shape for sdf_normal.
         p = p[:, None]
+
+        # Compute/estimate the SDF normal at the intersection point.
+        # For dual contouring, these normals define tangent planes used
+        # by the QEF minimization.
         n = sdf_normal(sdf, p.T)
 
+        # Store only xyz, ignoring the homogeneous coordinate.
         hermite_points.append(np.squeeze(p)[:3])
         hermite_normals.append(np.squeeze(n)[:3])
 
+    # If we got here because the corners had mixed signs, at least one edge
+    # crossing should normally have been found. If not, something is
+    # inconsistent between the signs and edge checks.
     if len(hermite_points) == 0:
         print("ERROR: No hermite points. Exiting")
         exit()
         return
-    # Append a point in the middle that pulls the vert towards the center
-    # BIAS_STRENGTH = 1e-6
-    # mass_point = np.mean(hermite_points, axis=0)
-    # hermite_normals.append([BIAS_STRENGTH, 0, 0])
-    # hermite_points.append(mass_point)
-    # hermite_normals.append([0, BIAS_STRENGTH, 0])
-    # hermite_points.append(mass_point)
-    # hermite_normals.append([0, 0, BIAS_STRENGTH])
-    # hermite_points.append(mass_point)
 
+    # Optional biasing strategy:
+    #
+    # These commented-out lines add weak constraints pulling the vertex
+    # towards the average Hermite point. This can help stabilize poorly
+    # conditioned QEFs, but the code below instead regularizes towards the
+    # cell center.
+    #
+    BIAS_STRENGTH = 1e-6
+    mass_point = np.mean(hermite_points, axis=0)
+    hermite_normals.append([BIAS_STRENGTH, 0, 0])
+    hermite_points.append(mass_point)
+    hermite_normals.append([0, BIAS_STRENGTH, 0])
+    hermite_points.append(mass_point)
+    hermite_normals.append([0, 0, BIAS_STRENGTH])
+    hermite_points.append(mass_point)
+
+    # Build the linear system for the QEF-like objective:
+    #
+    #     minimize sum_i (n_i dot x - n_i dot p_i)^2
+    #
+    # Each Hermite point p_i with normal n_i defines a tangent plane:
+    #
+    #     n_i dot x = n_i dot p_i
+    #
+    # The solution x is the point that best fits all tangent planes.
     A = np.squeeze(np.asarray(hermite_normals))
     b = np.asarray([np.dot(n, p) for p, n in zip(hermite_points, hermite_normals)])
 
+    # Cell center used as a weak regularization target.
+    # This helps avoid unstable vertices when the QEF is underdetermined
+    # or ill-conditioned.
     center = 0.5 * (leaf.bmin + leaf.bmax)
 
+    # Regularization strength.
+    # Larger values pull the vertex more strongly towards the cell center.
     lam = 1e-3
 
+    # Augment the least-squares system with:
+    #
+    #     sqrt(lam) * I * x = sqrt(lam) * center
+    #
+    # This is equivalent to adding:
+    #
+    #     lam * ||x - center||^2
+    #
+    # to the QEF objective.
     A_aug = np.vstack(
         [
             A,
@@ -218,26 +526,38 @@ def calc_vert(leaf, sdf):
         ]
     )
 
+    # Solve the regularized least-squares problem.
     x, *_ = np.linalg.lstsq(
         A_aug,
         b_aug,
         rcond=None,
     )
 
+    # Clamp the dual contouring vertex to the current cell.
+    #
+    # Standard dual contouring implementations often enforce this to avoid
+    # vertices escaping far outside the cell when the QEF is ill-conditioned.
     x = np.maximum(x, leaf.bmin)
     x = np.minimum(x, leaf.bmax)
 
-    leaf.corner_values = values
+    # Store data on the leaf for later visualization or meshing.
+    leaf.corner_signs = values
     leaf.hermite_points = hermite_points
     leaf.hermite_normals = hermite_normals
-    leaf.dc_vertex = x
+    leaf.vertex = x
 
 
 def compute_vertices(node, sdf):
+    """
+    Traverse the octree and compute dual contouring vertices for all leaves.
+    """
+
+    # Leaf cell: compute its dual contouring vertex if it contains the surface.
     if len(node.children) == 0:
         calc_vert(node, sdf)
         return
 
+    # Internal node: recurse into children.
     for child in node.children:
         compute_vertices(
             child,
@@ -245,13 +565,319 @@ def compute_vertices(node, sdf):
         )
 
 
+def evaluate_uniform_grid_sdf(bbox_min, bbox_max, max_depth, sdf):
+    """
+    Evaluate the SDF at all vertices of the uniform grid.
+
+    If the octree has depth d, then there are:
+
+        n = 2**d
+
+    cells along each axis, and therefore:
+
+        n + 1
+
+    grid vertices along each axis.
+
+    Returns
+    -------
+    grid_values:
+        Array of shape (n + 1, n + 1, n + 1) containing SDF values.
+    """
+
+    bbox_min = np.asarray(bbox_min, dtype=float)
+    bbox_max = np.asarray(bbox_max, dtype=float)
+
+    n = 2**max_depth
+
+    xs = np.linspace(bbox_min[0], bbox_max[0], n + 1)
+    ys = np.linspace(bbox_min[1], bbox_max[1], n + 1)
+    zs = np.linspace(bbox_min[2], bbox_max[2], n + 1)
+
+    # Build all grid vertex coordinates.
+    X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
+
+    pts = np.column_stack(
+        [
+            X.ravel(),
+            Y.ravel(),
+            Z.ravel(),
+            np.ones(X.size),
+        ]
+    )
+
+    values = sdf(pts)
+
+    return values.reshape((n + 1, n + 1, n + 1))
+
+
+def build_dual_contouring_faces_uniform(leaves, bbox_min, bbox_max, max_depth, sdf):
+    """
+    Build triangle faces for a uniform-grid dual contouring mesh.
+
+    This assumes:
+    - the octree is uniform,
+    - every leaf has a valid integer grid_index,
+    - active leaves have leaf.vertex set,
+    - active leaves have leaf.vertex_index assigned.
+
+    Connectivity rule
+    -----------------
+    For every primal grid edge with an SDF sign change, find the four
+    grid cells surrounding that edge. Each of those cells has one dual
+    contouring vertex. These four vertices form a quad, which is split
+    into two triangles.
+
+    Returns
+    -------
+    faces:
+        List of triangle index triples.
+    """
+
+    n = 2**max_depth
+
+    # Evaluate SDF at all primal grid vertices.
+    grid_values = evaluate_uniform_grid_sdf(
+        bbox_min,
+        bbox_max,
+        max_depth,
+        sdf,
+    )
+
+    # Map integer cell coordinates to octree leaves.
+    #
+    # For a uniform grid, each leaf should have:
+    #
+    #     leaf.grid_index = (i, j, k)
+    #
+    # where i, j, k are cell indices in [0, n - 1].
+    leaf_grid = {}
+
+    for leaf in leaves:
+        if hasattr(leaf, "grid_index"):
+            leaf_grid[leaf.grid_index] = leaf
+
+    faces = []
+
+    def has_sign_change(a, b):
+        """
+        Return True if an edge crosses the zero level set.
+        """
+        return a * b < 0
+
+    def leaf_has_vertex(cell_index):
+        """
+        Check whether a cell exists and has a dual-contouring vertex.
+        """
+        leaf = leaf_grid.get(cell_index)
+
+        if leaf is None:
+            return False
+
+        if leaf.vertex is None:
+            return False
+
+        if not hasattr(leaf, "vertex_index"):
+            return False
+
+        return True
+
+    def add_quad(cell_indices, flip=False):
+        """
+        Add a quad formed by four cell dual vertices.
+
+        The quad is split into two triangles.
+
+        Parameters
+        ----------
+        cell_indices:
+            Four cell indices ordered around a primal grid edge.
+        flip:
+            If True, reverse triangle winding.
+        """
+
+        # Only create the face if all four surrounding cells have vertices.
+        if not all(leaf_has_vertex(idx) for idx in cell_indices):
+            return
+
+        ids = [leaf_grid[idx].vertex_index for idx in cell_indices]
+
+        if not flip:
+            faces.append([ids[0], ids[1], ids[2]])
+            faces.append([ids[0], ids[2], ids[3]])
+        else:
+            faces.append([ids[0], ids[2], ids[1]])
+            faces.append([ids[0], ids[3], ids[2]])
+
+    # ------------------------------------------------------------------
+    # X-directed primal edges
+    # ------------------------------------------------------------------
+    #
+    # Edge from:
+    #
+    #     (i, j, k) to (i + 1, j, k)
+    #
+    # This edge is surrounded by four cells in the yz-plane:
+    #
+    #     (i, j - 1, k - 1)
+    #     (i, j,     k - 1)
+    #     (i, j,     k)
+    #     (i, j - 1, k)
+    #
+    # j and k must be interior grid vertex indices for four surrounding
+    # cells to exist.
+    for i in range(n):
+        for j in range(1, n):
+            for k in range(1, n):
+                v0 = grid_values[i, j, k]
+                v1 = grid_values[i + 1, j, k]
+
+                if not has_sign_change(v0, v1):
+                    continue
+
+                cell_indices = [
+                    (i, j - 1, k - 1),
+                    (i, j, k - 1),
+                    (i, j, k),
+                    (i, j - 1, k),
+                ]
+
+                # Flip based on the sign direction along the edge.
+                add_quad(cell_indices, flip=(v0 > 0))
+
+    # ------------------------------------------------------------------
+    # Y-directed primal edges
+    # ------------------------------------------------------------------
+    #
+    # Edge from:
+    #
+    #     (i, j, k) to (i, j + 1, k)
+    #
+    # This edge is surrounded by four cells in the xz-plane.
+    for i in range(1, n):
+        for j in range(n):
+            for k in range(1, n):
+                v0 = grid_values[i, j, k]
+                v1 = grid_values[i, j + 1, k]
+
+                if not has_sign_change(v0, v1):
+                    continue
+
+                cell_indices = [
+                    (i - 1, j, k - 1),
+                    (i, j, k - 1),
+                    (i, j, k),
+                    (i - 1, j, k),
+                ]
+
+                add_quad(cell_indices, flip=(v0 > 0))
+
+    # ------------------------------------------------------------------
+    # Z-directed primal edges
+    # ------------------------------------------------------------------
+    #
+    # Edge from:
+    #
+    #     (i, j, k) to (i, j, k + 1)
+    #
+    # This edge is surrounded by four cells in the xy-plane.
+    for i in range(1, n):
+        for j in range(1, n):
+            for k in range(n):
+                v0 = grid_values[i, j, k]
+                v1 = grid_values[i, j, k + 1]
+
+                if not has_sign_change(v0, v1):
+                    continue
+
+                cell_indices = [
+                    (i - 1, j - 1, k),
+                    (i, j - 1, k),
+                    (i, j, k),
+                    (i - 1, j, k),
+                ]
+
+                add_quad(cell_indices, flip=(v0 > 0))
+
+    return faces
+
+
+def orient_faces_with_sdf(vertices, faces, sdf):
+    """
+    Orient triangle faces consistently using the SDF normal.
+
+    For each triangle, we compare:
+    - the triangle normal from the current winding,
+    - the SDF normal at the triangle centroid.
+
+    If they point in opposite directions, the triangle winding is flipped.
+
+    Assumption
+    ----------
+    sdf_normal points toward increasing SDF values.
+
+    If your convention is:
+        outside = positive SDF
+    then this produces outward-facing triangles.
+
+    If your convention is opposite, change the test from dot < 0 to dot > 0.
+    """
+
+    oriented_faces = []
+
+    for face in faces:
+        i0, i1, i2 = face
+
+        p0 = vertices[i0]
+        p1 = vertices[i1]
+        p2 = vertices[i2]
+
+        # Triangle normal from current winding.
+        tri_normal = np.cross(p1 - p0, p2 - p0)
+
+        norm = np.linalg.norm(tri_normal)
+
+        tri_normal = tri_normal / norm
+
+        c = (p0 + p1 + p2) / 3.0
+
+        eps = 1e-6
+
+        s_plus = sdf(np.array([[*(c + eps * tri_normal), 1.0]]))[0]
+
+        s_minus = sdf(np.array([[*(c - eps * tri_normal), 1.0]]))[0]
+
+        if s_plus < s_minus:
+            oriented_faces.append([i0, i2, i1])
+        else:
+            oriented_faces.append([i0, i1, i2])
+
+    return np.asarray(oriented_faces, dtype=int)
+
+
 def plot_octree(leaves, root, clouds=None):
+    """
+    Visualize the octree leaves, input point clouds, and computed dual
+    contouring vertices using Plotly.
+
+    Parameters
+    ----------
+    leaves:
+        List of octree leaf nodes.
+    root:
+        Root node of the octree. Currently unused in the plotting code,
+        but kept as an argument for possible future use.
+    clouds:
+        Optional list of point clouds to draw together with the octree.
+    """
+
     fig = go.Figure()
 
     # -------------------------
     # Point clouds
     # -------------------------
     #
+    # Draw the sampled input geometry used to build the octree.
     if clouds is not None:
         for i, pts in enumerate(clouds):
             if len(pts) == 0:
@@ -274,6 +900,8 @@ def plot_octree(leaves, root, clouds=None):
     # -------------------------
     # Octree cells
     # -------------------------
+    #
+    # Draw every leaf cell as a wireframe cube.
 
     edges = [
         (0, 1),
@@ -290,13 +918,17 @@ def plot_octree(leaves, root, clouds=None):
         (3, 7),
     ]
 
+    # Plotly can draw many disconnected line segments efficiently by
+    # inserting None between segments.
     x = []
     y = []
     z = []
+
     for leaf in leaves:
         x0, y0, z0 = leaf.bmin
         x1, y1, z1 = leaf.bmax
 
+        # Eight corners of the current leaf cell.
         corners = np.array(
             [
                 [x0, y0, z0],
@@ -310,10 +942,12 @@ def plot_octree(leaves, root, clouds=None):
             ]
         )
 
+        # Add all cube edges as line segments.
         for i, j in edges:
             x.extend([corners[i, 0], corners[j, 0], None])
             y.extend([corners[i, 1], corners[j, 1], None])
             z.extend([corners[i, 2], corners[j, 2], None])
+
     fig.add_trace(
         go.Scatter3d(
             x=x,
@@ -327,22 +961,14 @@ def plot_octree(leaves, root, clouds=None):
             showlegend=False,
         )
     )
-    hp = []
-    hn = []
-
+    # Plot the dual contouring vertex of each active leaf cell.
     for leaf in leaves:
-        if hasattr(leaf, "hermite_points") and leaf.hermite_points is not None:
-            hp.extend(leaf.hermite_points)
-            hn.extend(leaf.hermite_normals)
-
-    for leaf in leaves:
-        if hasattr(leaf, "dc_vertex"):
-            # print(leaf.dc_vertex[0])
+        if leaf.vertex is not None:
             fig.add_trace(
                 go.Scatter3d(
-                    x=[leaf.dc_vertex[0]],
-                    y=[leaf.dc_vertex[1]],
-                    z=[leaf.dc_vertex[2]],
+                    x=[leaf.vertex[0]],
+                    y=[leaf.vertex[1]],
+                    z=[leaf.vertex[2]],
                     mode="markers",
                     marker=dict(
                         size=5,
@@ -351,8 +977,9 @@ def plot_octree(leaves, root, clouds=None):
                     showlegend=False,
                 )
             )
-            # break
 
+    # Keep the 3D axes scaled equally so the octree cells are not visually
+    # distorted.
     fig.update_layout(
         scene=dict(
             aspectmode="data",
@@ -366,6 +993,23 @@ def plot_octree(leaves, root, clouds=None):
 
 
 def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file):
+    """
+    High-level driver for building an adaptive octree and computing dual
+    contouring vertices for each component in the union geometry.
+
+    Current behavior:
+    - Generate point samples for each input component.
+    - Build an adaptive octree around each component's sampled points.
+    - Compute one dual contouring vertex per active leaf cell.
+    - Visualize the octree and vertices.
+
+    Note:
+    The function name suggests that a mesh is built, but the current code
+    only computes and visualizes dual contouring vertices. Connectivity
+    between vertices is not generated yet.
+    """
+
+    # Generate point samples from the input geometries/SDFs.
     clouds = generate_points(
         union_geometries,
         sdfs,
@@ -373,35 +1017,86 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         world_matrices,
         n_points=5000,
     )
+
+    # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
         sdf = final_sdfs[comp.name]
+
+        # Skip components with no sampled points.
         if len(cloud) == 0:
             continue
 
         points = cloud[:, :3]
 
+        # Compute a tight bounding box around the sampled points.
         bbox_min = points.min(axis=0)
         bbox_max = points.max(axis=0)
 
+        # Expand the bounding box slightly so the surface is not clipped
+        # exactly at the sample bounds.
         span = bbox_max - bbox_min
-
         bbox_min -= 0.05 * span
         bbox_max += 0.05 * span
 
-        root = build_octree_from_points(
+        # Build an adaptive octree from the point cloud.
+        root = build_uniform_octree_from_points(
             points,
             bbox_min,
             bbox_max,
-            max_depth=7,
-            min_points=50,
+            max_depth=5,
+            min_points=10,
         )
+
         print("Octree built!")
+
+        # Extract all leaf cells where DC vertices may be computed.
         leaves = get_octree_leaves(root)
 
         print("Leaves gotten!")
+
+        # Evaluate the SDF in each leaf and compute the dual contouring
+        # vertex where the implicit surface crosses the cell.
         compute_vertices(root, sdf)
+        vertices = []
+        for leaf in leaves:
+            if leaf.vertex is not None:
+                leaf.vertex_index = len(vertices)
+                vertices.append(leaf.vertex)
+        vertices = np.asarray(vertices)
+
         print("Vertices calculated!")
+
+        faces = build_dual_contouring_faces_uniform(
+            leaves,
+            bbox_min,
+            bbox_max,
+            max_depth=5,
+            sdf=sdf,
+        )
+
+        faces = np.asarray(faces, dtype=int)
+
+        faces = orient_faces_with_sdf(
+            vertices,
+            faces,
+            sdf,
+        )
+
+        print("Faces calculated!")
+        if len(vertices) > 0 and len(faces) > 0:
+            mesh = trimesh.Trimesh(
+                vertices=vertices,
+                faces=faces,
+                process=False,
+            )
+
+            mesh.export(f"dc_{out_file}_{comp.name}.stl")
+
+            print(f"Exported dual contouring mesh to: {out_file}")
+        else:
+            print("No mesh exported because vertices or faces are empty.")
+
         print(
             comp.name,
             "points:",
@@ -409,10 +1104,16 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
             "leaves:",
             len(leaves),
             "dc verts:",
+            len(vertices),
+            "faces:",
+            len(faces),
         )
 
-        plot_octree(
-            leaves,
-            root,
-            [cloud],
-        )
+        # Visualize the sampled point cloud, octree cells, and computed
+        # dual contouring vertices.
+        # plot_octree(
+        #     leaves,
+        #     root,
+        #     [cloud],
+        # )
+        # break
