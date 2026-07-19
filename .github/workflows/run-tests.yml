@@ -37,4 +37,5 @@ jobs:
           for file in tests/*; do
             echo "Running on $file"
             python src/mcstas_to_cad.py --input_file="$file"
+            python src/union_viewer --input_file="$file"
           done
