@@ -40,7 +40,7 @@ def build_meshes(
     out_file="",
     export=True,
     verbose=False,
-    use_dual_contouring=True
+    use_dual_contouring=False
 ):
     meshes = []
     meshes_dict = {}
