@@ -827,7 +827,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         n_points=5000,
     )
 
-    max_depth = 4
+    max_depth = 3
     # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
@@ -896,18 +896,18 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         )
         print("Faces Oriented!")
 
-        # if len(vertices) > 0 and len(faces) > 0:
-        #     mesh = trimesh.Trimesh(
-        #         vertices=vertices,
-        #         faces=faces,
-        #         process=False,
-        #     )
+        if len(vertices) > 0 and len(faces) > 0:
+            mesh = trimesh.Trimesh(
+                vertices=vertices,
+                faces=faces,
+                process=False,
+            )
 
-        # mesh.export(f"dc_{out_file}_{comp.name}.stl")
+            mesh.export(f"dc_{out_file}_{comp.name}.stl")
 
-        #     print(f"Exported dual contouring mesh to: {out_file}")
-        # else:
-        #     print("No mesh exported because vertices or faces are empty.")
+            print(f"Exported dual contouring mesh to: {out_file}")
+        else:
+            print("No mesh exported because vertices or faces are empty.")
 
         print(
             comp.name,
@@ -928,5 +928,5 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
             root,
             [cloud],
         )
-        if i >= 1:
-            break
+        # if i >= 1:
+        #     break
