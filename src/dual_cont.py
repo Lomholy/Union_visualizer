@@ -36,12 +36,13 @@ class OctreeNode:
 
 
 def cellProc(node: OctreeNode, faces: list):
-    # print("In cellProc")
+    print("In cellProc")
     if node.is_leaf:
         return
 
     for child in node.children:
         cellProc(child, faces)
+
     face_pairs = [
         (0, 1),
         (0, 2),
@@ -61,12 +62,12 @@ def cellProc(node: OctreeNode, faces: list):
         faceProc(node.children[i], node.children[j], faces)
 
     edge_pairs = [
-        (0, 1, 2, 3),
-        (4, 5, 6, 7),
-        (0, 2, 4, 6),
-        (1, 3, 5, 7),
-        (0, 1, 4, 5),
-        (2, 3, 6, 7),
+        (0, 1, 3, 2),
+        (4, 5, 7, 6),
+        (0, 4, 6, 2),
+        (1, 5, 7, 3),
+        (0, 1, 5, 4),
+        (2, 3, 7, 6),
     ]
     for i, j, k, l in edge_pairs:
         edgeProc(
@@ -90,30 +91,30 @@ def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list):
         low = [4, 5, 6, 7]
         high = [0, 1, 2, 3]
         edges = [  # Edges are always from (low, low, high, high)
-            (4, 5, 0, 1),
-            (6, 7, 2, 3),
-            (5, 7, 1, 3),
-            (4, 6, 0, 2),
+            (4, 5, 1, 0),
+            (6, 7, 3, 2),
+            (5, 7, 3, 1),
+            (4, 6, 2, 0),
         ]
-    elif node1.center[1] != node2.center[1]:
+    if node1.center[1] != node2.center[1]:
         c = 1
         low = [2, 3, 6, 7]
         high = [0, 1, 4, 5]
         edges = [  # Edges are always from (low, low, high, high)
-            (2, 3, 0, 1),
-            (6, 7, 4, 5),
-            (3, 7, 1, 5),
-            (2, 6, 0, 4),
+            (2, 3, 1, 0),
+            (6, 7, 5, 4),
+            (3, 7, 5, 1),
+            (2, 6, 4, 0),
         ]
-    elif node1.center[2] != node2.center[2]:
+    if node1.center[2] != node2.center[2]:
         c = 2
         low = [1, 3, 5, 7]
         high = [0, 2, 4, 6]
         edges = [  # Edges are always from (low, low, high, high)
             (1, 3, 2, 0),
-            (1, 5, 0, 4),
-            (5, 7, 4, 6),
-            (3, 7, 2, 6),
+            (1, 5, 4, 0),
+            (5, 7, 6, 4),
+            (3, 7, 6, 2),
         ]
     # print(c)
 
@@ -141,7 +142,7 @@ def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list):
 
 def bubblesort(c, nodes):
     for i in range(len(nodes)):
-        for j in range(len(nodes[i + 1 :])):
+        for j in range(i + 1, len(nodes)):
             if nodes[i].center[c] > nodes[j].center[c]:
                 # flip nodes
                 tmp = nodes[i]
@@ -157,28 +158,42 @@ def edgeProc(
     node4: OctreeNode,
     faces: list,
 ):
-    if node1.is_leaf and node2.is_leaf and node3.is_leaf and node4.is_leaf:
-        Generate_polygon(node1, node2, node3, node4, faces)
-        return
+
+
+
     # If all boxes are not leafs, we must split the edge, and apply edgeproc
     # to the new cubes sharing the two edges.
 
     # First, find out which coordinate the nodes share
     nodes = [node1, node2, node3, node4]
+    c = 0
     if node1.center[0] == node2.center[0] == node3.center[0] == node4.center[0]:
         # Now figure out the ordering of the nodes
         bubblesort(1, nodes)
         bubblesort(2, nodes)
-        edge_same_x(*nodes, faces)
+        c = 0
     elif node1.center[1] == node2.center[1] == node3.center[1] == node4.center[1]:
         # Now figure out the ordering of the nodes
         bubblesort(0, nodes)
         bubblesort(2, nodes)
-        edge_same_y(*nodes, faces)
+        c = 1
     elif node1.center[2] == node2.center[2] == node3.center[2] == node4.center[2]:
         # Now figure out the ordering of the nodes
         bubblesort(0, nodes)
         bubblesort(1, nodes)
+        c = 2
+    else:
+        return
+
+    if node1.is_leaf and node2.is_leaf and node3.is_leaf and node4.is_leaf:
+        Generate_polygon(*nodes, faces)
+        return
+
+    if c == 0:
+        edge_same_x(*nodes, faces)
+    elif c == 1:
+        edge_same_y(*nodes, faces)
+    elif c == 2:
         edge_same_z(*nodes, faces)
     return
 
@@ -186,16 +201,16 @@ def edgeProc(
 def edge_same_x(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
-    edgeProc(a.children[3], b.children[2], c.children[0], d.children[1], faces)
-    edgeProc(a.children[7], b.children[6], c.children[4], d.children[5], faces)
+    edgeProc(a.children[3], b.children[1], c.children[0], d.children[2], faces)
+    edgeProc(a.children[7], b.children[5], c.children[4], d.children[6], faces)
     return
 
 
 def edge_same_y(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
-    edgeProc(a.children[7], b.children[6], c.children[2], d.children[3], faces)
-    edgeProc(a.children[5], b.children[4], c.children[0], d.children[1], faces)
+    edgeProc(a.children[7], b.children[3], c.children[2], d.children[6], faces)
+    edgeProc(a.children[5], b.children[1], c.children[0], d.children[4], faces)
     return
 
 
@@ -210,6 +225,7 @@ def edge_same_z(
 def Generate_polygon(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
+    coord = 0
     # Check if the edge actually has a sign change and vertices on all nodes
     if a.vertex is None or b.vertex is None or c.vertex is None or d.vertex is None:
         return
@@ -217,18 +233,18 @@ def Generate_polygon(
         if a.center[i] == b.center[i] == c.center[i] == d.center[i]:
             coord = i
             break
-    if coord == 0:
-        if (a.corner_signs[3] * a.corner_signs[7]) > 0:
-            return
-    elif coord == 1:
-        if (a.corner_signs[5] * a.corner_signs[7]) > 0:
-            return
-    elif coord == 2:
-        if (a.corner_signs[6] * a.corner_signs[7]) > 0:
-            return
+    # if coord == 0:
+    #     if (a.corner_signs[3] * a.corner_signs[7]) > 0:
+    #         return
+    # elif coord == 1:
+    #     if (a.corner_signs[5] * a.corner_signs[7]) > 0:
+    #         return
+    # elif coord == 2:
+    #     if (a.corner_signs[6] * a.corner_signs[7]) > 0:
+    #         return
 
     faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
-    faces.append([b.vertex_index, c.vertex_index, d.vertex_index])
+    faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
     return
 
 
@@ -887,7 +903,7 @@ def plot_octree(leaves, root, faces, vertices, clouds=None):
                     marker=dict(
                         size=2,
                     ),
-                    name=f"Cloud {i}",
+                    name=f"Point Cloud",
                     opacity=0.7,
                 )
             )
@@ -907,13 +923,13 @@ def plot_octree(leaves, root, faces, vertices, clouds=None):
         corners = np.array(
             [
                 [x0, y0, z0],
-                [x1, y0, z0],
-                [x1, y1, z0],
-                [x0, y1, z0],
                 [x0, y0, z1],
-                [x1, y0, z1],
-                [x1, y1, z1],
+                [x0, y1, z0],
                 [x0, y1, z1],
+                [x1, y0, z0],
+                [x1, y0, z1],
+                [x1, y1, z0],
+                [x1, y1, z1],
             ]
         )
 
@@ -923,38 +939,45 @@ def plot_octree(leaves, root, faces, vertices, clouds=None):
             y.extend([corners[i, 1], corners[j, 1], None])
             z.extend([corners[i, 2], corners[j, 2], None])
 
-    # fig.add_trace(
-    #     go.Scatter3d(
-    #         x=x,
-    #         y=y,
-    #         z=z,
-    #         mode="lines",
-    #         line=dict(
-    #             width=2,
-    #             color="black",
-    #         ),
-    #         showlegend=False,
-    #     )
-    # )
+    fig.add_trace(
+        go.Scatter3d(
+            x=x,
+            y=y,
+            z=z,
+            mode="lines",
+            line=dict(
+                width=2,
+                color="black",
+            ),
+            name="Octree boxes",
+        )
+    )
 
     # =============================================================
     # Plot the dual contouring vertex of each active leaf cell.
     # =============================================================
+
+    verts = []
     for leaf in leaves:
         if leaf.vertex is not None:
-            fig.add_trace(
-                go.Scatter3d(
-                    x=[leaf.vertex[0]],
-                    y=[leaf.vertex[1]],
-                    z=[leaf.vertex[2]],
-                    mode="markers",
-                    marker=dict(
-                        size=5,
-                        color="red",
-                    ),
-                    showlegend=False,
-                )
-            )
+            verts.append(leaf.vertex.tolist())
+    x = [i[0] for i in verts]
+    y = [i[1] for i in verts]
+    z = [i[2] for i in verts]
+
+    fig.add_trace(
+        go.Scatter3d(
+            x=x,
+            y=y,
+            z=z,
+            mode="markers",
+            marker=dict(
+                size=5,
+                color="red",
+            ),
+            name="Vertices",
+        )
+    )
 
     edge_x = []
     edge_y = []
@@ -981,6 +1004,21 @@ def plot_octree(leaves, root, faces, vertices, clouds=None):
             name="Connectivity",
         )
     )
+
+    # ==========================================================================
+    # =============== PLOT THE CENTERS OF ROOT =================================
+    # ==========================================================================
+
+    for i, node in enumerate(root.children):
+        print(node.center)
+        fig.add_trace(
+            go.Scatter3d(
+                x=[node.center[0]],
+                y=[node.center[1]],
+                z=[node.center[2]],
+                name=f"{i} in children",
+            )
+        )
 
     # Keep the 3D axes scaled equally so the octree cells are not visually
     # distorted.
@@ -1017,7 +1055,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         n_points=5000,
     )
 
-    max_depth = 3
+    max_depth = 2
     # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
