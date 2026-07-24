@@ -36,7 +36,6 @@ class OctreeNode:
 
 
 def cellProc(node: OctreeNode, faces: list):
-    print("In cellProc")
     if node.is_leaf:
         return
 
@@ -226,25 +225,29 @@ def Generate_polygon(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
     coord = 0
-    # Check if the edge actually has a sign change and vertices on all nodes
-    if a.vertex is None or b.vertex is None or c.vertex is None or d.vertex is None:
+    if a.vertex is None or (c.vertex is None and d.vertex is None):
         return
+    # Check if the edge actually has a sign change and vertices on all nodes
+    
     for i in range(3):
         if a.center[i] == b.center[i] == c.center[i] == d.center[i]:
             coord = i
             break
-    # if coord == 0:
-    #     if (a.corner_signs[3] * a.corner_signs[7]) > 0:
-    #         return
-    # elif coord == 1:
-    #     if (a.corner_signs[5] * a.corner_signs[7]) > 0:
-    #         return
-    # elif coord == 2:
-    #     if (a.corner_signs[6] * a.corner_signs[7]) > 0:
-    #         return
+    if coord == 0:
+        if (a.corner_signs[3] * a.corner_signs[7]) > 0:
+            return
+    elif coord == 1:
+        if (a.corner_signs[5] * a.corner_signs[7]) > 0:
+            return
+    elif coord == 2:
+        if (a.corner_signs[6] * a.corner_signs[7]) > 0:
+            return
 
-    faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
-    faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
+
+    if a.vertex is not None and b.vertex is not None and c.vertex is not None:
+        faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
+    if a.vertex is not None and c.vertex is not None and d.vertex is not None:
+        faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
     return
 
 
@@ -1055,7 +1058,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         n_points=5000,
     )
 
-    max_depth = 2
+    max_depth = 5
     # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
