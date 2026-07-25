@@ -111,8 +111,8 @@ AT (0,0,0) RELATIVE PREVIOUS
 COMPONENT box_left = Union_box(
     priority = 10,
     xwidth = 0.6,
-    yheight = 0.4,
-    zdepth = 0.1,
+    yheight = 0.6,
+    zdepth = 0.6,
     material_string = "mat"
 )
 AT (0,0,0) RELATIVE left

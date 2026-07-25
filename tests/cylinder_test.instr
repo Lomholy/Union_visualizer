@@ -1,0 +1,148 @@
+/********************************************************************************
+* 
+* McStas, neutron ray-tracing package
+*         Copyright (C) 1997-2008, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+* 
+* This file was written by McStasScript, which is a 
+* python based McStas instrument generator written by 
+* Mads Bertelsen in 2019 while employed at the 
+* European Spallation Source Data Management and 
+* Software Centre
+* 
+* Instrument: ODIN
+* 
+* %Identification
+* Written by: Python McStas Instrument Generator
+* Date: 13:23:57 on February 26, 2026
+* Origin: ESS DMSC
+* %INSTRUMENT_SITE: Generated_instruments
+* 
+* !!Please write a short instrument description (1 line) here!!
+* 
+* %Description
+* Please write a longer instrument description here!
+* 
+* 
+* %Parameters
+* l_min: [unit] Minimum simulated wavelength [AA]
+* l_max: [unit] Maximum simulated wavelength [AA]
+* n_pulses: [unit] Number of simulated pulses
+* wfm_delta: [unit] Distance between WFM choppers [m]
+* bp_frequency: [unit] Frequency of bandpass choppers [Hz]
+* bp1_phase_offset: [unit] Offset of bp1 phase [deg]
+* jitter_bp1: [unit] Jitter of bp1 chopper
+* bp2_phase_offset: [unit] Offset of bp2 phase [deg]
+* jitter_bp2: [unit] Jitter of bp2 chopper
+* t0_phase_offset: [unit] Offset of t0 phase [deg]
+* jit_t0_sec: [unit] Jitter of t0 chopper
+* run_from_mcpl: [unit] 
+* 
+* %Link 
+* 
+* %End 
+********************************************************************************/
+
+DEFINE INSTRUMENT ODIN (
+
+)
+
+DECLARE 
+%{
+%}
+
+INITIALIZE 
+%{
+
+
+
+%}
+
+TRACE 
+
+COMPONENT Origin = Progress_bar(
+
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+
+COMPONENT src = Source_simple(
+radius = 0.1, lambda0 = 3, dlambda = 2
+
+
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+
+COMPONENT sample = Arm(
+
+)
+AT (0,0,10) RELATIVE src
+
+COMPONENT right = Arm(
+)
+AT (0.2,0,0) RELATIVE sample
+ROTATED (0,0,90) RELATIVE sample
+
+
+COMPONENT left = Arm(
+)
+AT (-0.2,0,0) RELATIVE sample
+ROTATED (90,0,00) RELATIVE sample
+
+COMPONENT init = Union_init(
+
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT non = Non_process(
+
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+
+COMPONENT mat = Union_make_material(
+    my_absorption = 100, process_string="non" 
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT cyl = Union_cylinder(
+    priority = 10,
+    radius = 0.2,
+    yheight = 0.3 
+)
+AT (0,0,0) RELATIVE sample
+
+
+
+
+
+COMPONENT master = Union_master(
+
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT stop = Union_stop(
+
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT psd_det = PSD_monitor(
+nx = 300, 
+ny = 300,
+xwidth = 1,
+yheight = 1,
+restore_neutron = 1
+
+)
+AT (0,0,1) RELATIVE sample
+
+
+
+FINALLY 
+%{
+// Start of finally for generated ODIN
+%}
+
+END
