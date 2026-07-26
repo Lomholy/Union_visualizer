@@ -79,15 +79,22 @@ def build_uniform_octree_from_points(
 
     bbox_min = np.asarray(bbox_min, dtype=float)
     bbox_max = np.asarray(bbox_max, dtype=float)
-    return recurse(bbox_min, bbox_max, depth=0, max_depth=max_depth)
+    return recurse(
+        bbox_min,
+        bbox_max,
+        depth=0,
+        max_depth=max_depth,
+        points=points,
+        min_points=min_points,
+    )
 
 
-def recurse(bmin, bmax, depth, max_depth):
+def recurse(bmin, bmax, depth, max_depth, points, min_points):
     """
-    Recursively subdivide every cell until max_depth.
+    Recursively subdivide every cell until max_depth, or less than min points
+    are contained within the box
 
-    Because this is a uniform octree, every node at depth < max_depth
-    gets exactly eight children.
+
     """
     center = 0.5 * (bmin + bmax)
 
@@ -98,9 +105,17 @@ def recurse(bmin, bmax, depth, max_depth):
         depth=depth,
         children=[],
     )
+    npts = len(points)
     # Stop once all cells have reached the same target depth.
-    if depth >= max_depth:
+    if depth >= max_depth or npts < min_points:
         return node
+
+    # Determine which side of the center each point lies on
+    octant_ids = (
+        (points[:, 0] >= center[0]).astype(np.int32) * 4
+        + (points[:, 1] >= center[1]).astype(np.int32) * 2
+        + (points[:, 2] >= center[2]).astype(np.int32)
+    )
 
     # At each subdivision, the grid index is doubled and offset by
     # the local child octant index.
@@ -111,6 +126,9 @@ def recurse(bmin, bmax, depth, max_depth):
     for ix in range(2):
         for iy in range(2):
             for iz in range(2):
+                octant = 4 * ix + 2 * iy + iz
+                child_points = points[octant_ids == octant]
+
                 child_min = np.array(
                     [
                         bmin[0] if ix == 0 else center[0],
@@ -128,7 +146,9 @@ def recurse(bmin, bmax, depth, max_depth):
                     ],
                     dtype=float,
                 )
-                child = recurse(child_min, child_max, depth + 1, max_depth)
+                child = recurse(
+                    child_min, child_max, depth + 1, max_depth, child_points, min_points
+                )
 
                 node.children.append(child)
 
@@ -319,20 +339,20 @@ def calc_vert(leaf, sdf):
     # Instead, we march the vertices, by using the sdf normal
     x = np.maximum(x[:3], leaf.bmin)
     x = np.minimum(x[:3], leaf.bmax)
-    x = np.array([[x[0], x[1], x[2], 1]])
-    x_sdf = sdf(x)
-
-    if abs(x_sdf) > 1e-3:
-        # Move the vertices to the closest surface
-        # using the sdf normal at that point
-        flag_fix_verts[0] += 1
-        # x = np.array(hermite_points[0])
-        for i in range(4):
-            sdf_vals = sdf(x)
-
-            grads = sdf_normal(sdf, x)
-
-            x -= sdf_vals[:, None] * grads  # Newton projection
+    # x = np.array([[x[0], x[1], x[2], 1]])
+    # x_sdf = sdf(x)
+    #
+    # if abs(x_sdf) > 1e-3:
+    #     # Move the vertices to the closest surface
+    #     # using the sdf normal at that point
+    #     flag_fix_verts[0] += 1
+    #     # x = np.array(hermite_points[0])
+    #     for i in range(4):
+    #         sdf_vals = sdf(x)
+    #
+    #         grads = sdf_normal(sdf, x)
+    #
+    #         x -= sdf_vals[:, None] * grads  # Newton projection
 
     # Clamp the dual contouring vertex to the current cell.
     x = x.squeeze()[:3]
@@ -362,113 +382,16 @@ def compute_vertices(node, sdf):
         )
 
 
-def evaluate_uniform_grid_sdf(bbox_min, bbox_max, max_depth, sdf):
-    """
-    Evaluate the SDF at all vertices of the uniform grid.
-
-    If the octree has depth d, then there are:
-
-        n = 2**d
-
-    cells along each axis, and therefore:
-
-        n + 1
-
-    grid vertices along each axis.
-
-    Returns
-    -------
-    grid_values:
-        Array of shape (n + 1, n + 1, n + 1) containing SDF values.
-    """
-
-    bbox_min = np.asarray(bbox_min, dtype=float)
-    bbox_max = np.asarray(bbox_max, dtype=float)
-
-    n = 2**max_depth
-
-    xs = np.linspace(bbox_min[0], bbox_max[0], n + 1)
-    ys = np.linspace(bbox_min[1], bbox_max[1], n + 1)
-    zs = np.linspace(bbox_min[2], bbox_max[2], n + 1)
-
-    # Build all grid vertex coordinates.
-    X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
-
-    pts = np.column_stack(
-        [
-            X.ravel(),
-            Y.ravel(),
-            Z.ravel(),
-            np.ones(X.size),
-        ]
-    )
-
-    values = sdf(pts)
-
-    return values.reshape((n + 1, n + 1, n + 1))
-
-
-def orient_faces_with_sdf(vertices, faces, sdf):
-    """
-    Orient triangle faces consistently using the SDF normal.
-
-    For each triangle, we compare:
-    - the triangle normal from the current winding,
-    - the SDF normal at the triangle centroid.
-
-    If they point in opposite directions, the triangle winding is flipped.
-
-    Assumption
-    ----------
-    sdf_normal points toward increasing SDF values.
-
-    If your convention is:
-        outside = positive SDF
-    then this produces outward-facing triangles.
-
-    If your convention is opposite, change the test from dot < 0 to dot > 0.
-    """
-
-    oriented_faces = []
-
-    for face in faces:
-        i0, i1, i2 = face
-
-        p0 = vertices[i0]
-        p1 = vertices[i1]
-        p2 = vertices[i2]
-
-        # Triangle normal from current winding.
-        tri_normal = np.cross(p1 - p0, p2 - p0)
-
-        norm = np.linalg.norm(tri_normal)
-
-        tri_normal = tri_normal / norm
-
-        c = (p0 + p1 + p2) / 3.0
-
-        eps = 1e-3
-
-        s_plus = sdf(np.array([[*(c + eps * tri_normal), 1.0]]))
-
-        s_minus = sdf(np.array([[*(c - eps * tri_normal), 1.0]]))
-        print(s_plus, s_minus)
-
-        if s_plus[0] < s_minus[0]:
-            oriented_faces.append([i0, i2, i1])
-        else:
-            oriented_faces.append([i0, i1, i2])
-
-    return np.asarray(oriented_faces, dtype=int)
-
-
 def self_or_child(node, idx):
     if node.is_leaf:
         return node
     return node.children[idx]
 
 
-def cellProc(node: OctreeNode, faces: list, ):
+def cellProc(
+    node: OctreeNode,
+    faces: list,
+):
     if node.is_leaf:
         return
 
@@ -496,8 +419,8 @@ def cellProc(node: OctreeNode, faces: list, ):
     edge_pairs = [
         (0, 1, 3, 2, 0),  # Same x
         (4, 5, 7, 6, 0),  # Same x
-        (0, 2, 6, 4, 2),  # Same z
-        (1, 3, 7, 5, 2),  # Same z
+        (0, 4, 6, 2, 2),  # Same z
+        (1, 5, 7, 3, 2),  # Same z
         (0, 1, 5, 4, 1),  # Same y
         (2, 3, 7, 6, 1),  # Same y
     ]
@@ -511,7 +434,6 @@ def cellProc(node: OctreeNode, faces: list, ):
 
 
 def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list, coord: int):
-    # print("In faceProc")
     if node1.is_leaf and node2.is_leaf:
         return
 
@@ -527,8 +449,8 @@ def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list, coord: int):
         edges = [  # Edges are always from (low, low, high, high)
             ((0, 4), (0, 5), (1, 1), (1, 0), 1),
             ((0, 6), (0, 7), (1, 3), (1, 2), 1),
-            ((0, 5), (0, 7), (1, 3), (1, 1), 2),
-            ((0, 4), (0, 6), (1, 2), (1, 0), 2),
+            ((0, 5), (1, 1), (1, 3), (0, 7), 2),
+            ((0, 4), (1, 0), (1, 2), (0, 6), 2),
         ]
         # return
     if coord == 1:
@@ -537,8 +459,8 @@ def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list, coord: int):
         edges = [  # Edges are always from (low, low, high, high)
             ((0, 2), (0, 3), (1, 1), (1, 0), 0),
             ((0, 6), (0, 7), (1, 5), (1, 4), 0),
-            ((0, 3), (1, 1), (1, 5), (0, 7), 2),
-            ((0, 2), (1, 0), (1, 4), (0, 6), 2),
+            ((0, 3), (0, 7), (1, 5), (1, 1), 2),
+            ((0, 2), (0, 6), (1, 4), (1, 0), 2),
         ]
         # return
     if coord == 2:
@@ -645,9 +567,9 @@ def edge_same_z(
     edgeProc(
         [
             self_or_child(a, 6),
-            self_or_child(b, 4),
+            self_or_child(b, 2),
             self_or_child(c, 0),
-            self_or_child(d, 2),
+            self_or_child(d, 4),
         ],
         faces,
         2,
@@ -655,9 +577,9 @@ def edge_same_z(
     edgeProc(
         [
             self_or_child(a, 7),
-            self_or_child(b, 5),
+            self_or_child(b, 3),
             self_or_child(c, 1),
-            self_or_child(d, 3),
+            self_or_child(d, 5),
         ],
         faces,
         2,
@@ -668,7 +590,7 @@ def edge_same_z(
 def Generate_polygon(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list, coord: int
 ):
-    # Check if the edge actually has a sign change and vertices on all nodes
+    # Check if the edge actually has a sign change
     if coord == 0:
         if (a.corner_signs[3] * a.corner_signs[7]) > 0:
             return
@@ -874,10 +796,9 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         sdfs,
         final_sdfs,
         world_matrices,
-        n_points=5000,
+        n_points=50000,
     )
 
-    max_depth = 4
     # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
@@ -904,8 +825,8 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
             points,
             bbox_min,
             bbox_max,
-            max_depth=max_depth,
-            min_points=10,
+            max_depth=8,
+            min_points=5,
         )
 
         print("Octree built!")
@@ -928,24 +849,10 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         #
         print("Vertices calculated!")
 
-        # faces = build_dual_contouring_faces_uniform(
-        #     leaves,
-        #     bbox_min,
-        #     bbox_max,
-        #     max_depth=max_depth,
-        #     sdf=sdf,
-        # )
         faces = []
         cellProc(root, faces)
         print("Faces calculated!")
         faces = np.asarray(faces, dtype=int)
-        # faces = orient_faces_with_sdf(
-        #     vertices,
-        #     faces,
-        #     sdf,
-        # )
-        print("Faces Oriented!")
-
         if len(vertices) > 0 and len(faces) > 0:
             mesh = trimesh.Trimesh(
                 vertices=vertices,
@@ -981,5 +888,3 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
             vertices,
             [cloud],
         )
-        if i >= 1:
-            break
