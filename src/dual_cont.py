@@ -35,222 +35,6 @@ class OctreeNode:
     vertex: np.ndarray | None = None
 
 
-def cellProc(node: OctreeNode, faces: list):
-    if node.is_leaf:
-        return
-
-    for child in node.children:
-        cellProc(child, faces)
-
-    face_pairs = [
-        (0, 1),
-        (0, 2),
-        (0, 4),
-        (1, 3),
-        (1, 5),
-        (2, 3),
-        (2, 6),
-        (3, 7),
-        (4, 5),
-        (4, 6),
-        (5, 7),
-        (6, 7),
-    ]
-
-    for i, j in face_pairs:
-        faceProc(node.children[i], node.children[j], faces)
-
-    edge_pairs = [
-        (0, 1, 3, 2),
-        (4, 5, 7, 6),
-        (0, 4, 6, 2),
-        (1, 5, 7, 3),
-        (0, 1, 5, 4),
-        (2, 3, 7, 6),
-    ]
-    for i, j, k, l in edge_pairs:
-        edgeProc(
-            node.children[i],
-            node.children[j],
-            node.children[k],
-            node.children[l],
-            faces,
-        )
-    return faces
-
-
-def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list):
-    # print("In faceProc")
-    if node1.is_leaf and node2.is_leaf:
-        return
-    c = 0
-    # Depending on the plane shared, call faceproc
-    if node1.center[0] != node2.center[0]:
-        c = 0
-        low = [4, 5, 6, 7]
-        high = [0, 1, 2, 3]
-        edges = [  # Edges are always from (low, low, high, high)
-            (4, 5, 1, 0),
-            (6, 7, 3, 2),
-            (5, 7, 3, 1),
-            (4, 6, 2, 0),
-        ]
-    if node1.center[1] != node2.center[1]:
-        c = 1
-        low = [2, 3, 6, 7]
-        high = [0, 1, 4, 5]
-        edges = [  # Edges are always from (low, low, high, high)
-            (2, 3, 1, 0),
-            (6, 7, 5, 4),
-            (3, 7, 5, 1),
-            (2, 6, 4, 0),
-        ]
-    if node1.center[2] != node2.center[2]:
-        c = 2
-        low = [1, 3, 5, 7]
-        high = [0, 2, 4, 6]
-        edges = [  # Edges are always from (low, low, high, high)
-            (1, 3, 2, 0),
-            (1, 5, 4, 0),
-            (5, 7, 6, 4),
-            (3, 7, 6, 2),
-        ]
-    # print(c)
-
-    lower_node = node1
-    higher_node = node2
-    if node1.center[c] > node2.center[c]:
-        lower_node = node2
-        higher_node = node1
-
-    lower_node_kids = lower_node.children
-    higher_node_kids = higher_node.children
-
-    for i, j in zip(low, high):
-        faceProc(lower_node_kids[i], higher_node_kids[j], faces)
-    for i, j, k, l in edges:
-        edgeProc(
-            lower_node_kids[i],
-            lower_node_kids[j],
-            higher_node_kids[k],
-            higher_node_kids[l],
-            faces,
-        )
-    return
-
-
-def bubblesort(c, nodes):
-    for i in range(len(nodes)):
-        for j in range(i + 1, len(nodes)):
-            if nodes[i].center[c] > nodes[j].center[c]:
-                # flip nodes
-                tmp = nodes[i]
-                nodes[i] = nodes[j]
-                nodes[j] = tmp
-    return
-
-
-def edgeProc(
-    node1: OctreeNode,
-    node2: OctreeNode,
-    node3: OctreeNode,
-    node4: OctreeNode,
-    faces: list,
-):
-
-
-
-    # If all boxes are not leafs, we must split the edge, and apply edgeproc
-    # to the new cubes sharing the two edges.
-
-    # First, find out which coordinate the nodes share
-    nodes = [node1, node2, node3, node4]
-    c = 0
-    if node1.center[0] == node2.center[0] == node3.center[0] == node4.center[0]:
-        # Now figure out the ordering of the nodes
-        bubblesort(1, nodes)
-        bubblesort(2, nodes)
-        c = 0
-    elif node1.center[1] == node2.center[1] == node3.center[1] == node4.center[1]:
-        # Now figure out the ordering of the nodes
-        bubblesort(0, nodes)
-        bubblesort(2, nodes)
-        c = 1
-    elif node1.center[2] == node2.center[2] == node3.center[2] == node4.center[2]:
-        # Now figure out the ordering of the nodes
-        bubblesort(0, nodes)
-        bubblesort(1, nodes)
-        c = 2
-    else:
-        return
-
-    if node1.is_leaf and node2.is_leaf and node3.is_leaf and node4.is_leaf:
-        Generate_polygon(*nodes, faces)
-        return
-
-    if c == 0:
-        edge_same_x(*nodes, faces)
-    elif c == 1:
-        edge_same_y(*nodes, faces)
-    elif c == 2:
-        edge_same_z(*nodes, faces)
-    return
-
-
-def edge_same_x(
-    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
-):
-    edgeProc(a.children[3], b.children[1], c.children[0], d.children[2], faces)
-    edgeProc(a.children[7], b.children[5], c.children[4], d.children[6], faces)
-    return
-
-
-def edge_same_y(
-    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
-):
-    edgeProc(a.children[7], b.children[3], c.children[2], d.children[6], faces)
-    edgeProc(a.children[5], b.children[1], c.children[0], d.children[4], faces)
-    return
-
-
-def edge_same_z(
-    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
-):
-    edgeProc(a.children[6], b.children[2], c.children[0], d.children[4], faces)
-    edgeProc(a.children[7], b.children[3], c.children[1], d.children[5], faces)
-    return
-
-
-def Generate_polygon(
-    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
-):
-    coord = 0
-    if a.vertex is None or (c.vertex is None and d.vertex is None):
-        return
-    # Check if the edge actually has a sign change and vertices on all nodes
-    
-    for i in range(3):
-        if a.center[i] == b.center[i] == c.center[i] == d.center[i]:
-            coord = i
-            break
-    if coord == 0:
-        if (a.corner_signs[3] * a.corner_signs[7]) > 0:
-            return
-    elif coord == 1:
-        if (a.corner_signs[5] * a.corner_signs[7]) > 0:
-            return
-    elif coord == 2:
-        if (a.corner_signs[6] * a.corner_signs[7]) > 0:
-            return
-
-
-    if a.vertex is not None and b.vertex is not None and c.vertex is not None:
-        faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
-    if a.vertex is not None and c.vertex is not None and d.vertex is not None:
-        faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
-    return
-
-
 def build_uniform_octree_from_points(
     points,
     bbox_min,
@@ -542,6 +326,7 @@ def calc_vert(leaf, sdf):
         # Move the vertices to the closest surface
         # using the sdf normal at that point
         flag_fix_verts[0] += 1
+        # x = np.array(hermite_points[0])
         for i in range(4):
             sdf_vals = sdf(x)
 
@@ -623,199 +408,6 @@ def evaluate_uniform_grid_sdf(bbox_min, bbox_max, max_depth, sdf):
     return values.reshape((n + 1, n + 1, n + 1))
 
 
-#
-# def build_dual_contouring_faces_uniform(leaves, bbox_min, bbox_max, max_depth, sdf):
-#     """
-#     Build triangle faces for a uniform-grid dual contouring mesh.
-#
-#     This assumes:
-#     - the octree is uniform,
-#     - every leaf has a valid integer grid_index,
-#     - active leaves have leaf.vertex set,
-#     - active leaves have leaf.vertex_index assigned.
-#
-#     Connectivity rule
-#     -----------------
-#     For every primal grid edge with an SDF sign change, find the four
-#     grid cells surrounding that edge. Each of those cells has one dual
-#     contouring vertex. These four vertices form a quad, which is split
-#     into two triangles.
-#
-#     Returns
-#     -------
-#     faces:
-#         List of triangle index triples.
-#     """
-#
-#     n = 2**max_depth
-#
-#     # Evaluate SDF at all primal grid vertices.
-#     grid_values = evaluate_uniform_grid_sdf(
-#         bbox_min,
-#         bbox_max,
-#         max_depth,
-#         sdf,
-#     )
-#
-#     # Map integer cell coordinates to octree leaves.
-#     #
-#     # For a uniform grid, each leaf should have:
-#     #
-#     #     leaf.grid_index = (i, j, k)
-#     #
-#     # where i, j, k are cell indices in [0, n - 1].
-#     leaf_grid = {}
-#
-#     for leaf in leaves:
-#         if hasattr(leaf, "grid_index"):
-#             leaf_grid[leaf.grid_index] = leaf
-#
-#     faces = []
-#
-#     def has_sign_change(a, b):
-#         """
-#         Return True if an edge crosses the zero level set.
-#         """
-#         return a * b < 0
-#
-#     def leaf_has_vertex(cell_index):
-#         """
-#         Check whether a cell exists and has a dual-contouring vertex.
-#         """
-#         leaf = leaf_grid.get(cell_index)
-#
-#         if leaf is None:
-#             return False
-#
-#         if leaf.vertex is None:
-#             return False
-#
-#         if not hasattr(leaf, "vertex_index"):
-#             return False
-#
-#         return True
-#
-#     def add_quad(cell_indices, flip=False):
-#         """
-#         Add a quad formed by four cell dual vertices.
-#
-#         The quad is split into two triangles.
-#
-#         Parameters
-#         ----------
-#         cell_indices:
-#             Four cell indices ordered around a primal grid edge.
-#         flip:
-#             If True, reverse triangle winding.
-#         """
-#
-#         # Only create the face if all four surrounding cells have vertices.
-#         if not all(leaf_has_vertex(idx) for idx in cell_indices):
-#             return
-#
-#         ids = [leaf_grid[idx].vertex_index for idx in cell_indices]
-#
-#         if not flip:
-#             faces.append([ids[0], ids[1], ids[2]])
-#             faces.append([ids[0], ids[2], ids[3]])
-#         else:
-#             faces.append([ids[0], ids[2], ids[1]])
-#             faces.append([ids[0], ids[3], ids[2]])
-#
-#     # ------------------------------------------------------------------
-#     # X-directed primal edges
-#     # ------------------------------------------------------------------
-#     #
-#     # Edge from:
-#     #
-#     #     (i, j, k) to (i + 1, j, k)
-#     #
-#     # This edge is surrounded by four cells in the yz-plane:
-#     #
-#     #     (i, j - 1, k - 1)
-#     #     (i, j,     k - 1)
-#     #     (i, j,     k)
-#     #     (i, j - 1, k)
-#     #
-#     # j and k must be interior grid vertex indices for four surrounding
-#     # cells to exist.
-#     for i in range(n):
-#         for j in range(1, n):
-#             for k in range(1, n):
-#                 v0 = grid_values[i, j, k]
-#                 v1 = grid_values[i + 1, j, k]
-#
-#                 if not has_sign_change(v0, v1):
-#                     continue
-#
-#                 cell_indices = [
-#                     (i, j - 1, k - 1),
-#                     (i, j, k - 1),
-#                     (i, j, k),
-#                     (i, j - 1, k),
-#                 ]
-#
-#                 # Flip based on the sign direction along the edge.
-#                 add_quad(cell_indices, flip=(v0 > 0))
-#
-#     # ------------------------------------------------------------------
-#     # Y-directed primal edges
-#     # ------------------------------------------------------------------
-#     #
-#     # Edge from:
-#     #
-#     #     (i, j, k) to (i, j + 1, k)
-#     #
-#     # This edge is surrounded by four cells in the xz-plane.
-#     for i in range(1, n):
-#         for j in range(n):
-#             for k in range(1, n):
-#                 v0 = grid_values[i, j, k]
-#                 v1 = grid_values[i, j + 1, k]
-#
-#                 if not has_sign_change(v0, v1):
-#                     continue
-#
-#                 cell_indices = [
-#                     (i - 1, j, k - 1),
-#                     (i, j, k - 1),
-#                     (i, j, k),
-#                     (i - 1, j, k),
-#                 ]
-#
-#                 add_quad(cell_indices, flip=(v0 > 0))
-#
-#     # ------------------------------------------------------------------
-#     # Z-directed primal edges
-#     # ------------------------------------------------------------------
-#     #
-#     # Edge from:
-#     #
-#     #     (i, j, k) to (i, j, k + 1)
-#     #
-#     # This edge is surrounded by four cells in the xy-plane.
-#     for i in range(1, n):
-#         for j in range(1, n):
-#             for k in range(n):
-#                 v0 = grid_values[i, j, k]
-#                 v1 = grid_values[i, j, k + 1]
-#
-#                 if not has_sign_change(v0, v1):
-#                     continue
-#
-#                 cell_indices = [
-#                     (i - 1, j - 1, k),
-#                     (i, j - 1, k),
-#                     (i, j, k),
-#                     (i - 1, j, k),
-#                 ]
-#
-#                 add_quad(cell_indices, flip=(v0 > 0))
-#
-#     return faces
-#
-
-
 def orient_faces_with_sdf(vertices, faces, sdf):
     """
     Orient triangle faces consistently using the SDF normal.
@@ -855,18 +447,184 @@ def orient_faces_with_sdf(vertices, faces, sdf):
 
         c = (p0 + p1 + p2) / 3.0
 
-        eps = 1e-6
+        eps = 1e-3
 
-        s_plus = sdf(np.array([[*(c + eps * tri_normal), 1.0]]))[0]
+        s_plus = sdf(np.array([[*(c + eps * tri_normal), 1.0]]))
 
-        s_minus = sdf(np.array([[*(c - eps * tri_normal), 1.0]]))[0]
+        s_minus = sdf(np.array([[*(c - eps * tri_normal), 1.0]]))
+        print(s_plus, s_minus)
 
-        if s_plus < s_minus:
+        if s_plus[0] < s_minus[0]:
             oriented_faces.append([i0, i2, i1])
         else:
             oriented_faces.append([i0, i1, i2])
 
     return np.asarray(oriented_faces, dtype=int)
+
+
+def cellProc(node: OctreeNode, faces: list):
+    if node.is_leaf:
+        return
+
+    for child in node.children:
+        cellProc(child, faces)
+
+    face_pairs = [  # first two indices is choice of nodes. Last idx is coordinate not shared
+        (0, 1, 2),
+        (0, 2, 1),
+        (0, 4, 0),
+        (1, 3, 1),
+        (1, 5, 0),
+        (2, 3, 2),
+        (2, 6, 0),
+        (3, 7, 0),
+        (4, 5, 2),
+        (4, 6, 1),
+        (5, 7, 1),
+        (6, 7, 2),
+    ]
+
+    for i, j, k in face_pairs:
+        faceProc(node.children[i], node.children[j], faces, k)
+
+    edge_pairs = [
+        (0, 2, 3, 1, 0),  # Same x
+        (4, 6, 7, 5, 0),  # Same x
+        (0, 4, 6, 2, 2),  # Same z
+        (1, 5, 7, 3, 2),  # Same z
+        (0, 4, 5, 1, 1),  # Same y
+        (2, 6, 7, 3, 1),  # Same y
+    ]
+    for i, j, k, l, h in edge_pairs:
+        edgeProc(
+            [node.children[i], node.children[j], node.children[k], node.children[l]],
+            faces,
+            h,
+        )
+    return faces
+
+
+def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list, coord: int):
+    # print("In faceProc")
+    if node1.is_leaf and node2.is_leaf:
+        return
+    # Depending on the plane shared, call faceproc
+    low = []
+    high = []
+    if coord == 0:
+        low = [4, 5, 6, 7]
+        high = [0, 1, 2, 3]
+
+        edges = [  # Edges are always from (low, low, high, high)
+            (4, 5, 1, 0, 1),
+            (6, 7, 3, 2, 1),
+            (5, 7, 3, 1, 2),
+            (4, 6, 2, 0, 2),
+        ]
+    if coord == 1:
+        low = [2, 3, 6, 7]
+        high = [0, 1, 4, 5]
+        edges = [  # Edges are always from (low, low, high, high)
+            (2, 3, 1, 0, 0),
+            (6, 7, 5, 4, 0),
+            (3, 7, 5, 1, 2),
+            (2, 6, 4, 0, 2),
+        ]
+    if coord == 2:
+        low = [1, 3, 5, 7]
+        high = [0, 2, 4, 6]
+        edges = [  # Edges are always from (low, low, high, high)
+            (1, 3, 2, 0, 0),
+            (1, 5, 4, 0, 1),
+            (5, 7, 6, 4, 0),
+            (3, 7, 6, 2, 1),
+        ]
+
+    for i, j in zip(low, high):
+        faceProc(node1.children[i], node2.children[j], faces, coord)
+    for i, j, k, l, h in edges:
+        edgeProc(
+            [
+                node1.children[i],
+                node1.children[j],
+                node2.children[k],
+                node2.children[l],
+            ],
+            faces,
+            h,
+        )
+    return
+
+
+def edgeProc(nodes: list(OctreeNode), faces: list, coord: int):
+    # If all boxes are not leafs, we must split the edge, and apply edgeproc
+    # to the new cubes sharing the two edges.
+    if nodes[0].is_leaf and nodes[1].is_leaf and nodes[2].is_leaf and nodes[3].is_leaf:
+        for a in nodes:
+            if a.vertex is None:
+                return
+        Generate_polygon(*nodes, faces, coord)
+        return
+
+    if coord == 0:
+        edge_same_x(*nodes, faces)
+    elif coord == 1:
+        edge_same_y(*nodes, faces)
+    elif coord == 2:
+        edge_same_z(*nodes, faces)
+    return
+
+
+def edge_same_x(
+    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
+):
+    edgeProc([a.children[3], b.children[1], c.children[0], d.children[2]], faces, 0)
+    edgeProc([a.children[7], b.children[5], c.children[4], d.children[6]], faces, 0)
+    return
+
+
+def edge_same_y(
+    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
+):
+    edgeProc([a.children[7], b.children[3], c.children[2], d.children[6]], faces, 1)
+    edgeProc([a.children[5], b.children[1], c.children[0], d.children[4]], faces, 1)
+    return
+
+
+def edge_same_z(
+    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
+):
+    edgeProc([a.children[6], b.children[2], c.children[0], d.children[4]], faces, 2)
+    edgeProc([a.children[7], b.children[3], c.children[1], d.children[5]], faces, 2)
+    return
+
+
+def Generate_polygon(
+    a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list, coord: int
+):
+    # Check if the edge actually has a sign change and vertices on all nodes
+    if coord == 0:
+        if (a.corner_signs[3] * a.corner_signs[7]) > 0:
+            return
+    elif coord == 1:
+        if (a.corner_signs[5] * a.corner_signs[7]) > 0:
+            return
+    elif coord == 2:
+        if (a.corner_signs[6] * a.corner_signs[7]) > 0:
+            return
+
+    if a.corner_signs[7] > 0:
+            faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
+            faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
+    else:
+            faces.append([c.vertex_index, b.vertex_index, a.vertex_index])
+            faces.append([d.vertex_index, c.vertex_index, a.vertex_index])
+    return
+
+
+
+
+
 
 
 def plot_octree(leaves, root, faces, vertices, clouds=None):
@@ -1058,7 +816,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         n_points=5000,
     )
 
-    max_depth = 5
+    max_depth = 3
     # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
@@ -1119,14 +877,12 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         faces = []
         cellProc(root, faces)
         print("Faces calculated!")
-        #
         faces = np.asarray(faces, dtype=int)
-        #
-        faces = orient_faces_with_sdf(
-            vertices,
-            faces,
-            sdf,
-        )
+        # faces = orient_faces_with_sdf(
+        #     vertices,
+        #     faces,
+        #     sdf,
+        # )
         print("Faces Oriented!")
 
         if len(vertices) > 0 and len(faces) > 0:
@@ -1135,6 +891,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
                 faces=faces,
                 process=False,
             )
+            mesh.fix_normals()
 
             mesh.export(f"dc_{out_file}_{comp.name}.stl")
 
