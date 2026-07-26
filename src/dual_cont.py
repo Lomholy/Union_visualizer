@@ -462,7 +462,13 @@ def orient_faces_with_sdf(vertices, faces, sdf):
     return np.asarray(oriented_faces, dtype=int)
 
 
-def cellProc(node: OctreeNode, faces: list):
+def self_or_child(node, idx):
+    if node.is_leaf:
+        return node
+    return node.children[idx]
+
+
+def cellProc(node: OctreeNode, faces: list, ):
     if node.is_leaf:
         return
 
@@ -488,12 +494,12 @@ def cellProc(node: OctreeNode, faces: list):
         faceProc(node.children[i], node.children[j], faces, k)
 
     edge_pairs = [
-        (0, 2, 3, 1, 0),  # Same x
-        (4, 6, 7, 5, 0),  # Same x
-        (0, 4, 6, 2, 2),  # Same z
-        (1, 5, 7, 3, 2),  # Same z
-        (0, 4, 5, 1, 1),  # Same y
-        (2, 6, 7, 3, 1),  # Same y
+        (0, 1, 3, 2, 0),  # Same x
+        (4, 5, 7, 6, 0),  # Same x
+        (0, 2, 6, 4, 2),  # Same z
+        (1, 3, 7, 5, 2),  # Same z
+        (0, 1, 5, 4, 1),  # Same y
+        (2, 3, 7, 6, 1),  # Same y
     ]
     for i, j, k, l, h in edge_pairs:
         edgeProc(
@@ -508,47 +514,53 @@ def faceProc(node1: OctreeNode, node2: OctreeNode, faces: list, coord: int):
     # print("In faceProc")
     if node1.is_leaf and node2.is_leaf:
         return
+
     # Depending on the plane shared, call faceproc
     low = []
     high = []
+    edges = []
+    nodes = [node1, node2]
     if coord == 0:
         low = [4, 5, 6, 7]
         high = [0, 1, 2, 3]
 
         edges = [  # Edges are always from (low, low, high, high)
-            (4, 5, 1, 0, 1),
-            (6, 7, 3, 2, 1),
-            (5, 7, 3, 1, 2),
-            (4, 6, 2, 0, 2),
+            ((0, 4), (0, 5), (1, 1), (1, 0), 1),
+            ((0, 6), (0, 7), (1, 3), (1, 2), 1),
+            ((0, 5), (0, 7), (1, 3), (1, 1), 2),
+            ((0, 4), (0, 6), (1, 2), (1, 0), 2),
         ]
+        # return
     if coord == 1:
         low = [2, 3, 6, 7]
         high = [0, 1, 4, 5]
         edges = [  # Edges are always from (low, low, high, high)
-            (2, 3, 1, 0, 0),
-            (6, 7, 5, 4, 0),
-            (3, 7, 5, 1, 2),
-            (2, 6, 4, 0, 2),
+            ((0, 2), (0, 3), (1, 1), (1, 0), 0),
+            ((0, 6), (0, 7), (1, 5), (1, 4), 0),
+            ((0, 3), (1, 1), (1, 5), (0, 7), 2),
+            ((0, 2), (1, 0), (1, 4), (0, 6), 2),
         ]
+        # return
     if coord == 2:
         low = [1, 3, 5, 7]
         high = [0, 2, 4, 6]
         edges = [  # Edges are always from (low, low, high, high)
-            (1, 3, 2, 0, 0),
-            (1, 5, 4, 0, 1),
-            (5, 7, 6, 4, 0),
-            (3, 7, 6, 2, 1),
+            ((0, 1), (1, 0), (1, 2), (0, 3), 0),
+            ((0, 5), (1, 4), (1, 6), (0, 7), 0),
+            ((0, 1), (1, 0), (1, 4), (0, 5), 1),
+            ((0, 3), (1, 2), (1, 6), (0, 7), 1),
         ]
+        # return
 
     for i, j in zip(low, high):
-        faceProc(node1.children[i], node2.children[j], faces, coord)
+        faceProc(self_or_child(node1, i), self_or_child(node2, j), faces, coord)
     for i, j, k, l, h in edges:
         edgeProc(
             [
-                node1.children[i],
-                node1.children[j],
-                node2.children[k],
-                node2.children[l],
+                self_or_child(nodes[i[0]], i[1]),
+                self_or_child(nodes[j[0]], j[1]),
+                self_or_child(nodes[k[0]], k[1]),
+                self_or_child(nodes[l[0]], l[1]),
             ],
             faces,
             h,
@@ -578,24 +590,78 @@ def edgeProc(nodes: list(OctreeNode), faces: list, coord: int):
 def edge_same_x(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
-    edgeProc([a.children[3], b.children[1], c.children[0], d.children[2]], faces, 0)
-    edgeProc([a.children[7], b.children[5], c.children[4], d.children[6]], faces, 0)
+    edgeProc(
+        [
+            self_or_child(a, 3),
+            self_or_child(b, 2),
+            self_or_child(c, 0),
+            self_or_child(d, 1),
+        ],
+        faces,
+        0,
+    )
+    edgeProc(
+        [
+            self_or_child(a, 7),
+            self_or_child(b, 6),
+            self_or_child(c, 4),
+            self_or_child(d, 5),
+        ],
+        faces,
+        0,
+    )
     return
 
 
 def edge_same_y(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
-    edgeProc([a.children[7], b.children[3], c.children[2], d.children[6]], faces, 1)
-    edgeProc([a.children[5], b.children[1], c.children[0], d.children[4]], faces, 1)
+    edgeProc(
+        [
+            self_or_child(a, 7),
+            self_or_child(b, 6),
+            self_or_child(c, 2),
+            self_or_child(d, 3),
+        ],
+        faces,
+        1,
+    )
+    edgeProc(
+        [
+            self_or_child(a, 5),
+            self_or_child(b, 4),
+            self_or_child(c, 0),
+            self_or_child(d, 1),
+        ],
+        faces,
+        1,
+    )
     return
 
 
 def edge_same_z(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list
 ):
-    edgeProc([a.children[6], b.children[2], c.children[0], d.children[4]], faces, 2)
-    edgeProc([a.children[7], b.children[3], c.children[1], d.children[5]], faces, 2)
+    edgeProc(
+        [
+            self_or_child(a, 6),
+            self_or_child(b, 4),
+            self_or_child(c, 0),
+            self_or_child(d, 2),
+        ],
+        faces,
+        2,
+    )
+    edgeProc(
+        [
+            self_or_child(a, 7),
+            self_or_child(b, 5),
+            self_or_child(c, 1),
+            self_or_child(d, 3),
+        ],
+        faces,
+        2,
+    )
     return
 
 
@@ -614,17 +680,12 @@ def Generate_polygon(
             return
 
     if a.corner_signs[7] > 0:
-            faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
-            faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
+        faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
+        faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
     else:
-            faces.append([c.vertex_index, b.vertex_index, a.vertex_index])
-            faces.append([d.vertex_index, c.vertex_index, a.vertex_index])
+        faces.append([c.vertex_index, b.vertex_index, a.vertex_index])
+        faces.append([d.vertex_index, c.vertex_index, a.vertex_index])
     return
-
-
-
-
-
 
 
 def plot_octree(leaves, root, faces, vertices, clouds=None):
@@ -816,7 +877,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         n_points=5000,
     )
 
-    max_depth = 3
+    max_depth = 4
     # Process each component independently.
     for i, comp in enumerate(union_geometries):
         cloud = clouds[comp.name]
