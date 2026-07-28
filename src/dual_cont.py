@@ -2,6 +2,7 @@ from plot_union_cloud import sdf_normal
 import trimesh
 from dataclasses import dataclass
 import numpy as np
+from scipy.optimize import lsq_linear
 from plot_union_cloud import generate_points
 import plotly.graph_objects as go
 
@@ -173,7 +174,6 @@ def get_octree_leaves(node):
         if len(n.children) == 0:
             leaves.append(n)
             n.is_leaf = True
-            n.children = [n, n, n, n, n, n, n, n]
             return
 
         # Otherwise continue descending through the tree.
@@ -291,7 +291,7 @@ def calc_vert(leaf, sdf):
         #
         # Four iterations gives a coarse approximation. Increasing this
         # number gives more accurate Hermite points at modest cost.
-        for _ in range(3):
+        for _ in range(4):
             pm = 0.5 * (pa + pb)
             vm = sdf(pm[None])[0]
 
@@ -328,34 +328,35 @@ def calc_vert(leaf, sdf):
     # The solution x is the point that best fits all tangent planes.
     A = np.squeeze(np.asarray(hermite_normals))
     b = np.asarray([np.dot(n, p) for p, n in zip(hermite_points, hermite_normals)])
-    center = 0.5 * (leaf.bmin + leaf.bmax)
+    center = np.mean(hermite_points, axis=0)
     lam = 1e-5
     A_aug = np.vstack([A, np.sqrt(lam) * np.eye(3)])
     b_aug = np.concatenate([b, np.sqrt(lam) * center])
 
     # Solve the regularized least-squares problem.
-    x, *_ = np.linalg.lstsq(A_aug, b_aug)
+    # x, *_ = np.linalg.lstsq(A_aug, b_aug)
+    res = lsq_linear(A_aug, b_aug, bounds=(leaf.bmin, leaf.bmax))
+    x = res.x
     # If the sdf value is large, then the QEF did not work.
     # Instead, we march the vertices, by using the sdf normal
-    x = np.maximum(x[:3], leaf.bmin)
-    x = np.minimum(x[:3], leaf.bmax)
-    # x = np.array([[x[0], x[1], x[2], 1]])
-    # x_sdf = sdf(x)
-    #
-    # if abs(x_sdf) > 1e-3:
-    #     # Move the vertices to the closest surface
-    #     # using the sdf normal at that point
-    #     flag_fix_verts[0] += 1
-    #     # x = np.array(hermite_points[0])
-    #     for i in range(4):
-    #         sdf_vals = sdf(x)
-    #
-    #         grads = sdf_normal(sdf, x)
-    #
-    #         x -= sdf_vals[:, None] * grads  # Newton projection
+    x = np.array([[x[0], x[1], x[2], 1]])
+    x_sdf = sdf(x)
+
+    if abs(x_sdf) > 1e-3:
+        # Move the vertices to the closest surface
+        # using the sdf normal at that point
+        flag_fix_verts[0] += 1
+        # x = np.array(hermite_points[0])
+        for i in range(4):
+            sdf_vals = sdf(x)
+
+            grads = sdf_normal(sdf, x)
+
+            x -= sdf_vals[:, None] * grads  # Newton projection
 
     # Clamp the dual contouring vertex to the current cell.
     x = x.squeeze()[:3]
+    x = np.clip(x, leaf.bmin, leaf.bmax)
 
     # Store data on the leaf for later visualization or meshing.
     leaf.corner_signs = values
@@ -587,26 +588,56 @@ def edge_same_z(
     return
 
 
+def get_edge_corners(a, b, c, d, coord):
+    if coord == 0:
+        a_corn = [3, 7]
+        b_corn = [2, 6]
+        c_corn = [0, 4]
+        d_corn = [1, 5]
+    if coord == 1:
+        a_corn = [5, 7]
+        b_corn = [4, 6]
+        c_corn = [0, 2]
+        d_corn = [1, 3]
+    if coord == 2:
+        a_corn = [6, 7]
+        b_corn = [2, 3]
+        c_corn = [0, 1]
+        d_corn = [4, 5]
+    a_corn = [a.corner_signs[x] for x in a_corn]
+    b_corn = [b.corner_signs[x] for x in b_corn]
+    c_corn = [c.corner_signs[x] for x in c_corn]
+    d_corn = [d.corner_signs[x] for x in d_corn]
+    corn = [a_corn, b_corn, c_corn, d_corn]
+    s = [a, b, c, d]
+    s = sorted(range(len(s)), key=lambda k: s[k].depth, reverse=True)
+    return corn[s[0]]
+
+
 def Generate_polygon(
     a: OctreeNode, b: OctreeNode, c: OctreeNode, d: OctreeNode, faces: list, coord: int
 ):
     # Check if the edge actually has a sign change
-    if coord == 0:
-        if (a.corner_signs[3] * a.corner_signs[7]) > 0:
-            return
-    elif coord == 1:
-        if (a.corner_signs[5] * a.corner_signs[7]) > 0:
-            return
-    elif coord == 2:
-        if (a.corner_signs[6] * a.corner_signs[7]) > 0:
-            return
+    # Note! This does not work when a is bigger than the others!
+    edge_corners = get_edge_corners(a, b, c, d, coord)
+    if (edge_corners[0] * edge_corners[1]) > 0:
+        return
 
-    if a.corner_signs[7] > 0:
-        faces.append([a.vertex_index, b.vertex_index, c.vertex_index])
-        faces.append([a.vertex_index, c.vertex_index, d.vertex_index])
-    else:
-        faces.append([c.vertex_index, b.vertex_index, a.vertex_index])
-        faces.append([d.vertex_index, c.vertex_index, a.vertex_index])
+    face1 = [a.vertex_index, b.vertex_index, c.vertex_index]
+    face2 = [a.vertex_index, c.vertex_index, d.vertex_index]
+
+    if edge_corners[1] < 0:
+        if coord == 1:
+            face1[1], face1[2] = face1[2], face1[1]
+            face2[1], face2[2] = face2[2], face2[1]
+        if coord == 2:
+            face1[1], face1[2] = face1[2], face1[1]
+            face2[1], face2[2] = face2[2], face2[1]
+    elif coord == 0:
+        face1[1], face1[2] = face1[2], face1[1]
+        face2[1], face2[2] = face2[2], face2[1]
+    faces.append(face1)
+    faces.append(face2)
     return
 
 
@@ -754,7 +785,6 @@ def plot_octree(leaves, root, faces, vertices, clouds=None):
     # ==========================================================================
 
     for i, node in enumerate(root.children):
-        print(node.center)
         fig.add_trace(
             go.Scatter3d(
                 x=[node.center[0]],
@@ -796,7 +826,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         sdfs,
         final_sdfs,
         world_matrices,
-        n_points=50000,
+        n_points=10000,
     )
 
     # Process each component independently.
@@ -857,9 +887,8 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
             mesh = trimesh.Trimesh(
                 vertices=vertices,
                 faces=faces,
-                process=False,
             )
-            mesh.fix_normals()
+            # mesh.fix_normals()
 
             mesh.export(f"dc_{out_file}_{comp.name}.stl")
 
@@ -881,10 +910,10 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
 
         # Visualize the sampled point cloud, octree cells, and computed
         # dual contouring vertices.
-        plot_octree(
-            leaves,
-            root,
-            faces,
-            vertices,
-            [cloud],
-        )
+        # plot_octree(
+        #     leaves,
+        #     root,
+        #     faces,
+        #     vertices,
+        #     [cloud],
+        # )
