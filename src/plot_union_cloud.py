@@ -193,7 +193,9 @@ GEOMETRY_FUNCS = {
 }
 
 
-def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=10):
+def sample_sdf_surfaces(
+    geometries, final_sdfs, world_matrices, n_points, steps=10, verbose=False
+):
     """
     For each geometry:
     - generate initial samples
@@ -206,13 +208,13 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
     clouds = {}
 
     for name, comp in geometries.items():
-        print(f"SAMPLING {comp.name}")
+        if verbose:
+            print(f"SAMPLING {comp.name}")
 
         # initial samples (world space)
         sampler = GEOMETRY_FUNCS[comp.component_name.lower()]["generate_surface_points"]
 
         pts = sampler(comp, n_points)
-        print(pts)
         pts = np.concatenate([pts, np.ones((len(pts), 1))], axis=1)
         pts = (world_matrices[comp.name] @ pts.T).T
 
@@ -241,7 +243,6 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
 def plot_multiple_clouds(cloud_list, geoms, size=3):
     fig = go.Figure()
 
-    print(cloud_list)
     for name, pts in cloud_list.items():
         # if geoms[i].component_name != "Union_cone":
         #     continue
@@ -262,7 +263,9 @@ def plot_multiple_clouds(cloud_list, geoms, size=3):
     fig.show()
 
 
-def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices):
+def prioritise_points(
+    point_clouds, sdfs, final_sdfs, geometries, world_matrices, verbose=False
+):
     K = len(point_clouds.keys())
     final_points = {}
     final_points_tracker = {}
@@ -283,7 +286,7 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
         reassigned = np.zeros(point_world.shape[0])
 
         for name2 in geometries.keys():
-            if (name, name2) in pairs or (name2, name) in pairs:
+            if (name, name2) in pairs:
                 continue
             pairs.append((name, name2))
             comp_j = geometries[name2]
@@ -308,7 +311,8 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
             :,
         ] = point_world
         final_points_tracker[name] += point_world.shape[0]
-        print(f"Processed geometry {name}")
+        if verbose:
+            print(f"Processed geometry {name}")
     clouds = {}
     for name in geometries.keys():
         # Do A final wipe, to remove any points not on the edge of the final sdf
@@ -322,12 +326,14 @@ def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices
     return clouds
 
 
-def generate_points(union_geometries, sdfs, final_sdfs, world_matrices, n_points):
+def generate_points(
+    union_geometries, sdfs, final_sdfs, world_matrices, n_points, verbose=False
+):
     point_clouds = sample_sdf_surfaces(
-        union_geometries, final_sdfs, world_matrices, n_points
+        union_geometries, final_sdfs, world_matrices, n_points, verbose
     )
     point_clouds = prioritise_points(
-        point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
+        point_clouds, sdfs, final_sdfs, union_geometries, world_matrices, verbose
     )
     return point_clouds
 
