@@ -134,16 +134,16 @@ GEOMETRY_SDF = {
 def build_sdfs(union_geometries, world_matrices, clip={}):
     sdfs = {}
     final_sdfs = {}
-    for comp in union_geometries:
+    for name, comp in union_geometries.items():
         comp_type = comp.component_name.lower()
         sdf = GEOMETRY_SDF[comp_type]["sdf"]
         inv_mat = np.linalg.inv(world_matrices[comp.name])
         sdfs[comp.name] = make_sdf(comp, sdf, inv_mat)
 
-    for comp in union_geometries:
+    for name, comp in union_geometries.items():
         higher_comps = [
             sdfs[x.name]
-            for x in union_geometries
+            for x in union_geometries.values()
             if x.priority > comp.priority and x.component_name != "Union_mesh"
         ]
         final_sdfs[comp.name] = sdf_subtract_all(sdfs[comp.name], higher_comps)
