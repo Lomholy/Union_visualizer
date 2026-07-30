@@ -113,19 +113,19 @@ def sdf_subtract_all(f_i, higher_priority_fs):
 
 
 GEOMETRY_SDF = {
-    "union_cylinder": {
+    "Union_cylinder": {
         "sdf": sdf_cylinder,
     },
-    "union_box": {
+    "Union_box": {
         "sdf": sdf_box,
     },
-    "union_sphere": {
+    "Union_sphere": {
         "sdf": sdf_sphere,
     },
-    "union_cone": {
+    "Union_cone": {
         "sdf": sdf_cone,
     },
-    "union_mesh": {
+    "Union_mesh": {
         "sdf": sdf_mesh,
     },
 }
@@ -135,7 +135,7 @@ def build_sdfs(union_geometries, world_matrices, clip={}):
     sdfs = {}
     final_sdfs = {}
     for name, comp in union_geometries.items():
-        comp_type = comp.component_name.lower()
+        comp_type = comp.component_name
         sdf = GEOMETRY_SDF[comp_type]["sdf"]
         inv_mat = np.linalg.inv(world_matrices[comp.name])
         sdfs[comp.name] = make_sdf(comp, sdf, inv_mat)
@@ -146,9 +146,10 @@ def build_sdfs(union_geometries, world_matrices, clip={}):
             for x in union_geometries.values()
             if x.priority > comp.priority and x.component_name != "Union_mesh"
         ]
-        final_sdfs[comp.name] = sdf_subtract_all(sdfs[comp.name], higher_comps)
+        final_sdfs[name] = sdf_subtract_all(sdfs[name], higher_comps)
 
-    if clip.get("enabled", False):
+    if clip.get("enable", True):
+
         axis_map = {
             "X": 0,
             "Y": 1,
