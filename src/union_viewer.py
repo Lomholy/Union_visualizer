@@ -23,25 +23,47 @@ import argparse
 # ============================================================
 
 
+def rebuild_mesh(
+    meshes,
+    mesh,
+    name,
+    union_geometries,
+    world_matrices,
+    sdfs,
+    final_sdfs,
+    res,
+):
+    meshes[name] = build_mesh(
+        union_geometries[name], world_matrices, sdfs, final_sdfs, res
+    )
+    mesh = meshes[name]
+    return mesh, meshes
+
+
 def generate_group(
     input_file,
     clip,
     colors={},
-    meshes = None,
-    points = None,
+    meshes=None,
+    points=None,
     use_colors=False,
+    force_remesh=False,
     res=64,
-    verbose=False,
+    verbose=True,
 ):
     instr, world_matrices, union_geometries = preprocess(
         input_file,
-        verbose,
+        verbose=False,
+
     )
     print("Building sdfs")
+    print(clip)
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices, clip)
     print("Building meshes")
 
-    new_points = generate_points(union_geometries, sdfs, final_sdfs, world_matrices, 1000)
+    new_points = generate_points(
+        union_geometries, sdfs, final_sdfs, world_matrices, 1000, verbose=False
+    )
     if points == None:
         meshes = build_all_meshes(
             union_geometries,
@@ -57,18 +79,27 @@ def generate_group(
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
-
     for name, mesh in meshes.items():
+        rebuild = 0
         if name not in points.keys():
-            meshes[name] = build_mesh(union_geometries[name], world_matrices, sdfs, final_sdfs, res)
-            mesh = meshes[name]
+            rebuild = 1
         if points[name].shape != new_points[name].shape:
-            meshes[name] = build_mesh(union_geometries[name], world_matrices, sdfs, final_sdfs, res)
-            mesh = meshes[name]
-        elif np.any(abs(points[name] - new_points[name])>1e-10):
-            print(np.sum(abs(points[name] - new_points[name])>1e-10))
-            meshes[name] = build_mesh(union_geometries[name], world_matrices, sdfs, final_sdfs, res)
-            mesh = meshes[name]
+            rebuild = 1
+        elif np.any(abs(points[name] - new_points[name]) > 1e-10):
+            rebuild = 1
+        if rebuild:
+            mesh, meshes = rebuild_mesh(
+                meshes,
+                mesh,
+                name,
+                union_geometries,
+                world_matrices,
+                sdfs,
+                final_sdfs,
+                res,
+            )
+            if verbose:
+                print(f"Rebuilding {name}")
 
         if name not in colors and use_colors:
             color = random.randrange(0, 2**24)
@@ -78,6 +109,8 @@ def generate_group(
         elif colors[name] == "#b6b6b6" and use_colors:
             color = random.randrange(0, 2**24)
             colors[name] = f"#{color:06x}"
+        if mesh is None:
+            continue
 
         gfx_mesh = gfx.Mesh(
             gfx.geometry_from_trimesh(mesh),
@@ -90,6 +123,7 @@ def generate_group(
 
         group.add(gfx_mesh)
         group.geometry_meshes[name] = gfx_mesh
+    points = new_points
 
     return (group, meshes, points)
 
@@ -274,12 +308,12 @@ class Viewer(QtWidgets.QMainWindow):
         # Clipping dock widget
         # ----------------------------------------------------
 
-        self.clip_enabled = False
+        self.clip_enable = False
         self.clip_axis = "Z"
         self.clip_mode = "Above"
         self.clip_position = 0.0
         self.clip = {
-            "enable": self.clip_enabled,
+            "enable": self.clip_enable,
             "axis": self.clip_axis,
             "mode": self.clip_mode,
             "position": self.clip_position,
@@ -367,7 +401,9 @@ class Viewer(QtWidgets.QMainWindow):
         resolution_layout.addWidget(self.res_val)
         dock_layout.addLayout(resolution_layout)
 
-        self.reset_visibility_button = QtWidgets.QPushButton("Reset all hidden geometries")
+        self.reset_visibility_button = QtWidgets.QPushButton(
+            "Reset all hidden geometries"
+        )
         self.reset_visibility_button.clicked.connect(self.reset_geometry_visibility)
         visibility_layout = QtWidgets.QHBoxLayout()
         visibility_layout.addWidget(self.reset_visibility_button)
@@ -402,7 +438,6 @@ class Viewer(QtWidgets.QMainWindow):
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
             self.geometry_dock,
         )
-
 
         # ----------------------------------------------------
         # Clipping signals
@@ -495,8 +530,8 @@ class Viewer(QtWidgets.QMainWindow):
                 self.input_file,
                 self.clip,
                 self.colors,
-                meshes= self.meshes,
-                points = self.points,
+                meshes=self.meshes,
+                points=self.points,
                 use_colors=self.color_checkbox.isChecked(),
                 res=self.res_val.currentData(),
             )
@@ -547,7 +582,7 @@ class Viewer(QtWidgets.QMainWindow):
     # ========================================================
 
     def on_clip_changed(self):
-        self.clip["enabled"] = self.clip_checkbox.isChecked()
+        self.clip["enable"] = self.clip_checkbox.isChecked()
         self.clip["axis"] = self.axis_combo.currentText()
         self.clip["mode"] = self.mode_combo.currentText()
         self.clip["position"] = self.slice_val.value()
