@@ -32,18 +32,15 @@ def execute_mcstasscript_file(input_file):
 
 
 def get_union_geometries(instr: ms.McStas_instr):
-    union_geometries = []
+    union_geometries = {}
+    union_names = ["Union_cylinder",
+                   "Union_box",
+                   "Union_sphere",
+                   "Union_cone",
+                   "Union_mesh"]
     for comp in instr.component_list:
-        if comp.component_name == "Union_cylinder":
-            union_geometries.append(comp)
-        elif comp.component_name == "Union_box":
-            union_geometries.append(comp)
-        elif comp.component_name == "Union_sphere":
-            union_geometries.append(comp)
-        elif comp.component_name == "Union_cone":
-            union_geometries.append(comp)
-        elif comp.component_name == "Union_mesh":
-            union_geometries.append(comp)
+        if comp.component_name in union_names:
+            union_geometries[comp.name] = comp
     return union_geometries
 
 
