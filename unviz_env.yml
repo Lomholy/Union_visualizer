@@ -8,4 +8,5 @@ dependencies:
   - trimesh
   - plotly
   - scikit-image
+  - pygfx
 
