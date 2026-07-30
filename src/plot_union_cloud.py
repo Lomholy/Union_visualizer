@@ -1,69 +1,83 @@
-import numpy as np
-import trimesh
-import plotly.graph_objects as go
-import mcstasscript.helper.mcstas_objects as mshelp
 from signed_distance_functions import *
+import mcstasscript.helper.mcstas_objects as mshelp
+import plotly.graph_objects as go
+import trimesh
+import numpy as np
 
+np.random.seed(42)
 
 
 def sample_union_cylinder(comp: mshelp.Component, n_points):
     # Sample a fraction on the sides, and a fraction on the ends
     radius = comp.radius
     height = comp.yheight
-    frac_side = int(n_points * 0.6)
-    frac_ends = int(n_points * 0.4)
+    frac_side = int(np.sqrt(n_points * 0.6))
+    frac_ends = int(np.sqrt(n_points * 0.4))
+    # Sample sides:
 
-    theta = np.random.uniform(0, 2 * np.pi, frac_side)
-    y = np.random.uniform(-height / 2, height / 2, frac_side)
+    theta = np.linspace(0, 2 * np.pi, frac_side)
+    y = np.linspace(-height / 2, height / 2, frac_side)
+    theta, y = np.meshgrid(theta, y)
+    theta = np.ravel(theta)
+    y = np.ravel(y)
     x = radius * np.cos(theta)
     z = radius * np.sin(theta)
     tmp = np.column_stack((x, y, z))
 
-    theta = np.random.uniform(0, 2 * np.pi, frac_ends)
-    rand_rad = np.random.rand(frac_ends) * radius
-    y = height / 2 * np.random.choice((-1, 1), size=frac_ends)
+    # Sample top and bottom
+
+    theta = np.linspace(0, 2 * np.pi, frac_ends)
+    rand_rad = np.linspace(0, radius, frac_ends)
+    theta, rand_rad = np.meshgrid(theta, rand_rad)
+    theta = theta.ravel()
+    rand_rad = rand_rad.ravel()
     x = np.cos(theta) * rand_rad
     z = np.sin(theta) * rand_rad
-    tmp_2 = np.column_stack((x, y, z))
 
-    return np.row_stack((tmp, tmp_2))
+    y = np.ones_like(theta)
+    tmp_2 = np.column_stack((x, y, z))
+    tmp_3 = np.column_stack((x, -y, z))
+
+    return np.row_stack((tmp, tmp_2, tmp_3))
 
 
 def sample_union_box(comp: mshelp.Component, n_points):
-    size_x = comp.xwidth
-    size_y = comp.yheight
-    size_z = comp.zdepth
-    points = []
-    faces = [
-        (np.array([1, 0, 0]), size_x / 2),
-        (np.array([-1, 0, 0]), size_x / 2),
-        (np.array([0, 1, 0]), size_y / 2),
-        (np.array([0, -1, 0]), size_y / 2),
-        (np.array([0, 0, 1]), size_z / 2),
-        (np.array([0, 0, -1]), size_z / 2),
-    ]
-    for _ in range(n_points):
-        normal, d = faces[np.random.randint(6)]
-        if normal[0]:
-            y = np.random.uniform(-size_y / 2, size_y / 2)
-            z = np.random.uniform(-size_z / 2, size_z / 2)
-            points.append([normal[0] * d, y, z])
-        elif normal[1]:
-            x = np.random.uniform(-size_x / 2, size_x / 2)
-            z = np.random.uniform(-size_z / 2, size_z / 2)
-            points.append([x, normal[1] * d, z])
-        else:
-            x = np.random.uniform(-size_x / 2, size_x / 2)
-            y = np.random.uniform(-size_y / 2, size_y / 2)
-            points.append([x, y, normal[2] * d])
-    return np.array(points)
+    sizes = np.array([comp.xwidth / 2, comp.yheight / 2, comp.zdepth / 2])
+    point_per_face = int(np.sqrt(n_points / 6))
+    points = np.zeros((point_per_face**2 * 6, 3))
+
+    x = np.linspace(-sizes[0], sizes[0], point_per_face)
+    y = np.linspace(-sizes[1], sizes[1], point_per_face)
+    z = np.linspace(-sizes[2], sizes[2], point_per_face)
+    x, t = np.meshgrid(x, x)
+    y, z = np.meshgrid(y, z)
+    t = t.ravel()
+    x = x.ravel()
+    y = y.ravel()
+    z = z.ravel()
+    x_tmp = np.ones_like(y) * sizes[0]
+    y_tmp = np.ones_like(y) * sizes[1]
+    z_tmp = np.ones_like(y) * sizes[2]
+
+    point_per_face = point_per_face**2
+    points[:point_per_face] = np.column_stack((x_tmp, y, z))
+    points[point_per_face : 2 * point_per_face] = np.column_stack((-x_tmp, y, z))
+    points[2 * point_per_face : 3 * point_per_face] = np.column_stack((x, y_tmp, z))
+    points[3 * point_per_face : 4 * point_per_face] = np.column_stack((x, -y_tmp, z))
+    points[4 * point_per_face : 5 * point_per_face] = np.column_stack((t, y, z_tmp))
+    points[5 * point_per_face : 6 * point_per_face] = np.column_stack((t, y, -z_tmp))
+    return points
 
 
 def sample_union_sphere(comp: mshelp.Component, n_points):
+    points = int(np.sqrt(n_points))
     radius = comp.radius
-    phi = np.random.uniform(0, 2 * np.pi, n_points)
-    costheta = np.random.uniform(-1, 1, n_points)
+    phi = np.linspace(0, 2 * np.pi, points)
+    costheta = np.linspace(-1, 1, points)
     theta = np.arccos(costheta)
+    theta, phi = np.meshgrid(theta, phi)
+    theta = theta.ravel()
+    phi = phi.ravel()
     x = radius * np.sin(theta) * np.cos(phi)
     y = radius * np.sin(theta) * np.sin(phi)
     z = radius * np.cos(theta)
@@ -74,28 +88,40 @@ def sample_union_cone(comp: mshelp.Component, n_points):
     radius_bottom = comp.radius_bottom
     radius_top = comp.radius_top
     height = comp.yheight
-    frac_side = int(n_points * 0.6)
-    frac_ends = int(n_points * 0.4)
+    frac_side = int(np.sqrt(n_points * 0.6))
+    frac_ends = int(np.sqrt(n_points * 0.4))
     # Truncated cone (frustum) surface sampling
-    y = np.random.uniform(-height / 2, height / 2, frac_side)
+    y = np.linspace(-height / 2, height / 2, frac_side)
+
+    theta = np.linspace(0, 2 * np.pi, frac_side)
+    y, theta = np.meshgrid(y, theta)
+    y = y.ravel()
+    theta = theta.ravel()
     t = (y + height / 2) / height  # 0 → bottom, 1 → top
     r = radius_bottom * (1 - t) + radius_top * t
 
-    theta = np.random.uniform(0, 2 * np.pi, frac_side)
     x = r * np.cos(theta)
     z = r * np.sin(theta)
     tmp_pts = np.column_stack((x, y, z))
 
-    theta = np.random.uniform(0, 2 * np.pi, frac_ends)
-    y = np.random.choice([-height / 2, height / 2], frac_ends)
-    rand_rad = np.where(y > 0, radius_top, radius_bottom)
-    rand_rad *= np.random.rand(frac_ends)
+    rad = np.linspace(0, 1, frac_ends)
+    theta = np.linspace(0, 2 * np.pi, frac_ends)
+    rad, theta = np.meshgrid(rad, theta)
+    rad = rad.ravel()
+    theta = theta.ravel()
 
-    x = rand_rad * np.cos(theta)
-    z = rand_rad * np.sin(theta)
-    tmp_pts_2 = np.column_stack((x, y, z))
+    y = np.ones_like(rad) * height / 2
+    radtop = rad * radius_top
+    radbot = rad * radius_bottom
 
-    return np.concatenate((tmp_pts, tmp_pts_2))
+    x = radbot * np.cos(theta)
+    z = radbot * np.sin(theta)
+    tmp_pts_2 = np.column_stack((x, -y, z))
+    x = radtop * np.cos(theta)
+    z = radtop * np.sin(theta)
+    tmp_pts_3 = np.column_stack((x, y, z))
+
+    return np.concatenate((tmp_pts, tmp_pts_2, tmp_pts_3))
 
 
 def sample_union_mesh(comp: mshelp.Component, n_points):
@@ -115,20 +141,31 @@ def sample_union_mesh(comp: mshelp.Component, n_points):
 
 
 def sdf_normal(sdf_func, pts, eps=1e-5):
-    grads = np.zeros((pts.shape[0], 4))
+    n = pts.shape[0]
 
-    for i in range(3):
-        dp = np.zeros_like(pts)
-        dp[:, i] = eps
+    offsets = np.array(
+        [
+            [eps, 0.0, 0.0, 0.0],
+            [-eps, 0.0, 0.0, 0.0],
+            [0.0, eps, 0.0, 0.0],
+            [0.0, -eps, 0.0, 0.0],
+            [0.0, 0.0, eps, 0.0],
+            [0.0, 0.0, -eps, 0.0],
+        ]
+    )
 
-        f_plus = sdf_func(pts + dp)
-        f_minus = sdf_func(pts - dp)
+    samples = (pts[:, None, :] + offsets[None, :, :]).reshape(-1, 4)
 
-        grads[:, i] = (f_plus - f_minus)# / (2 * eps)
+    vals = sdf_func(samples).reshape(n, 6)
 
-    # normalize per point
-    norms = np.linalg.norm(grads, axis=1, keepdims=True) + 1e-12
-    grads = grads / norms
+    grads = np.empty((n, 4))
+    grads[:, 0] = vals[:, 0] - vals[:, 1]
+    grads[:, 1] = vals[:, 2] - vals[:, 3]
+    grads[:, 2] = vals[:, 4] - vals[:, 5]
+    grads[:, 3] = 0.0
+
+    grads[:, :3] /= np.linalg.norm(grads[:, :3], axis=1, keepdims=True) + 1e-12
+
     return grads
 
 
@@ -166,9 +203,9 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
     Returns: list of arrays (points per geometry)
     """
 
-    clouds = []
+    clouds = {}
 
-    for comp in geometries:
+    for name, comp in geometries.items():
         print(f"SAMPLING {comp.name}")
 
         # initial samples (world space)
@@ -196,7 +233,7 @@ def sample_sdf_surfaces(geometries, final_sdfs, world_matrices, n_points, steps=
         points = pts[mask]
         # points = pts
 
-        clouds.append(points)
+        clouds[name] = points
 
     return clouds
 
@@ -226,60 +263,64 @@ def plot_multiple_clouds(cloud_list, geoms, size=3):
 
 
 def prioritise_points(point_clouds, sdfs, final_sdfs, geometries, world_matrices):
-    K = len(point_clouds)
-
+    K = len(point_clouds.keys())
+    final_points = {}
+    final_points_tracker = {}
     P = 0
-    for x in point_clouds:
+    for x in point_clouds.values():
         if x.shape[0] > P:
             P = x.shape[0]
-    final_points = np.zeros((P * K, 4, K))
-    final_points_tracker = np.zeros(K, dtype=int)
 
-    for i in range(K):
-        comp_i = geometries[i]
-        point_world = point_clouds[i]
-        p = point_clouds[i]
+    for name, comp in geometries.items():
+        final_points[name] = np.zeros((P * K, 4))
+        final_points_tracker[name] = 0
+    pairs = []
+
+    for name, comp in geometries.items():
+        comp = geometries[name]
+        point_world = point_clouds[name]
+        p = point_clouds[name]
         reassigned = np.zeros(point_world.shape[0])
 
-        for j in range(K):
-            if i == j:
+        for name2 in geometries.keys():
+            if (name, name2) in pairs or (name2, name) in pairs:
                 continue
-
-            comp_j = geometries[j]
-            f_j = sdfs[comp_j.name]
+            pairs.append((name, name2))
+            comp_j = geometries[name2]
+            f_j = sdfs[name2]
 
             val_j = f_j(p)
             mask = np.where(val_j < 0, True, False)
             reassigned += mask
             added_pts = point_world[mask]
 
-            if comp_i.priority > comp_j.priority:
-                final_points[
-                    final_points_tracker[j] : final_points_tracker[j]
+            if comp.priority > comp_j.priority:
+                final_points[name2][
+                    final_points_tracker[name2] : final_points_tracker[name2]
                     + added_pts.shape[0],
                     :,
-                    j,
                 ] = added_pts
-                final_points_tracker[j] += added_pts.shape[0]
+                final_points_tracker[name2] += added_pts.shape[0]
         mask = np.where(reassigned == 0, True, False)
-        final_points[
-            final_points_tracker[i] : final_points_tracker[i] + point_world.shape[0],
+        final_points[name][
+            final_points_tracker[name] : final_points_tracker[name]
+            + point_world.shape[0],
             :,
-            i,
         ] = point_world
-        final_points_tracker[i] += point_world.shape[0]
-        print(f"Processed geometry {i}")
+        final_points_tracker[name] += point_world.shape[0]
+        print(f"Processed geometry {name}")
     clouds = {}
-    for i in range(K):
+    for name in geometries.keys():
         # Do A final wipe, to remove any points not on the edge of the final sdf
-        sdf_fin = final_sdfs[geometries[i].name]
-        p = final_points[: final_points_tracker[i], :, i]
+        sdf_fin = final_sdfs[name]
+        p = final_points[name][: final_points_tracker[name], :]
         vals = sdf_fin(p)
         mask = np.where(abs(vals) < 1e-3, True, False)
         cloud = p[mask]
-        clouds[geometries[i].name] = cloud
+        clouds[name] = cloud
 
     return clouds
+
 
 def generate_points(union_geometries, sdfs, final_sdfs, world_matrices, n_points):
     point_clouds = sample_sdf_surfaces(
@@ -289,8 +330,6 @@ def generate_points(union_geometries, sdfs, final_sdfs, world_matrices, n_points
         point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
     )
     return point_clouds
-
-
 
 
 def plot_point_clouds(union_geometries, sdfs, final_sdfs, world_matrices, n_points):
