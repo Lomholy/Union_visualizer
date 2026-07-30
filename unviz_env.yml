@@ -2,12 +2,11 @@ name: unviz
 channels:
   - conda-forge
 dependencies:
-  - python=3.14
-  - numpy
+  - qt
+  - pyqt
   - mcstas
   - trimesh
   - plotly
   - scikit-image
   - pygfx
-  - pyqt
 
