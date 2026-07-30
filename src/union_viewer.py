@@ -14,7 +14,8 @@ from pygfx.utils.viewport import Viewport
 
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
-from meshing import build_meshes
+from meshing import build_all_meshes, build_mesh
+from plot_union_cloud import generate_points
 import argparse
 
 # ============================================================
@@ -26,6 +27,8 @@ def generate_group(
     input_file,
     clip,
     colors={},
+    meshes = None,
+    points = None,
     use_colors=False,
     res=64,
     verbose=False,
@@ -38,21 +41,35 @@ def generate_group(
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices, clip)
     print("Building meshes")
 
-    meshes = build_meshes(
-        union_geometries,
-        world_matrices,
-        sdfs,
-        final_sdfs,
-        res,
-        export=False,
-        verbose=False,
-    )
+    new_points = generate_points(union_geometries, sdfs, final_sdfs, world_matrices, 1000)
+    if points == None:
+        meshes = build_all_meshes(
+            union_geometries,
+            world_matrices,
+            sdfs,
+            final_sdfs,
+            res,
+            export=False,
+            verbose=False,
+        )
+        points = new_points
 
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
 
     for name, mesh in meshes.items():
+        if name not in points.keys():
+            meshes[name] = build_mesh(union_geometries[name], world_matrices, sdfs, final_sdfs, res)
+            mesh = meshes[name]
+        if points[name].shape != new_points[name].shape:
+            meshes[name] = build_mesh(union_geometries[name], world_matrices, sdfs, final_sdfs, res)
+            mesh = meshes[name]
+        elif np.any(abs(points[name] - new_points[name])>1e-10):
+            print(np.sum(abs(points[name] - new_points[name])>1e-10))
+            meshes[name] = build_mesh(union_geometries[name], world_matrices, sdfs, final_sdfs, res)
+            mesh = meshes[name]
+
         if name not in colors and use_colors:
             color = random.randrange(0, 2**24)
             colors[name] = f"#{color:06x}"
@@ -74,7 +91,7 @@ def generate_group(
         group.add(gfx_mesh)
         group.geometry_meshes[name] = gfx_mesh
 
-    return group
+    return (group, meshes, points)
 
 
 def make_coordinate_axes(
@@ -175,6 +192,8 @@ class Viewer(QtWidgets.QMainWindow):
             self.start_input = True
         self.last_mtime = None
         self.current_group = None
+        self.points = None
+        self.meshes = None
 
         # ----------------------------------------------------
         # Render widget
@@ -472,10 +491,12 @@ class Viewer(QtWidgets.QMainWindow):
             return
         print("Rebuilding meshes...")
         try:
-            new_group = generate_group(
+            new_group, meshes, points = generate_group(
                 self.input_file,
                 self.clip,
                 self.colors,
+                meshes= self.meshes,
+                points = self.points,
                 use_colors=self.color_checkbox.isChecked(),
                 res=self.res_val.currentData(),
             )
@@ -483,6 +504,8 @@ class Viewer(QtWidgets.QMainWindow):
                 mesh.visible = self.geometry_visibility.get(name, True)
             if self.current_group is not None:
                 self.scene.remove(self.current_group)
+            self.points = points
+            self.meshes = meshes
 
             self.current_group = new_group
 
