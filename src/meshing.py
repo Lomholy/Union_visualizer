@@ -20,7 +20,6 @@ def make_grid(sdf, bbox_min, bbox_max, resolution):
 def sdf_to_mesh(sdf_func, bbox_min, bbox_max, resolution=64):
     pts = make_grid(sdf_func, bbox_min, bbox_max, resolution)
     sdf_vals = sdf_func(pts).reshape((resolution, resolution, resolution))
-    print(pts.min(), pts.max())
 
     verts, faces, normals, _ = marching_cubes(sdf_vals, level=0.0)
 
@@ -42,7 +41,8 @@ def build_mesh(
     verbose=False,
     use_dual_contouring=False,
 ):
-    print(f"build single mesh! Building {comp.name}!")
+    if verbose:
+        print(f"build single mesh! Building {comp.name}!")
     name = comp.name
     if comp.component_name == "Union_mesh":
         mesh = trimesh.load_mesh(comp.filename.strip('"'))
@@ -85,7 +85,7 @@ def build_mesh(
         return mesh
     except Exception as e:
         print(e)
-        exit()
+        return
 
 
 def build_all_meshes(
@@ -96,13 +96,13 @@ def build_all_meshes(
     res,
     out_file="",
     export=True,
-    verbose=True,
+    verbose=False,
     use_dual_contouring=False,
 ):
     meshes = []
     meshes_dict = {}
     for name, comp in union_geometries.items():
-        if verbose is True:
+        if verbose:
             print(f"Building {name}!")
         if comp.component_name == "Union_mesh":
             mesh = trimesh.load_mesh(comp.filename.strip('"'))
@@ -118,7 +118,7 @@ def build_all_meshes(
             continue
         sdf_func = final_sdfs[name]
         bmin, bmax = compute_world_bbox(comp, world_matrices)
-        if verbose is True:
+        if verbose:
             print(f"BBOX {name}: {bmin} → {bmax}")
         if use_dual_contouring is True:
             continue
@@ -148,7 +148,7 @@ def build_all_meshes(
             meshes.append(mesh)
             meshes_dict[comp.name] = mesh
         except Exception as e:
-            print("Error building mesh:")
+            print(f"Error building mesh on {name}:")
             print(e)
     if export:
         comb_mesh = trimesh.util.concatenate(meshes)
