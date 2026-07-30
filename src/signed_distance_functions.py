@@ -131,7 +131,16 @@ GEOMETRY_SDF = {
 }
 
 
-def build_sdfs(union_geometries, world_matrices, clip={}):
+def build_sdfs(
+    union_geometries,
+    world_matrices,
+    clip={
+        "enable": False,
+        "position": 0,
+        "mode": "Above",
+        "axis": "X",
+    },
+):
     sdfs = {}
     final_sdfs = {}
     for name, comp in union_geometries.items():
@@ -149,7 +158,6 @@ def build_sdfs(union_geometries, world_matrices, clip={}):
         final_sdfs[name] = sdf_subtract_all(sdfs[name], higher_comps)
 
     if clip.get("enable", True):
-
         axis_map = {
             "X": 0,
             "Y": 1,
