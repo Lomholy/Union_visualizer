@@ -25,7 +25,6 @@ import argparse
 
 def rebuild_mesh(
     meshes,
-    mesh,
     name,
     union_geometries,
     world_matrices,
@@ -36,8 +35,7 @@ def rebuild_mesh(
     meshes[name] = build_mesh(
         union_geometries[name], world_matrices, sdfs, final_sdfs, res
     )
-    mesh = meshes[name]
-    return mesh, meshes
+    return meshes
 
 
 def generate_group(
@@ -57,7 +55,6 @@ def generate_group(
 
     )
     print("Building sdfs")
-    print(clip)
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices, clip)
     print("Building meshes")
 
@@ -79,18 +76,18 @@ def generate_group(
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
-    for name, mesh in meshes.items():
+    print(meshes.keys(), points.keys())
+    for name in new_points.keys():
         rebuild = 0
         if name not in points.keys():
             rebuild = 1
-        if points[name].shape != new_points[name].shape:
+        elif points[name].shape != new_points[name].shape:
             rebuild = 1
         elif np.any(abs(points[name] - new_points[name]) > 1e-10):
             rebuild = 1
         if rebuild:
-            mesh, meshes = rebuild_mesh(
+            meshes = rebuild_mesh(
                 meshes,
-                mesh,
                 name,
                 union_geometries,
                 world_matrices,
@@ -109,11 +106,9 @@ def generate_group(
         elif colors[name] == "#b6b6b6" and use_colors:
             color = random.randrange(0, 2**24)
             colors[name] = f"#{color:06x}"
-        if mesh is None:
-            continue
 
         gfx_mesh = gfx.Mesh(
-            gfx.geometry_from_trimesh(mesh),
+            gfx.geometry_from_trimesh(meshes[name]),
             gfx.MeshStandardMaterial(
                 color=colors[name],
                 metalness=0,
