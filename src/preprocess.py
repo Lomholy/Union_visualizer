@@ -45,13 +45,18 @@ def get_union_geometries(instr: ms.McStas_instr):
 
 
 def load_McStas_file(input_file):
-    if input_file.endswith(".py"):
-        instr = execute_mcstasscript_file(input_file)
-    elif input_file.endswith(".instr"):
-        file = ms.McStas_file(input_file)
-        instr = ms.McStas_instr("union_cad")
-        file.add_to_instr(instr)
-    return instr
+    try:
+        if input_file.endswith(".py"):
+            instr = execute_mcstasscript_file(input_file)
+        elif input_file.endswith(".instr"):
+            file = ms.McStas_file(input_file)
+            instr = ms.McStas_instr("union_cad")
+            file.add_to_instr(instr)
+        return instr
+    except Exception as e:
+        print(e)
+        return
+
 
 
 # =============================================================================
