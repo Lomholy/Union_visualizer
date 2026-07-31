@@ -106,6 +106,10 @@ def generate_group(
         elif colors[name] == "#b6b6b6" and use_colors:
             color = random.randrange(0, 2**24)
             colors[name] = f"#{color:06x}"
+        if name not in meshes.keys():
+            continue
+        elif meshes[name] is None:
+            continue
 
         gfx_mesh = gfx.Mesh(
             gfx.geometry_from_trimesh(meshes[name]),
