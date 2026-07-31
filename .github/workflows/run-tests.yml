@@ -55,6 +55,8 @@ jobs:
           cache-environment: true
           init-shell: bash
 
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
 
       - name: Verify environment
         shell: bash -l {0}
