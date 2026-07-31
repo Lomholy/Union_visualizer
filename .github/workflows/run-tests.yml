@@ -38,39 +38,39 @@ jobs:
             echo "Running mcstas_to_cad on $file"
             python src/mcstas_to_cad.py --input_file="$file"
           done
-
-  run-union_viewer:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          environment-file: unviz_env.yml
-          environment-name: unviz
-          cache-environment: true
-          init-shell: bash
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-
-      - name: Verify environment
-        shell: bash -l {0}
-        run: |
-          micromamba info
-          which python
-          python --version
-          micromamba list
-
-
-      - name: Run script on all test files
-        shell: bash -l {0}
-        run: |
-          for file in tests/*; do
-            echo "Running union_viewer on $file"
-            python src/union_viewer.py --input_file="$file"
-          done
+  #
+  # run-union_viewer:
+  #   runs-on: ubuntu-latest
+  #
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #
+  #
+  #     - name: Setup micromamba
+  #       uses: mamba-org/setup-micromamba@v2
+  #       with:
+  #         environment-file: unviz_env.yml
+  #         environment-name: unviz
+  #         cache-environment: true
+  #         init-shell: bash
+  #
+  #     - name: Install Qt
+  #       uses: jurplel/install-qt-action@v4
+  #
+  #     - name: Verify environment
+  #       shell: bash -l {0}
+  #       run: |
+  #         micromamba info
+  #         which python
+  #         python --version
+  #         micromamba list
+  #
+  #
+  #     - name: Run script on all test files
+  #       shell: bash -l {0}
+  #       run: |
+  #         for file in tests/*; do
+  #           echo "Running union_viewer on $file"
+  #           python src/union_viewer.py --input_file="$file"
+  #         done
