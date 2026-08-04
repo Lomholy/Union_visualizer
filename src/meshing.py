@@ -99,9 +99,14 @@ def build_all_meshes(
     verbose=False,
     use_dual_contouring=False,
 ):
-    meshes = []
     meshes_dict = {}
+    if use_dual_contouring:
+        meshes_dict = build_mesh_dual(
+            union_geometries, sdfs, final_sdfs, world_matrices, out_file, meshes_dict,
+        )
     for name, comp in union_geometries.items():
+        if use_dual_contouring:
+            continue
         if verbose:
             print(f"Building {name}!")
         if comp.component_name == "Union_mesh":
@@ -113,15 +118,13 @@ def build_all_meshes(
             mesh.apply_scale(float(comp.coordinate_scale))
             mesh.apply_transform(world_matrices[comp.name])
             mesh.export(f"{out_file}_{comp.name}.stl")
-            meshes.append(mesh)
             meshes_dict[name] = mesh
             continue
         sdf_func = final_sdfs[name]
         bmin, bmax = compute_world_bbox(comp, world_matrices)
         if verbose:
             print(f"BBOX {name}: {bmin} → {bmax}")
-        if use_dual_contouring is True:
-            continue
+
         try:
             verts, faces = sdf_to_mesh(
                 sdf_func,
@@ -143,17 +146,15 @@ def build_all_meshes(
                 print("verts is none")
                 continue
             mesh = trimesh.Trimesh(vertices=verts, faces=faces)
-            if export:
-                mesh.export(f"{out_file}_{comp.name}.stl")
-            meshes.append(mesh)
             meshes_dict[comp.name] = mesh
         except Exception as e:
             print(f"Error building mesh on {name}:")
             print(e)
+
     if export:
-        comb_mesh = trimesh.util.concatenate(meshes)
+        for name, mesh in meshes_dict.items():
+            mesh.export(f"{out_file}_{name}.stl")
+        comb_mesh = trimesh.util.concatenate(list(meshes_dict.values()))
         comb_mesh.export(f"{out_file}.stl")
-    if use_dual_contouring:
-        build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file)
-    #
+
     return meshes_dict
