@@ -5,6 +5,7 @@ import numpy as np
 from scipy.optimize import lsq_linear
 from plot_union_cloud import generate_points
 import plotly.graph_objects as go
+import time 
 
 
 @dataclass
@@ -30,13 +31,14 @@ class OctreeNode:
     is_leaf: bool = False
 
     # dual contouring data.
-    corner_signs: np.ndarray | None = None
+    corner_indices: np.ndarray | None = None
+    corners: np.ndarray | None = None
     hermite_points: list | None = None
     hermite_normals: list | None = None
     vertex: np.ndarray | None = None
 
 
-def build_uniform_octree_from_points(
+def build_octree_from_points(
     points,
     bbox_min,
     bbox_max,
@@ -80,17 +82,21 @@ def build_uniform_octree_from_points(
 
     bbox_min = np.asarray(bbox_min, dtype=float)
     bbox_max = np.asarray(bbox_max, dtype=float)
-    return recurse(
+    corner_positions = []
+    corner_map = {}
+    return (recurse(
         bbox_min,
         bbox_max,
         depth=0,
         max_depth=max_depth,
         points=points,
         min_points=min_points,
-    )
+        corner_list = corner_positions,
+        corner_map = corner_map
+    ), corner_positions, corner_map)
 
 
-def recurse(bmin, bmax, depth, max_depth, points, min_points):
+def recurse(bmin, bmax, depth, max_depth, points, min_points, corner_list, corner_map):
     """
     Recursively subdivide every cell until max_depth, or less than min points
     are contained within the box
@@ -109,6 +115,32 @@ def recurse(bmin, bmax, depth, max_depth, points, min_points):
     npts = len(points)
     # Stop once all cells have reached the same target depth.
     if depth >= max_depth or npts < min_points:
+        x0, y0, z0 = node.bmin
+        x1, y1, z1 = node.bmax
+        
+        corners = (
+                (x0, y0, z0),
+                (x0, y0, z1),
+                (x0, y1, z0),
+                (x0, y1, z1),
+                (x1, y0, z0),
+                (x1, y0, z1),
+                (x1, y1, z0),
+                (x1, y1, z1),
+          
+        )
+        
+        corner_indices = np.empty(8, dtype=int)
+        
+        for i, key in enumerate(corners):
+            if key not in corner_map:
+                corner_map[key] = len(corner_list)
+                corner_list.append(key)
+        
+            corner_indices[i] = corner_map[key]
+
+        node.corner_indices = corner_indices
+        
         return node
 
     # Determine which side of the center each point lies on
@@ -148,7 +180,8 @@ def recurse(bmin, bmax, depth, max_depth, points, min_points):
                     dtype=float,
                 )
                 child = recurse(
-                    child_min, child_max, depth + 1, max_depth, child_points, min_points
+                    child_min, child_max, depth + 1, max_depth, child_points, min_points,
+                    corner_list, corner_map
                 )
 
                 node.children.append(child)
@@ -215,8 +248,22 @@ EDGE_VERTS = [
 
 flag_fix_verts = [0]
 
+def qef_minimize(points, normals):
+    # points: (N,3)
+    # normals: (N,3)
 
-def calc_vert(leaf, sdf):
+    A = np.asarray(normals, dtype=float)
+    b = np.sum(points * normals, axis=1)
+
+    ATA = A.T @ A
+    ATb = A.T @ b
+
+    # robust for rank-deficient cases
+    x = np.linalg.pinv(ATA) @ ATb
+
+    return x
+
+def calc_vert(leaf, sdf, corner_pos, corner_vals):
     """
     Compute the dual contouring vertex for a single octree leaf cell.
 
@@ -233,29 +280,7 @@ def calc_vert(leaf, sdf):
        to place one representative dual contouring vertex inside the cell.
     """
 
-    # Extract the axis-aligned bounds of the current leaf cell.
-    x0, y0, z0 = leaf.bmin
-    x1, y1, z1 = leaf.bmax
-
-    # Coordinates of the eight cell corners.
-    #
-    # The fourth coordinate is set to 1, presumably because the SDF expects
-    # homogeneous coordinates or points compatible with 4D transform logic.
-    corners = np.array(
-        [
-            [x0, y0, z0, 1],
-            [x0, y0, z1, 1],
-            [x0, y1, z0, 1],
-            [x0, y1, z1, 1],
-            [x1, y0, z0, 1],
-            [x1, y0, z1, 1],
-            [x1, y1, z0, 1],
-            [x1, y1, z1, 1],
-        ]
-    )
-
-    # Evaluate the signed distance field at the cell corners.
-    values = sdf(corners)
+    values = corner_vals[leaf.corner_indices]
 
     # If all corners lie on the same side of the implicit surface,
     # there is no detected surface crossing in this cell.
@@ -284,30 +309,30 @@ def calc_vert(leaf, sdf):
         # This code uses a few bisection iterations, which can be
         # more robust if the SDF is nonlinear along the edge.
 
-        pa = corners[a].copy()
-        pb = corners[b].copy()
+        pa = corner_pos[leaf.corner_indices[a]].copy()
+        pb = corner_pos[leaf.corner_indices[b]].copy()
 
         # Refine the edge intersection using bisection.
         #
         # Four iterations gives a coarse approximation. Increasing this
         # number gives more accurate Hermite points at modest cost.
-        for _ in range(4):
-            pm = 0.5 * (pa + pb)
-            vm = sdf(pm[None])[0]
-
-            # Keep the sub-interval that contains the sign change.
-            if va * vm <= 0:
-                pb = pm
-                vb = vm
-            else:
-                pa = pm
-                va = vm
+        # for _ in range(4):
+        #     pm = 0.5 * (pa + pb)
+        #     vm = sdf(pm[None])[0]
+        #
+        #     # Keep the sub-interval that contains the sign change.
+        #     if va * vm <= 0:
+        #         pb = pm
+        #         vb = vm
+        #     else:
+        #         pa = pm
+        #         va = vm
 
         p = 0.5 * (pa + pb) + eps * pa
         p = p[:, None]
-        n = sdf_normal(sdf, p.T)
+        # n = sdf_normal(sdf, p.T)
         hermite_points.append(np.squeeze(p)[:3])
-        hermite_normals.append(np.squeeze(n)[:3])
+        # hermite_normals.append(np.squeeze(n)[:3])
 
     # If we got here because the corners had mixed signs, at least one edge
     # crossing should normally have been found. If not, something is
@@ -326,53 +351,59 @@ def calc_vert(leaf, sdf):
     #     n_i dot x = n_i dot p_i
     #
     # The solution x is the point that best fits all tangent planes.
-    A = np.squeeze(np.asarray(hermite_normals))
-    b = np.asarray([np.dot(n, p) for p, n in zip(hermite_points, hermite_normals)])
-    center = np.mean(hermite_points, axis=0)
-    lam = 1e-5
-    A_aug = np.vstack([A, np.sqrt(lam) * np.eye(3)])
-    b_aug = np.concatenate([b, np.sqrt(lam) * center])
+    # A = np.squeeze(np.asarray(hermite_normals))
+    # b = np.asarray([np.dot(n, p) for p, n in zip(hermite_points, hermite_normals)])
+    # center = np.mean(hermite_points, axis=0)
+    # lam = 1e-5
+    # A_aug = np.vstack([A, np.sqrt(lam) * np.eye(3)])
+    # b_aug = np.concatenate([b, np.sqrt(lam) * center])
 
     # Solve the regularized least-squares problem.
     # x, *_ = np.linalg.lstsq(A_aug, b_aug)
-    res = lsq_linear(A_aug, b_aug, bounds=(leaf.bmin, leaf.bmax))
-    x = res.x
+    # res = lsq_linear(A_aug, b_aug, bounds=(leaf.bmin, leaf.bmax))
+    # x = res.x
     # If the sdf value is large, then the QEF did not work.
     # Instead, we march the vertices, by using the sdf normal
-    x = np.array([[x[0], x[1], x[2], 1]])
-    x_sdf = sdf(x)
+    # x = np.array([[x[0], x[1], x[2], 1]])
+    # x_sdf = sdf(x)
 
-    if abs(x_sdf) > 1e-3:
-        # Move the vertices to the closest surface
-        # using the sdf normal at that point
-        flag_fix_verts[0] += 1
-        # x = np.array(hermite_points[0])
-        for i in range(4):
-            sdf_vals = sdf(x)
-
-            grads = sdf_normal(sdf, x)
-
-            x -= sdf_vals[:, None] * grads  # Newton projection
+    # if abs(x_sdf) > 1e-3:
+    #     # Move the vertices to the closest surface
+    #     # using the sdf normal at that point
+    #     flag_fix_verts[0] += 1
+    #     # x = np.array(hermite_points[0])
+    #     for i in range(4):
+    #         sdf_vals = sdf(x)
+    #
+    #         grads = sdf_normal(sdf, x)
+    #
+    #         x -= sdf_vals[:, None] * grads  # Newton projection
 
     # Clamp the dual contouring vertex to the current cell.
-    x = x.squeeze()[:3]
-    x = np.clip(x, leaf.bmin, leaf.bmax)
+    # x = x.squeeze()[:3]
+    # x = np.clip(x, leaf.bmin, leaf.bmax)
 
     # Store data on the leaf for later visualization or meshing.
-    leaf.corner_signs = values
+    leaf.corners = values
     leaf.hermite_points = hermite_points
-    leaf.hermite_normals = hermite_normals
-    leaf.vertex = x
+    # leaf.hermite_normals = hermite_normals
+
+    leaf.vertex = np.mean(hermite_points, axis=0)
+
+def compute_all_corners(corners, sdf):
+    corners = np.column_stack((corners, np.ones(len(corners))))
+    return corners, sdf(corners)
 
 
-def compute_vertices(node, sdf):
+
+def compute_vertices(node, sdf, corner_pos, corner_vals):
     """
     Traverse the octree and compute dual contouring vertices for all leaves.
     """
 
     # Leaf cell: compute its dual contouring vertex if it contains the surface.
     if node.is_leaf:
-        calc_vert(node, sdf)
+        calc_vert(node, sdf, corner_pos, corner_vals)
         return
 
     # Internal node: recurse into children.
@@ -380,6 +411,8 @@ def compute_vertices(node, sdf):
         compute_vertices(
             child,
             sdf,
+            corner_pos,
+            corner_vals
         )
 
 
@@ -604,10 +637,10 @@ def get_edge_corners(a, b, c, d, coord):
         b_corn = [2, 3]
         c_corn = [0, 1]
         d_corn = [4, 5]
-    a_corn = [a.corner_signs[x] for x in a_corn]
-    b_corn = [b.corner_signs[x] for x in b_corn]
-    c_corn = [c.corner_signs[x] for x in c_corn]
-    d_corn = [d.corner_signs[x] for x in d_corn]
+    a_corn = [a.corners[x] for x in a_corn]
+    b_corn = [b.corners[x] for x in b_corn]
+    c_corn = [c.corners[x] for x in c_corn]
+    d_corn = [d.corners[x] for x in d_corn]
     corn = [a_corn, b_corn, c_corn, d_corn]
     s = [a, b, c, d]
     s = sorted(range(len(s)), key=lambda k: s[k].depth, reverse=True)
@@ -808,7 +841,16 @@ def plot_octree(leaves, root, faces, vertices, clouds=None):
     fig.show()
 
 
-def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file):
+def build_mesh_dual(
+    union_geometries,
+    sdfs,
+    final_sdfs,
+    world_matrices,
+    out_file,
+    meshes_dict,
+    verbose=True,
+    clouds=None,
+):
     """
     High-level driver for building an adaptive octree and computing dual
     contouring vertices for each component in the union geometry.
@@ -819,27 +861,25 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
     - Compute one dual contouring vertex per active leaf cell.
     - Visualize the octree and vertices.
     """
-
+    start_time = time.time()
+    print("Building mesh dual!")
     # Generate point samples from the input geometries/SDFs.
-    clouds = generate_points(
-        union_geometries,
-        sdfs,
-        final_sdfs,
-        world_matrices,
-        n_points=10000,
-    )
-
+    if not clouds:
+        clouds = generate_points(
+            union_geometries,
+            sdfs,
+            final_sdfs,
+            world_matrices,
+            n_points=5000,
+        )
     # Process each component independently.
-    for i, comp in enumerate(union_geometries):
-        cloud = clouds[comp.name]
-        sdf = final_sdfs[comp.name]
-
+    for name, comp in union_geometries.items():
+        cloud = clouds[name]
+        sdf = final_sdfs[name]
         # Skip components with no sampled points.
         if len(cloud) == 0:
             continue
-
         points = cloud[:, :3]
-
         # Compute a tight bounding box around the sampled points.
         bbox_min = points.min(axis=0)
         bbox_max = points.max(axis=0)
@@ -851,25 +891,35 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         bbox_max += 0.05 * span
 
         # Build an adaptive octree from the point cloud.
-        root = build_uniform_octree_from_points(
+        root, corner_list, corner_map = build_octree_from_points(
             points,
             bbox_min,
             bbox_max,
-            max_depth=8,
-            min_points=5,
+            max_depth=9,
+            min_points=3,
         )
+        print(len(corner_list))
 
-        print("Octree built!")
+        if verbose:
+            print("Octree built!")
 
         # Extract all leaf cells where DC vertices may be computed.
         leaves = get_octree_leaves(root)
+        print(len(leaves))
 
-        print("Leaves gotten!")
+        if verbose:
+            print("Leaves gotten!")
 
         # Evaluate the SDF in each leaf and compute the dual contouring
         # vertex where the implicit surface crosses the cell.
-        compute_vertices(root, sdf)
-        print(f"Number of vertices to fix is {flag_fix_verts}")
+        print("Computing corners!")
+        corner_list, corner_vals = compute_all_corners(corner_list, sdf)
+
+        print("Computing vertices!")
+        compute_vertices(root, sdf, corner_list, corner_vals)
+
+        if verbose:
+            print(f"Number of vertices to fix is {flag_fix_verts}")
         vertices = []
         for leaf in leaves:
             if leaf.vertex is not None:
@@ -877,37 +927,37 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
                 vertices.append(leaf.vertex)
         vertices = np.asarray(vertices)
         #
-        print("Vertices calculated!")
+
+        if verbose:
+            print("Vertices calculated!")
 
         faces = []
         cellProc(root, faces)
-        print("Faces calculated!")
+
+        if verbose:
+            print("Faces calculated!")
         faces = np.asarray(faces, dtype=int)
         if len(vertices) > 0 and len(faces) > 0:
-            mesh = trimesh.Trimesh(
+            meshes_dict[name] = trimesh.Trimesh(
                 vertices=vertices,
                 faces=faces,
             )
-            # mesh.fix_normals()
-
-            mesh.export(f"dc_{out_file}_{comp.name}.stl")
-
-            print(f"Exported dual contouring mesh to: {out_file}")
         else:
-            print("No mesh exported because vertices or faces are empty.")
+            if verbose:
+                print("No mesh made because vertices or faces are empty.")
 
-        print(
-            comp.name,
-            "points:",
-            len(points),
-            "leaves:",
-            len(leaves),
-            "dc verts:",
-            len(vertices),
-            "faces:",
-            len(faces),
-        )
-
+        if verbose:
+            print(
+                comp.name,
+                "points:",
+                len(points),
+                "leaves:",
+                len(leaves),
+                "dc verts:",
+                len(vertices),
+                "faces:",
+                len(faces),
+            )
         # Visualize the sampled point cloud, octree cells, and computed
         # dual contouring vertices.
         # plot_octree(
@@ -917,3 +967,7 @@ def build_mesh_dual(union_geometries, sdfs, final_sdfs, world_matrices, out_file
         #     vertices,
         #     [cloud],
         # )
+
+    print(f"Time taken is {time.time() - start_time}")
+
+    return meshes_dict
