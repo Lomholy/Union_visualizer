@@ -31,15 +31,18 @@ def rebuild_mesh(
     sdfs,
     final_sdfs,
     res,
-    use_dual_contouring,
+    clip,
+    mesher,
 ):
     meshes[name] = build_mesh(
         union_geometries[name],
+        union_geometries,
         world_matrices,
         sdfs,
         final_sdfs,
         res,
-        use_dual_contouring=use_dual_contouring,
+        clip,
+        mesher=mesher,
     )
     return meshes
 
@@ -50,7 +53,7 @@ def generate_group(
     colors={},
     meshes=None,
     points=None,
-    use_dual_contouring=False,
+    mesher="mc",
     use_colors=False,
     force_remesh=False,
     res=64,
@@ -74,9 +77,10 @@ def generate_group(
             sdfs,
             final_sdfs,
             res,
+            clip,
             export=False,
             verbose=False,
-            use_dual_contouring=use_dual_contouring,
+            mesher=mesher,
         )
         points = new_points
 
@@ -101,7 +105,8 @@ def generate_group(
                 sdfs,
                 final_sdfs,
                 res,
-                use_dual_contouring,
+                clip,
+                mesher,
             )
             if verbose:
                 print(f"Rebuilding {name}")
@@ -235,7 +240,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.current_group = None
         self.points = None
         self.meshes = None
-        self.use_dual_contouring = False
+        self.mesher = "mc"
 
         # ----------------------------------------------------
         # Render widget
@@ -348,8 +353,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.color_checkbox = QtWidgets.QCheckBox("Color individual component")
         dock_layout.addWidget(self.color_checkbox)
 
-        self.dual_cont_checkbox = QtWidgets.QCheckBox("Enable dual contouring")
-        dock_layout.addWidget(self.dual_cont_checkbox)
+        self.mesher_box = QtWidgets.QComboBox()
+        self.mesher_box.addItems(["mc", "dc", "brep"])
+
+        dock_layout.addWidget(self.mesher_box)
         # ----------------------------------------
         # Axis selector
         # ----------------------------------------
@@ -456,7 +463,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.clip_checkbox.stateChanged.connect(self.on_clip_changed)
         self.color_checkbox.stateChanged.connect(self.on_color_changed)
-        self.dual_cont_checkbox.stateChanged.connect(self.on_dual_cont_changed)
+        self.mesher_box.currentTextChanged.connect(self.on_mesher_changed)
         self.axis_combo.currentTextChanged.connect(self.on_clip_changed)
         self.mode_combo.currentTextChanged.connect(self.on_clip_changed)
         self.slice_val.valueChanged.connect(self.on_clip_changed)
@@ -533,7 +540,7 @@ class Viewer(QtWidgets.QMainWindow):
     # Reload geometry
     # ========================================================
 
-    def reload_meshes(self):
+    def reload_meshes(self, force_reload=False):
         if self.input_file is None:
             return
         print("Rebuilding meshes...")
@@ -544,9 +551,10 @@ class Viewer(QtWidgets.QMainWindow):
                 self.colors,
                 meshes=self.meshes,
                 points=self.points,
-                use_dual_contouring=self.use_dual_contouring,
+                mesher=self.mesher,
                 use_colors=self.color_checkbox.isChecked(),
                 res=self.res_val.currentData(),
+                force_remesh=force_reload
             )
             for name, mesh in new_group.geometry_meshes.items():
                 mesh.visible = self.geometry_visibility.get(name, True)
@@ -601,9 +609,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip["position"] = self.slice_val.value()
         self.reload_meshes()
 
-    def on_dual_cont_changed(self):
-        self.use_dual_contouring = self.dual_cont_checkbox.isChecked()
-        self.reload_meshes()
+    def on_mesher_changed(self):
+        self.mesher = self.mesher_box.currentText()
+        self.reload_meshes(force_reload=True)
 
     def on_color_changed(self):
         self.reload_meshes()

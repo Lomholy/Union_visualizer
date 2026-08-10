@@ -31,7 +31,11 @@ def parse():
         default=1_000,
     )
     parser.add_argument("--plot_point_cloud", action="store_true", default=False)
-    parser.add_argument("--use_dual_contouring", action="store_true", default=False)
+    parser.add_argument(
+        "--mesher",
+        default="mc",
+        help="Chosen mesher. Possibilities are: mc (Marching cubes), dc (Dual contouring), brep (Boundary representations)",
+    )
     parser.add_argument("--verbose", action="store_true", default=False)
     parser.add_argument("--export", action="store_true", default=False)
     return parser
@@ -52,7 +56,13 @@ if __name__ == "__main__":
     verbose = args.verbose
     res = args.resolution
     export = args.export
-    use_dual_contouring = args.use_dual_contouring
+    mesher = args.mesher
+    clip = {
+            "enable": False,
+            "axis": "X",
+            "mode": "Above",
+            "position": 0,
+        }
 
     instr, world_matrices, union_geometries = preprocess(input_file, verbose)
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices)
@@ -65,7 +75,9 @@ if __name__ == "__main__":
         sdfs,
         final_sdfs,
         res,
-        out_file = out_file,
+        clip,
+        out_file=out_file,
         export=export,
-        use_dual_contouring=use_dual_contouring
+        mesher=mesher,
+
     )

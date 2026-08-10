@@ -4,6 +4,7 @@ from skimage.measure import marching_cubes
 from plot_union_cloud import sdf_normal
 from bounding_box import compute_world_bbox
 from dual_cont import build_mesh_dual
+from brep import build_brep_meshes, build_single_brep_mesh
 
 
 def make_grid(sdf, bbox_min, bbox_max, resolution):
@@ -32,14 +33,16 @@ def sdf_to_mesh(sdf_func, bbox_min, bbox_max, resolution=64):
 
 def build_mesh(
     comp,
+    union_geometries,
     world_matrices,
     sdfs,
     final_sdfs,
     res,
+    clip,
     out_file="",
     export=True,
     verbose=False,
-    use_dual_contouring=False,
+    mesher="mc",
 ):
     if verbose:
         print(f"build single mesh! Building {comp.name}!")
@@ -58,8 +61,12 @@ def build_mesh(
     bmin, bmax = compute_world_bbox(comp, world_matrices)
     if verbose:
         print(f"BBOX {name}: {bmin} → {bmax}")
-    if use_dual_contouring:
+    if mesher == "dc":
         return
+    if mesher == "brep":
+        mesh = build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose)
+        return mesh
+
     try:
         verts, faces = sdf_to_mesh(
             sdf_func,
@@ -94,19 +101,25 @@ def build_all_meshes(
     sdfs,
     final_sdfs,
     res,
+    clip,
     out_file="",
     export=True,
     verbose=False,
-    use_dual_contouring=False,
+    mesher="mc",
 ):
     meshes_dict = {}
-    if use_dual_contouring:
+    if mesher == "dc":
         meshes_dict = build_mesh_dual(
-            union_geometries, sdfs, final_sdfs, world_matrices, out_file, meshes_dict,
+            union_geometries,
+            sdfs,
+            final_sdfs,
+            world_matrices,
+            out_file,
+            meshes_dict,
         )
+    if mesher == "brep":
+        meshes_dict = build_brep_meshes(union_geometries, world_matrices, clip, verbose)
     for name, comp in union_geometries.items():
-        if use_dual_contouring:
-            continue
         if verbose:
             print(f"Building {name}!")
         if comp.component_name == "Union_mesh":
@@ -119,6 +132,8 @@ def build_all_meshes(
             mesh.apply_transform(world_matrices[comp.name])
             mesh.export(f"{out_file}_{comp.name}.stl")
             meshes_dict[name] = mesh
+            continue
+        if mesher != "mc":
             continue
         sdf_func = final_sdfs[name]
         bmin, bmax = compute_world_bbox(comp, world_matrices)
