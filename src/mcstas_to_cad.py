@@ -8,7 +8,6 @@
 import argparse
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
-from plot_union_cloud import plot_point_clouds
 from meshing import build_all_meshes
 
 # ==============================================================================
@@ -30,7 +29,6 @@ def parse():
         help="Number of points on geometries when plotting point clouds",
         default=1_000,
     )
-    parser.add_argument("--plot_point_cloud", action="store_true", default=False)
     parser.add_argument(
         "--mesher",
         default="brep",
@@ -51,7 +49,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     input_file = args.input_file
     out_file = args.out_file
-    plot_point_cloud = args.plot_point_cloud
     n_points = args.n_points
     verbose = args.verbose
     res = args.resolution
@@ -66,9 +63,6 @@ if __name__ == "__main__":
 
     instr, world_matrices, union_geometries = preprocess(input_file, verbose)
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices)
-    if plot_point_cloud:
-        plot_point_clouds(union_geometries, sdfs, final_sdfs, world_matrices, n_points)
-
     build_all_meshes(
         union_geometries,
         world_matrices,

@@ -1,6 +1,5 @@
 from signed_distance_functions import *
 import mcstasscript.helper.mcstas_objects as mshelp
-import plotly.graph_objects as go
 import trimesh
 import numpy as np
 
@@ -38,7 +37,7 @@ def sample_union_cylinder(comp: mshelp.Component, n_points):
     tmp_2 = np.column_stack((x, y, z))
     tmp_3 = np.column_stack((x, -y, z))
 
-    return np.row_stack((tmp, tmp_2, tmp_3))
+    return np.vstack((tmp, tmp_2, tmp_3))
 
 
 def sample_union_box(comp: mshelp.Component, n_points):
@@ -240,29 +239,6 @@ def sample_sdf_surfaces(
     return clouds
 
 
-def plot_multiple_clouds(cloud_list, geoms, size=3):
-    fig = go.Figure()
-
-    for name, pts in cloud_list.items():
-        # if geoms[i].component_name != "Union_cone":
-        #     continue
-        fig.add_trace(
-            go.Scatter3d(
-                x=pts[:, 0],
-                y=pts[:, 1],
-                z=pts[:, 2],
-                mode="markers",
-                marker=dict(size=size),
-                name=f"Cloud {name}",
-                opacity=0.7,
-            )
-        )
-
-    fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z"))
-
-    fig.show()
-
-
 def prioritise_points(
     point_clouds, sdfs, final_sdfs, geometries, world_matrices, verbose=False
 ):
@@ -336,13 +312,3 @@ def generate_points(
         point_clouds, sdfs, final_sdfs, union_geometries, world_matrices, verbose
     )
     return point_clouds
-
-
-def plot_point_clouds(union_geometries, sdfs, final_sdfs, world_matrices, n_points):
-    point_clouds = sample_sdf_surfaces(
-        union_geometries, final_sdfs, world_matrices, n_points
-    )
-    point_clouds = prioritise_points(
-        point_clouds, sdfs, final_sdfs, union_geometries, world_matrices
-    )
-    plot_multiple_clouds(point_clouds, union_geometries)
