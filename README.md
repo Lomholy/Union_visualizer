@@ -42,6 +42,7 @@ First clone this repository:
 Then you make a union visualizer environment by using the two commands below:
 
 `conda env create -f unviz_env.yml`
+
 `conda activate unviz`
 
 
