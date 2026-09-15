@@ -1,4 +1,4 @@
-name: unviz-dev
+name: unviz
 channels:
   - conda-forge
 dependencies:
