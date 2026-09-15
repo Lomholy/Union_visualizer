@@ -9,5 +9,5 @@ dependencies:
   - plotly
   - scikit-image
   - pygfx
-  - occt
+  - pythonocc-core
 
