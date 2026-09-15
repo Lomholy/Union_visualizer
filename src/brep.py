@@ -68,7 +68,6 @@ def get_mask_comps(focus_comp, union_geometries):
             continue
         if focus_comp.name in comp.mask_string:
             mask_comps.append(comp)
-            print("Here?")
     for mask in mask_comps:
         if mask.mask_setting == "All":
             mask_setting = mask.mask_setting
@@ -77,7 +76,6 @@ def get_mask_comps(focus_comp, union_geometries):
     return mask_comps, mask_setting
 
 def intersect_with_masks(shape, mask_comps, mask_setting):
-    print(mask_comps)
     if mask_setting == "All":
         # C ∩ M1 ∩ M2 ∩ ... ∩ Mn
         result_shape = shape
@@ -213,17 +211,16 @@ def clip_component(shape, clip):
 
 
 def build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose):
-    print(f"Processing {comp.name}")
     if hasattr(comp, 'mask_string'):
         if comp.mask_string != None:
-            print(f"{comp.name} is a mask, and is therefore not meshed.")
+            if verbose:
+                print(f"{comp.name} is a mask, and is therefore not meshed.")
             return None
     higher_priority = [
         x for n, x in union_geometries.items() if x.priority > comp.priority
     ]
     res_comp = build_comp_brep(comp, world_matrices)
     mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
-    print(mask_comps)
     mask_comps = build_mask_comps(mask_comps, world_matrices)
     prio_breps = build_higher_priorities(higher_priority, world_matrices)
     res_comp = subtract_higher_priorities(res_comp, prio_breps)
