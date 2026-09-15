@@ -48,6 +48,6 @@ Then you make a union visualizer environment by using the two commands below:
 ### Author
 
 The union visualizer software was authored by
-Daniel Lomholt Christensen as part of his Phd. project at the Niels Bohr Institute at the university of Copenhagen
+Daniel Lomholt Christensen as part of his Phd. project at the Niels Bohr Institute at the University of Copenhagen
 
 
