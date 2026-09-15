@@ -105,7 +105,7 @@ def build_all_meshes(
     out_file="",
     export=True,
     verbose=False,
-    mesher="mc",
+    mesher="brep",
 ):
     meshes_dict = {}
     if mesher == "dc":
@@ -120,6 +120,9 @@ def build_all_meshes(
     if mesher == "brep":
         meshes_dict = build_brep_meshes(union_geometries, world_matrices, clip, verbose)
     for name, comp in union_geometries.items():
+        print(mesher)
+        if mesher != "mc":
+            break
         if verbose:
             print(f"Building {name}!")
         if comp.component_name == "Union_mesh":
@@ -168,6 +171,8 @@ def build_all_meshes(
 
     if export:
         for name, mesh in meshes_dict.items():
+            if mesh is None:
+                continue
             mesh.export(f"{out_file}_{name}.stl")
         comb_mesh = trimesh.util.concatenate(list(meshes_dict.values()))
         comb_mesh.export(f"{out_file}.stl")

@@ -33,7 +33,7 @@ def parse():
     parser.add_argument("--plot_point_cloud", action="store_true", default=False)
     parser.add_argument(
         "--mesher",
-        default="mc",
+        default="brep",
         help="Chosen mesher. Possibilities are: mc (Marching cubes), dc (Dual contouring), brep (Boundary representations)",
     )
     parser.add_argument("--verbose", action="store_true", default=False)

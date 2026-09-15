@@ -1,8 +1,9 @@
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeSphere
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCone
-from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut
+from OCC.Core.BRepPrimAPI import (
+        BRepPrimAPI_MakeCylinder,
+        BRepPrimAPI_MakeBox, 
+        BRepPrimAPI_MakeSphere, 
+        BRepPrimAPI_MakeCone,
+        BRepPrimAPI_MakeHalfSpace)
 from OCC.Core.gp import gp_Ax2, gp_Pnt, gp_Dir
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.TopExp import TopExp_Explorer
@@ -11,8 +12,11 @@ from OCC.Core.BRep import BRep_Tool
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pln
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeHalfSpace
-from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common
+from OCC.Core.BRepAlgoAPI import (
+    BRepAlgoAPI_Common,
+    BRepAlgoAPI_Cut,
+    BRepAlgoAPI_Fuse,
+)
 import trimesh
 import numpy as np
 
@@ -56,6 +60,77 @@ def build_comp_brep(comp, world_matrices):
         ).Shape()
     return brep
 
+def get_mask_comps(focus_comp, union_geometries):
+    mask_comps = []
+    mask_setting = "No"
+    for name,comp in union_geometries.items():
+        if comp.mask_string is None: 
+            continue
+        if focus_comp.name in comp.mask_string:
+            mask_comps.append(comp)
+            print("Here?")
+    for mask in mask_comps:
+        if mask.mask_setting == "All":
+            mask_setting = mask.mask_setting
+    if mask_setting == "No" and len(mask_comps)>0:
+        mask_setting = "Any"
+    return mask_comps, mask_setting
+
+def intersect_with_masks(shape, mask_comps, mask_setting):
+    print(mask_comps)
+    if mask_setting == "All":
+        # C ∩ M1 ∩ M2 ∩ ... ∩ Mn
+        result_shape = shape
+
+        for mask_comp in mask_comps:
+            common = BRepAlgoAPI_Common(result_shape, mask_comp)
+            common.Build()
+
+            if not common.IsDone():
+                raise RuntimeError(
+                    f"Boolean intersection failed for mask "
+                    f"{mask_comp.name!r}"
+                )
+
+            result_shape = common.Shape()
+        return result_shape
+
+    elif mask_setting == "Any":
+        # C ∩ (M1 ∪ M2 ∪ ... ∪ Mn)
+        combined_mask = mask_comps[0]
+
+        for mask_comp in mask_comps[1:]:
+            fuse = BRepAlgoAPI_Fuse(combined_mask, mask_comp)
+            fuse.Build()
+
+            if not fuse.IsDone():
+                raise RuntimeError(
+                    f"Boolean union failed for mask "
+                    f"{mask_comp.name!r}"
+                )
+
+            combined_mask = fuse.Shape()
+
+        common = BRepAlgoAPI_Common(shape, combined_mask)
+        common.Build()
+
+        if not common.IsDone():
+            raise RuntimeError(
+                "Boolean intersection with combined ANY mask failed"
+            )
+
+        return common.Shape()
+    return shape
+
+
+
+def build_mask_comps(mask_comps, world_matrices):
+    breps = []
+    for i, comp in enumerate(mask_comps):
+        brep = build_comp_brep(comp, world_matrices)
+        breps.append(brep)
+
+    return breps
 
 def build_higher_priorities(higher_priorities, world_matrices):
     breps = []
@@ -73,6 +148,8 @@ def subtract_higher_priorities(comp, prio_breps):
             raise RuntimeError("Boolean cut failed")
         comp = cut.Shape()
     return comp
+
+
 
 
 def clip_component(shape, clip):
@@ -136,12 +213,21 @@ def clip_component(shape, clip):
 
 
 def build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose):
+    print(f"Processing {comp.name}")
+    if hasattr(comp, 'mask_string'):
+        if comp.mask_string != None:
+            print(f"{comp.name} is a mask, and is therefore not meshed.")
+            return None
     higher_priority = [
         x for n, x in union_geometries.items() if x.priority > comp.priority
     ]
     res_comp = build_comp_brep(comp, world_matrices)
+    mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
+    print(mask_comps)
+    mask_comps = build_mask_comps(mask_comps, world_matrices)
     prio_breps = build_higher_priorities(higher_priority, world_matrices)
     res_comp = subtract_higher_priorities(res_comp, prio_breps)
+    res_comp = intersect_with_masks(res_comp, mask_comps, mask_setting)
     res_comp = clip_component(res_comp, clip)
 
     BRepMesh_IncrementalMesh(res_comp, 0.01).Perform()
