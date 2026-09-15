@@ -45,4 +45,7 @@ Then you make a union visualizer environment by using the two commands below:
 
 `conda activate unviz`
 
+The union visualizer software was authored by
+Daniel Lomholt Christensen
+
 
