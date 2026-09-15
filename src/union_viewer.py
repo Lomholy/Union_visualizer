@@ -2,16 +2,11 @@ import sys
 import random
 from pathlib import Path
 import traceback
-
 import numpy as np
-
 import pygfx as gfx
-
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
-
 from pygfx.utils.viewport import Viewport
-
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh
@@ -554,7 +549,7 @@ class Viewer(QtWidgets.QMainWindow):
                 mesher=self.mesher,
                 use_colors=self.color_checkbox.isChecked(),
                 res=self.res_val.currentData(),
-                force_remesh=force_reload
+                force_remesh=force_reload,
             )
             for name, mesh in new_group.geometry_meshes.items():
                 mesh.visible = self.geometry_visibility.get(name, True)
