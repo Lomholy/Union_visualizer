@@ -1,12 +1,10 @@
-name: unviz
+name: unviz-dev
 channels:
   - conda-forge
 dependencies:
-  - qt
   - pyqt
   - mcstas
   - trimesh
-  - plotly
   - scikit-image
   - pygfx
   - pythonocc-core
