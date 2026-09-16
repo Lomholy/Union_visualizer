@@ -10,6 +10,7 @@ from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes
 
+from pathlib import Path
 # ==============================================================================
 # ============================ PARSE ARGUMENTS =================================
 # ==============================================================================
@@ -18,7 +19,7 @@ from meshing import build_all_meshes
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas"
+        "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas", type=str
     )
     parser.add_argument("--out_file", help="Name of output file.", default="union_env")
     parser.add_argument(
