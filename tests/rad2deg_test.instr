@@ -1,0 +1,85 @@
+/********************************************************************************
+*
+* McStas, neutron ray-tracing package
+*
+* Instrument: RAD2DEG_TEST
+*
+* %Identification
+* Written by: Union_visualizer test suite
+* %INSTRUMENT_SITE: Generated_instruments
+*
+* %Description
+* Minimal regression fixture exercising McStas's built-in RAD2DEG/DEG2RAD/PI
+* constants, both in an INITIALIZE assignment and in a ROTATED vector. This
+* mirrors the pattern found in CSPEC_test.instr that preprocess.py previously
+* failed to parse because those constants were unknown to eval_expr.
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT RAD2DEG_TEST (
+)
+
+DECLARE
+%{
+double rotation_rad;
+double rotation_deg;
+%}
+
+INITIALIZE
+%{
+rotation_rad = PI / 4;
+rotation_deg = rotation_rad * RAD2DEG;
+%}
+
+TRACE
+
+COMPONENT Origin = Progress_bar(
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT sample = Arm(
+)
+AT (0,0,10) RELATIVE Origin
+
+COMPONENT right = Arm(
+)
+AT (0.2,0,0) RELATIVE sample
+ROTATED (0, rotation_rad * RAD2DEG, 0) RELATIVE sample
+
+COMPONENT init = Union_init(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT non = Non_process(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT mat = Union_make_material(
+    my_absorption = 100, process_string="non"
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT box = Union_box(
+    priority = 10,
+    xwidth = 0.6,
+    yheight = 0.6,
+    zdepth = 0.6,
+    material_string = "mat"
+)
+AT (0,0,0) RELATIVE right
+ROTATED (0, 45 * DEG2RAD * RAD2DEG, 0) RELATIVE right
+
+COMPONENT master = Union_master(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT stop = Union_stop(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+FINALLY
+%{
+%}
+
+END
