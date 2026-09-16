@@ -48,7 +48,7 @@ def generate_group(
     colors={},
     meshes=None,
     points=None,
-    mesher="mc",
+    mesher="brep",
     use_colors=False,
     force_remesh=False,
     res=64,
@@ -235,7 +235,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.current_group = None
         self.points = None
         self.meshes = None
-        self.mesher = "mc"
+        self.mesher = "brep"
 
         # ----------------------------------------------------
         # Render widget
