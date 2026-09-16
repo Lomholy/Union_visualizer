@@ -79,6 +79,14 @@ UNARY = {
 # Allowed math functions/constants
 MATH_ENV = {name: getattr(math, name) for name in dir(math) if not name.startswith("_")}
 
+# McStas's own built-in constants (defined in its C runtime headers), which
+# aren't part of Python's math module.
+MCSTAS_CONSTANTS = {
+    "PI": math.pi,
+    "DEG2RAD": math.pi / 180,
+    "RAD2DEG": 180 / math.pi,
+}
+
 
 def eval_expr(expr, var_map=None):
     if var_map is None:
@@ -97,6 +105,8 @@ def eval_expr(expr, var_map=None):
         elif isinstance(node, ast.Name):  # variables
             if node.id in var_map:
                 return var_map[node.id]
+            elif node.id in MCSTAS_CONSTANTS:
+                return MCSTAS_CONSTANTS[node.id]
             elif node.id in MATH_ENV:
                 return MATH_ENV[node.id]
             else:
@@ -123,11 +133,23 @@ def parse_param(expr, var_map):
         return expr
 
 
+# C types for which mcstasscript reports an empty-string .value when a
+# DECLARE/USERVARS variable has no initializer. McStas generates these as
+# plain C globals, which zero-initialize, so we mirror that instead of
+# treating the placeholder "" as a literal (string) value.
+NUMERIC_DECLARE_TYPES = {"double", "float", "int", "long"}
+
+
 def create_var_map(instr: ms.McStas_instr):
     all_vars = (
         list(instr.declare_list) + list(instr.user_var_list) + list(instr.parameters)
     )
-    var_map = {v.name: v.value for v in all_vars}
+    var_map = {}
+    for v in all_vars:
+        value = v.value
+        if value == "" and getattr(v, "type", None) in NUMERIC_DECLARE_TYPES:
+            value = 0.0
+        var_map[v.name] = value
     ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*;$")
 
     lines = instr.initialize_section.splitlines()
@@ -236,6 +258,16 @@ def compute_world_matrices(instr, verbose=False):
         return AT_rel
 
     def local_matrix(comp):
+        unresolved = [v for v in comp.ROTATED_data if isinstance(v, str)]
+        unresolved += [v for v in comp.AT_data if isinstance(v, str)]
+        if unresolved:
+            raise ValueError(
+                f"Component '{comp.name}': could not resolve AT/ROTATED "
+                f"expression(s) to numeric values: {unresolved}. Check for "
+                f"undefined variables or missing constants in "
+                f"eval_expr/MCSTAS_CONSTANTS."
+            )
+
         M = np.eye(4)
         rx, ry, rz = np.array(comp.ROTATED_data) * np.pi / 180
         M[:3, :3] = rotation_matrix(rx, ry, rz)
