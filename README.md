@@ -13,7 +13,7 @@ The second is to use the union_viewer.py script to launch an interactive interfa
 `union_viewer.py`
 
 And see your union environment become a CAD model!
----
+
 
 ---
 ### Dependencies:
@@ -42,6 +42,12 @@ First clone this repository:
 Then you make a union visualizer environment by using the two commands below:
 
 `conda env create -f unviz_env.yml`
+
 `conda activate unviz`
+
+### Author
+
+The union visualizer software was authored by
+Daniel Lomholt Christensen as part of his Phd. project at the Niels Bohr Institute at the University of Copenhagen
 
 
