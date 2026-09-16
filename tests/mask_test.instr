@@ -126,17 +126,17 @@ COMPONENT sph_left = Union_sphere(
     mask_setting = "All",
     material_string = "mat"
 )
-AT (0,0,0) RELATIVE PREVIOUS
+AT (0,-0.2,0) RELATIVE PREVIOUS
 
 COMPONENT cyl_left = Union_cylinder(
     priority = 2,
     radius = 0.1,
-    yheight = 0.3,
+    yheight = 0.4,
     mask_string = "box_left",
     mask_setting = "All",
     material_string = "mat"
 )
-AT (0,0,0) RELATIVE PREVIOUS
+AT (0,0.1,0) RELATIVE PREVIOUS
 
 COMPONENT box_right = Union_box(
     priority = 11,
