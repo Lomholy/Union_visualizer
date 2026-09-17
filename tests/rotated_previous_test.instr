@@ -1,0 +1,79 @@
+/********************************************************************************
+*
+* McStas, neutron ray-tracing package
+*
+* Instrument: ROTATED_PREVIOUS_TEST
+*
+* %Identification
+* Written by: Union_visualizer test suite
+* %INSTRUMENT_SITE: Generated_instruments
+*
+* %Description
+* Minimal regression fixture exercising "ROTATED PREVIOUS" (very common in
+* real instruments, e.g. every unnamed COPY() component). preprocess.py
+* previously only substituted the real component name for PREVIOUS on the
+* AT-relative parent, never on the ROTATED-relative one, so the literal
+* string "PREVIOUS" was returned as a component's parent and never matched
+* a key in the world-matrix dict, aborting the whole instrument with
+* "Unresolved relative transforms". Here the box's AT is RELATIVE to a
+* named component while its ROTATED is RELATIVE PREVIOUS, so the two
+* resolve to different parents unless PREVIOUS is substituted correctly
+* in both places.
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT ROTATED_PREVIOUS_TEST (
+)
+
+TRACE
+
+COMPONENT Origin = Progress_bar(
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT sample = Arm(
+)
+AT (0,0,10) RELATIVE Origin
+
+COMPONENT spacer = Arm(
+)
+AT (0,0,1) RELATIVE sample
+ROTATED (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT init = Union_init(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT non = Non_process(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT mat = Union_make_material(
+    my_absorption = 100, process_string="non"
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT box = Union_box(
+    priority = 10,
+    xwidth = 0.6,
+    yheight = 0.6,
+    zdepth = 0.6,
+    material_string = "mat"
+)
+AT (0,0,0.2) RELATIVE sample
+ROTATED (0,45,0) RELATIVE PREVIOUS
+
+COMPONENT master = Union_master(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT stop = Union_stop(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+FINALLY
+%{
+%}
+
+END

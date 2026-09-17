@@ -248,9 +248,13 @@ def compute_world_matrices(instr, verbose=False):
         if ROT_rel.startswith("RELATIVE"):
             ROT_rel = ROT_rel.split(" ")[1]
 
-        if AT_rel.startswith("PREVIOUS"):
+        if AT_rel.startswith("PREVIOUS") or ROT_rel.startswith("PREVIOUS"):
             idx = instr.component_list.index(comp)
-            AT_rel = instr.component_list[idx - 1].name
+            previous_name = instr.component_list[idx - 1].name
+            if AT_rel.startswith("PREVIOUS"):
+                AT_rel = previous_name
+            if ROT_rel.startswith("PREVIOUS"):
+                ROT_rel = previous_name
 
         if ROT_rel != "ABSOLUTE":
             return ROT_rel
