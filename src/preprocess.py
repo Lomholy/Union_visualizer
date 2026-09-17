@@ -80,12 +80,31 @@ UNARY = {
 # Allowed math functions/constants
 MATH_ENV = {name: getattr(math, name) for name in dir(math) if not name.startswith("_")}
 
+# C-callable builtins that are Python builtins rather than math module
+# members, so dir(math) above doesn't pick them up (e.g. abs() is fabs()
+# in C/McStas terms, but McStas source uses "abs" directly).
+MATH_ENV.update({
+    "abs": abs,
+    "min": min,
+    "max": max,
+})
+
 # McStas's own built-in constants (defined in its C runtime headers), which
-# aren't part of Python's math module.
+# aren't part of Python's math module. Values pulled directly from
+# McCode/mccode/nlib/share/mcstas-r.h (lines 43-50) and general.h (line 21),
+# not re-derived, so they match bit-for-bit what the real simulator uses.
 MCSTAS_CONSTANTS = {
     "PI": math.pi,
     "DEG2RAD": math.pi / 180,
     "RAD2DEG": 180 / math.pi,
+    "AA2MS": 629.622368,       # mcstas-r.h:43 - convert k[1/AA] to v[m/s]
+    "MS2AA": 1.58825361e-3,    # mcstas-r.h:44 - convert v[m/s] to k[1/AA]
+    "K2V": 629.622368,         # mcstas-r.h:45 - #define K2V AA2MS
+    "V2K": 1.58825361e-3,      # mcstas-r.h:46 - #define V2K MS2AA
+    "SE2V": 437.393377,        # mcstas-r.h:49 - convert sqrt(E)[meV] to v[m/s]
+    "VS2E": 5.22703725e-6,     # mcstas-r.h:50 - convert (v[m/s])**2 to E[meV]
+    "NA": 6.022137e23,         # general.h:21 - Avogadro's number (McStas's own value, not current CODATA)
+    "NULL": 0,
 }
 
 
