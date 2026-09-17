@@ -77,11 +77,12 @@ class DeclareRecoveryTest(unittest.TestCase):
         self.assertEqual(var_map["result"], 5.0)
         self.assertEqual(var_map["gap"], 0.0)
 
-    def test_string_typed_parameter_entry_is_skipped_not_recovered(self):
-        # instr.parameters entries are never raw strings in practice, but
-        # create_var_map must not route one through the DECLARE-recovery
-        # machinery above if it ever were - that machinery is for a
-        # different source list and could misparse a parameter's raw text.
+    def test_unparseable_string_parameter_entry_is_left_unresolved(self):
+        # A string parameter entry with no "name = expr" shape at all has
+        # nothing to recover (see _recover_raw_parameter in
+        # tests_unit/test_parameter_recovery.py for the cases that DO get
+        # recovered) - create_var_map must not raise or fabricate a value
+        # for it, just leave it out of var_map.
         class FakeInstr:
             declare_list = []
             user_var_list = []

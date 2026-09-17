@@ -145,7 +145,12 @@ _C_TYPE_KEYWORDS = {
     "double", "float", "int", "long", "short", "char", "unsigned", "signed", "const",
 }
 
+# McStas instrument-parameter type keywords, a superset of the C ones above
+# since "string" is a valid McStas parameter type despite not being a C type.
+_PARAM_TYPE_KEYWORDS = _C_TYPE_KEYWORDS | {"string"}
+
 _RAW_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
+_QUOTED_STRING_RE = re.compile(r'^"(.*)"$', re.S)
 
 
 def _resolved_value(entry):
@@ -193,10 +198,10 @@ def _split_top_level_statements(text):
     return statements
 
 
-def _strip_c_type_prefix(statement):
+def _strip_c_type_prefix(statement, type_keywords=_C_TYPE_KEYWORDS):
     while True:
         head, sep, rest = statement.partition(" ")
-        if sep and head in _C_TYPE_KEYWORDS:
+        if sep and head in type_keywords:
             statement = rest.strip()
         else:
             return statement
@@ -255,6 +260,40 @@ def _populate_declare_vars(entries, var_map):
         i += 1
 
 
+def _recover_raw_parameter(raw_text, var_map):
+    """instr.parameters entries come from mcstasscript's DEFINE
+    INSTRUMENT(...) parser (read_definition.py), a different code path
+    from DECLARE's raw-string fallback: every parameter it finds is turned
+    into a proper Parameter object, confirmed by reading that reader and
+    reproducing typed defaults like "int height=3" and
+    "string filename=\"myfile.txt\"" directly. But treating "this never
+    happens" as the actual safety net is exactly the mistake the DECLARE
+    fix above exists to avoid, so a raw-string parameter entry is parsed
+    the same way as a DECLARE default instead of being dropped.
+
+    A quoted string default (McStas's "string" parameter type) is taken
+    as a literal value rather than run through eval_expr, and has its
+    surrounding quotes stripped - unlike mcstasscript's own object path,
+    which leaves them embedded in the value."""
+    statement = _strip_c_type_prefix(raw_text.strip(), _PARAM_TYPE_KEYWORDS)
+    match = _RAW_ASSIGNMENT_RE.match(statement)
+    if not match:
+        # A bare parameter name with no default value has no computable
+        # value at preprocessing time - expected, not a parser gap.
+        return
+    name, expr = match.groups()
+    expr = expr.strip()
+    quoted = _QUOTED_STRING_RE.match(expr)
+    if quoted:
+        var_map[name] = quoted.group(1)
+        return
+    expr = "".join(expr.split())
+    try:
+        var_map[name] = eval_expr(expr, var_map)
+    except Exception as e:
+        print(f"Warning: Failed to evaluate parameter {statement};: {e}")
+
+
 def create_var_map(instr: ms.McStas_instr):
     var_map = {}
     _populate_declare_vars(list(instr.declare_list), var_map)
@@ -262,11 +301,11 @@ def create_var_map(instr: ms.McStas_instr):
 
     for param in instr.parameters:
         # Parameters come from mcstasscript's DEFINE INSTRUMENT(...) parser,
-        # a different code path from the freeform DECLARE/USERVARS fallback
-        # above, and are never raw strings in practice - skip defensively
-        # rather than crash if one somehow ever is, instead of routing them
-        # through DECLARE-recovery logic meant for a different source.
+        # a different code path from the freeform DECLARE/USERVARS
+        # fallback above - see _recover_raw_parameter for why a raw-string
+        # entry here is recovered rather than assumed impossible.
         if isinstance(param, str):
+            _recover_raw_parameter(param, var_map)
             continue
         var_map[param.name] = _resolved_value(param)
 
