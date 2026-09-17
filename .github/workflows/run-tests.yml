@@ -34,9 +34,10 @@ jobs:
       - name: Run script on all test files
         shell: bash -l {0}
         run: |
-          for file in tests/*; do
+          status=0
+          for file in tests/*.instr tests/*.py; do
             echo "Running mcstas_to_cad on $file"
-            python src/mcstas_to_cad.py --input_file="$file"
+            python src/mcstas_to_cad.py --input_file="$file" || status=1
           done
 
 

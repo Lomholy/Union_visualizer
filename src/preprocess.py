@@ -2,6 +2,7 @@ import mcstasscript as ms
 import mcstasscript.helper.mcstas_objects as mshelp
 import operator
 import ast
+import os
 import re
 import math
 import numpy as np
@@ -522,6 +523,37 @@ def compute_world_matrices(instr, verbose=False):
     return world
 
 
+def _resolve_relative_path(path, base_dir):
+    """Strip a raw component-parameter string down to its literal path (the
+    .instr text parser leaves surrounding quotes in place, e.g. a filename
+    read as '"./mesh.stl"' rather than "./mesh.stl") and, if it's relative,
+    resolve it against base_dir rather than leaving it to whatever the
+    process's current working directory happens to be."""
+    quoted = _QUOTED_STRING_RE.match(path.strip())
+    path = quoted.group(1) if quoted else path.strip()
+    if os.path.isabs(path):
+        return path
+    return os.path.normpath(os.path.join(base_dir, path))
+
+
+def resolve_mesh_filenames(union_geometries, input_file):
+    """Union_mesh components reference an external mesh file (e.g. an STL)
+    by a filename that's typically written relative to the .instr/.py file
+    it's declared in - that's how real McStas resolves such paths too. Our
+    own pipeline has no equivalent of McStas's search path, so without this
+    a relative filename is instead resolved against the process's current
+    working directory, which silently depends on where mcstas_to_cad.py was
+    invoked from. Rewrite each filename to be resolved against the
+    instrument file's own directory instead, up front, so every downstream
+    mesh loader (meshing.py, signed_distance_functions.py, bounding_box.py)
+    gets a working, unambiguous path regardless of invocation cwd."""
+    base_dir = os.path.dirname(os.path.abspath(input_file))
+    for comp in union_geometries.values():
+        filename = getattr(comp, "filename", None)
+        if filename:
+            comp.filename = _resolve_relative_path(filename, base_dir)
+
+
 def preprocess(input_file: str, verbose: bool):
     """
     Function to preprocess the input file.
@@ -538,4 +570,5 @@ def preprocess(input_file: str, verbose: bool):
 
     world_matrices = compute_world_matrices(instr, verbose)
     union_geometries = get_union_geometries(instr)
+    resolve_mesh_filenames(union_geometries, input_file)
     return instr, world_matrices, union_geometries

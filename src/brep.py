@@ -11,14 +11,68 @@ from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pln
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+from OCC.Core.BRepBuilderAPI import (
+    BRepBuilderAPI_MakeFace,
+    BRepBuilderAPI_MakePolygon,
+    BRepBuilderAPI_MakeSolid,
+    BRepBuilderAPI_Sewing,
+)
 from OCC.Core.BRepAlgoAPI import (
     BRepAlgoAPI_Common,
     BRepAlgoAPI_Cut,
     BRepAlgoAPI_Fuse,
 )
+from OCC.Core.TopAbs import TopAbs_SHELL
+from OCC.Core.TopoDS import Shell as topods_Shell
 import trimesh
 import numpy as np
+
+
+def _mesh_to_brep(mesh, name, verbose=False):
+    """Convert a world-space trimesh.Trimesh into a genuine OCC solid (one
+    real BRep face per triangle, sewn into a shell and closed into a
+    solid), rather than a raw faceted STL import. A Union_mesh component
+    can be used both as the shape being meshed and as a higher-priority
+    cutter/mask against another component (see build_single_brep_mesh), so
+    it needs to behave like any other geometry under BRepAlgoAPI_Cut/Common
+    - a bare faceted shape doesn't reliably support that."""
+    sewing = BRepBuilderAPI_Sewing()
+    n_faces = 0
+    for tri in mesh.faces:
+        p0, p1, p2 = (gp_Pnt(*mesh.vertices[i]) for i in tri)
+        polygon = BRepBuilderAPI_MakePolygon(p0, p1, p2, True)
+        if not polygon.IsDone():
+            # Degenerate (zero-area/collinear) triangle - skip it rather
+            # than let it break the sewn shell.
+            if verbose:
+                print(f"Skipping degenerate triangle on mesh '{name}'")
+            continue
+        face = BRepBuilderAPI_MakeFace(polygon.Wire()).Face()
+        sewing.Add(face)
+        n_faces += 1
+
+    if n_faces == 0:
+        raise ValueError(f"Mesh '{name}' has no valid triangles to build a BRep from")
+
+    sewing.Perform()
+    shape = sewing.SewedShape()
+
+    if shape.ShapeType() != TopAbs_SHELL:
+        # Sewing didn't produce a single closed shell (e.g. a non-watertight
+        # mesh) - fall back to the sewn shape as-is rather than raising, so
+        # a slightly-open mesh still degrades gracefully.
+        if verbose:
+            print(f"Warning: mesh '{name}' did not sew into a closed shell; "
+                  f"using the sewn shape as-is.")
+        return shape
+
+    solid_maker = BRepBuilderAPI_MakeSolid(topods_Shell(shape))
+    if not solid_maker.IsDone():
+        if verbose:
+            print(f"Warning: could not close mesh '{name}' into a solid; "
+                  f"using the sewn shell as-is.")
+        return shape
+    return solid_maker.Solid()
 
 
 def build_comp_brep(comp, world_matrices):
@@ -58,6 +112,13 @@ def build_comp_brep(comp, world_matrices):
         brep = BRepPrimAPI_MakeCone(
             axis, comp.radius_bottom, comp.radius_top, comp.yheight
         ).Shape()
+    elif c_type == "Union_mesh":
+        mesh = trimesh.load_mesh(comp.filename.strip('"'))
+        if comp.coordinate_scale is None:
+            comp.coordinate_scale = 1e-3
+        mesh.apply_scale(float(comp.coordinate_scale))
+        mesh.apply_transform(mat)
+        brep = _mesh_to_brep(mesh, name)
     return brep
 
 def get_mask_comps(focus_comp, union_geometries):
