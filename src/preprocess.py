@@ -146,6 +146,11 @@ def create_var_map(instr: ms.McStas_instr):
     )
     var_map = {}
     for v in all_vars:
+        # mcstasscript stores DECLARE entries it can't parse into a typed
+        # variable (C functions, structs, raw array declarations) as plain
+        # strings rather than DeclareVariable objects; they have no .value.
+        if isinstance(v, str):
+            continue
         value = v.value
         if value == "" and getattr(v, "type", None) in NUMERIC_DECLARE_TYPES:
             value = 0.0
@@ -248,9 +253,13 @@ def compute_world_matrices(instr, verbose=False):
         if ROT_rel.startswith("RELATIVE"):
             ROT_rel = ROT_rel.split(" ")[1]
 
-        if AT_rel.startswith("PREVIOUS"):
+        if AT_rel.startswith("PREVIOUS") or ROT_rel.startswith("PREVIOUS"):
             idx = instr.component_list.index(comp)
-            AT_rel = instr.component_list[idx - 1].name
+            previous_name = instr.component_list[idx - 1].name
+            if AT_rel.startswith("PREVIOUS"):
+                AT_rel = previous_name
+            if ROT_rel.startswith("PREVIOUS"):
+                ROT_rel = previous_name
 
         if ROT_rel != "ABSOLUTE":
             return ROT_rel
