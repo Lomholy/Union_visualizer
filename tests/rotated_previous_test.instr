@@ -1,0 +1,101 @@
+/********************************************************************************
+*
+* McStas, neutron ray-tracing package
+*
+* Instrument: ROTATED_PREVIOUS_TEST
+*
+* %Identification
+* Written by: Union_visualizer test suite
+* %INSTRUMENT_SITE: Generated_instruments
+*
+* %Description
+* Minimal regression fixture mirroring two patterns found in real McCode
+* instruments that preprocess.py previously either mis-evaluated or
+* crashed on entirely:
+*
+*   - A component using "ROTATED (...) RELATIVE PREVIOUS" (e.g. every
+*     unnamed COPY() component in HZB_NEAT.instr). find_relative() used to
+*     substitute PREVIOUS for the AT-relative parent but not the
+*     ROTATED-relative one, so the literal string "PREVIOUS" was returned
+*     as the parent name, which never matched a key in the world-matrix
+*     dict and aborted the whole instrument with "Unresolved relative
+*     transforms".
+*   - A "#define" line inside DECLARE (e.g. h8_test_legacy.instr's
+*     "#define VERSION \"1.7\""), which mcstasscript can't parse into a
+*     typed DeclareVariable and instead stores as a plain string in
+*     declare_list. create_var_map used to assume every declare_list entry
+*     has a .value attribute and crashed with AttributeError.
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT ROTATED_PREVIOUS_TEST (
+)
+
+DECLARE
+%{
+#define VERSION "1.7"
+double angle;
+%}
+
+INITIALIZE
+%{
+angle = 30;
+%}
+
+TRACE
+
+COMPONENT Origin = Progress_bar(
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT sample = Arm(
+)
+AT (0,0,10) RELATIVE Origin
+
+COMPONENT tilt = Arm(
+)
+AT (0,0,0.1) RELATIVE sample
+ROTATED (0, angle, 0) RELATIVE sample
+
+COMPONENT after_tilt = Arm(
+)
+AT (0,0,0.1) RELATIVE PREVIOUS
+ROTATED (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT init = Union_init(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT non = Non_process(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT mat = Union_make_material(
+    my_absorption = 100, process_string="non"
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT box = Union_box(
+    priority = 10,
+    xwidth = 0.6,
+    yheight = 0.6,
+    zdepth = 0.6,
+    material_string = "mat"
+)
+AT (0,0,0) RELATIVE after_tilt
+ROTATED (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT master = Union_master(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT stop = Union_stop(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+FINALLY
+%{
+%}
+
+END
