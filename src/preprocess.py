@@ -139,17 +139,176 @@ def parse_param(expr, var_map):
 # treating the placeholder "" as a literal (string) value.
 NUMERIC_DECLARE_TYPES = {"double", "float", "int", "long"}
 
+# C type keywords that can prefix a DECLARE/USERVARS statement before the
+# actual "name = expr" assignment, e.g. "double result = 1.0".
+_C_TYPE_KEYWORDS = {
+    "double", "float", "int", "long", "short", "char", "unsigned", "signed", "const",
+}
+
+# McStas instrument-parameter type keywords, a superset of the C ones above
+# since "string" is a valid McStas parameter type despite not being a C type.
+_PARAM_TYPE_KEYWORDS = _C_TYPE_KEYWORDS | {"string"}
+
+_RAW_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
+_QUOTED_STRING_RE = re.compile(r'^"(.*)"$', re.S)
+
+
+def _resolved_value(entry):
+    value = entry.value
+    if value == "" and getattr(entry, "type", None) in NUMERIC_DECLARE_TYPES:
+        return 0.0
+    return value
+
+
+def _split_top_level_statements(text):
+    """Split C-ish source text on ';' characters that aren't nested inside
+    ()/[] or a string/char literal, yielding each trimmed statement with
+    its trailing ';' removed. Doesn't need to understand braces/control
+    flow - it only has to isolate individual statements well enough to
+    check each one against a plain assignment pattern."""
+    statements = []
+    depth = 0
+    quote = None
+    start = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if quote:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+        elif c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == ";" and depth <= 0:
+            piece = text[start:i].strip()
+            if piece:
+                statements.append(piece)
+            start = i + 1
+        i += 1
+    tail = text[start:].strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def _strip_c_type_prefix(statement, type_keywords=_C_TYPE_KEYWORDS):
+    while True:
+        head, sep, rest = statement.partition(" ")
+        if sep and head in type_keywords:
+            statement = rest.strip()
+        else:
+            return statement
+
+
+def _recover_raw_declare_block(raw_lines, var_map):
+    """mcstasscript reports DECLARE/USERVARS content it can't parse into a
+    typed variable as one raw string per physical source line - functions,
+    structs, #define/#pragma lines (see append_declare() in mcstasscript's
+    interface/instr.py). Most of that genuinely has no computable value.
+    But mcstasscript's own "is this a function?" heuristic (a line with "("
+    and no ";" yet) can also misfire on an ordinary multi-line initializer,
+    e.g. "double result = fabs(\n  -5.0\n);", which becomes three raw-string
+    entries even though it's a real, evaluable assignment. Rejoin the block
+    and try to recover a "name = expr;" statement from it before giving up
+    on the rest, instead of silently discarding a computable value."""
+    joined = "\n".join(raw_lines)
+    if "{" in joined or "}" in joined:
+        # A genuine function/struct body always has a brace pair. Anything
+        # assignment-shaped inside one is function-local C, not an
+        # instrument-global DECLARE variable, so leave the block alone.
+        return
+    for statement in _split_top_level_statements(joined):
+        statement = _strip_c_type_prefix(statement)
+        match = _RAW_ASSIGNMENT_RE.match(statement)
+        if not match:
+            # No "name = expr" shape at all: a #define/#pragma line, a bare
+            # declaration with no initializer, a function signature. This
+            # is expected, non-computable content, not a parser gap.
+            continue
+        name, expr = match.groups()
+        expr = "".join(expr.split())
+        try:
+            var_map[name] = eval_expr(expr, var_map)
+        except Exception as e:
+            print(f"Warning: Failed to evaluate {statement};: {e}")
+
+
+def _populate_declare_vars(entries, var_map):
+    """Populate var_map from one DECLARE/USERVARS source list (declare_list
+    or user_var_list), recovering any evaluable assignment hiding in a run
+    of mcstasscript's raw-string fallback entries rather than crashing on
+    them (they don't have a '.value' attribute) or silently dropping them."""
+    i = 0
+    n = len(entries)
+    while i < n:
+        entry = entries[i]
+        if isinstance(entry, str):
+            j = i
+            while j < n and isinstance(entries[j], str):
+                j += 1
+            _recover_raw_declare_block(entries[i:j], var_map)
+            i = j
+            continue
+        var_map[entry.name] = _resolved_value(entry)
+        i += 1
+
+
+def _recover_raw_parameter(raw_text, var_map):
+    """instr.parameters entries come from mcstasscript's DEFINE
+    INSTRUMENT(...) parser (read_definition.py), a different code path
+    from DECLARE's raw-string fallback: every parameter it finds is turned
+    into a proper Parameter object, confirmed by reading that reader and
+    reproducing typed defaults like "int height=3" and
+    "string filename=\"myfile.txt\"" directly. But treating "this never
+    happens" as the actual safety net is exactly the mistake the DECLARE
+    fix above exists to avoid, so a raw-string parameter entry is parsed
+    the same way as a DECLARE default instead of being dropped.
+
+    A quoted string default (McStas's "string" parameter type) is taken
+    as a literal value rather than run through eval_expr, and has its
+    surrounding quotes stripped - unlike mcstasscript's own object path,
+    which leaves them embedded in the value."""
+    statement = _strip_c_type_prefix(raw_text.strip(), _PARAM_TYPE_KEYWORDS)
+    match = _RAW_ASSIGNMENT_RE.match(statement)
+    if not match:
+        # A bare parameter name with no default value has no computable
+        # value at preprocessing time - expected, not a parser gap.
+        return
+    name, expr = match.groups()
+    expr = expr.strip()
+    quoted = _QUOTED_STRING_RE.match(expr)
+    if quoted:
+        var_map[name] = quoted.group(1)
+        return
+    expr = "".join(expr.split())
+    try:
+        var_map[name] = eval_expr(expr, var_map)
+    except Exception as e:
+        print(f"Warning: Failed to evaluate parameter {statement};: {e}")
+
 
 def create_var_map(instr: ms.McStas_instr):
-    all_vars = (
-        list(instr.declare_list) + list(instr.user_var_list) + list(instr.parameters)
-    )
     var_map = {}
-    for v in all_vars:
-        value = v.value
-        if value == "" and getattr(v, "type", None) in NUMERIC_DECLARE_TYPES:
-            value = 0.0
-        var_map[v.name] = value
+    _populate_declare_vars(list(instr.declare_list), var_map)
+    _populate_declare_vars(list(instr.user_var_list), var_map)
+
+    for param in instr.parameters:
+        # Parameters come from mcstasscript's DEFINE INSTRUMENT(...) parser,
+        # a different code path from the freeform DECLARE/USERVARS
+        # fallback above - see _recover_raw_parameter for why a raw-string
+        # entry here is recovered rather than assumed impossible.
+        if isinstance(param, str):
+            _recover_raw_parameter(param, var_map)
+            continue
+        var_map[param.name] = _resolved_value(param)
+
     ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*;$")
 
     lines = instr.initialize_section.splitlines()
