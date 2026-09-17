@@ -1,0 +1,1525 @@
+/********************************************************************************
+* 
+* McStas, neutron ray-tracing package
+*         Copyright (C) 1997-2008, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+* 
+* This file was written by McStasScript, which is a 
+* python based McStas instrument generator written by 
+* Mads Bertelsen in 2019 while employed at the 
+* European Spallation Source Data Management and 
+* Software Centre
+* 
+* Instrument: BL18_SENJU_generated
+* 
+* %Identification
+* Written by: Python McStas Instrument Generator
+* Date: 12:00:57 on September 16, 2026
+* Origin: ESS DMSC
+* %INSTRUMENT_SITE: Generated_instruments
+* 
+* !!Please write a short instrument description (1 line) here!!
+* 
+* %Description
+* Please write a longer instrument description here!
+* 
+* 
+* %Parameters
+* L_min: [unit] 
+* L_max: [unit] 
+* 
+* %Link 
+* 
+* %End 
+********************************************************************************/
+
+DEFINE INSTRUMENT BL18_SENJU_generated (
+double L_min = 3.3, 
+double L_max = 7.7 
+)
+
+DECLARE 
+%{
+%}
+
+INITIALIZE 
+%{
+// Start of initialize for generated BL18_SENJU_generated
+%}
+
+TRACE 
+COMPONENT Origin = Progress_bar()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT a1 = Arm()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT mod = SNS_source(
+ filename = "source_BL18.txt", xwidth = 0.1,
+ yheight = 0.1, dist = 15.19,
+ focus_xw = 0.041, focus_yh = 0.041,
+ Emin = pow((2*PI/L_max)*K2V,2.0)*VS2E, Emax = pow((2*PI/L_min)*K2V,2.0)*VS2E)
+AT (0, 0, 0) RELATIVE a1
+
+COMPONENT slt_in = Slit(
+ xwidth = 0.07, yheight = 0.07)
+AT (0, 0, 2.271) RELATIVE a1
+
+COMPONENT slt_out = Slit(
+ xwidth = 0.044, yheight = 0.044)
+AT (0, 0, 15.14) RELATIVE a1
+
+COMPONENT guide_0 = Guide_gravity(
+ w1 = 0.03951, h1 = 0.03951,
+ w2 = 0.04146, h2 = 0.04146,
+ l = 0.8-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 4,
+ m = 4.0, W = 0.0015,
+ G = -9.81)
+AT (0, 0, 15.2) RELATIVE a1
+
+COMPONENT guide_1 = Guide_gravity(
+ w1 = 0.04146, h1 = 0.04146,
+ w2 = 0.04347, h2 = 0.04347,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 16.0) RELATIVE a1
+
+COMPONENT guide_2 = Guide_gravity(
+ w1 = 0.04347, h1 = 0.04347,
+ w2 = 0.04507, h2 = 0.04507,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 17.0) RELATIVE a1
+
+COMPONENT guide_3 = Guide_gravity(
+ w1 = 0.04507, h1 = 0.04507,
+ w2 = 0.0463, h2 = 0.0463,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 18.0) RELATIVE a1
+
+COMPONENT guide_4 = Guide_gravity(
+ w1 = 0.0463, h1 = 0.0463,
+ w2 = 0.04718, h2 = 0.04718,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 19.0) RELATIVE a1
+
+COMPONENT guide_5 = Guide_gravity(
+ w1 = 0.04718, h1 = 0.04718,
+ w2 = 0.04774, h2 = 0.04774,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 20.0) RELATIVE a1
+
+COMPONENT guide_6 = Guide_gravity(
+ w1 = 0.04774, h1 = 0.04774,
+ w2 = 0.04799, h2 = 0.04799,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 21.0) RELATIVE a1
+
+COMPONENT guide_7 = Guide_gravity(
+ w1 = 0.04799, h1 = 0.04799,
+ w2 = 0.04799, h2 = 0.04799,
+ l = 0.6-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 22.0) RELATIVE a1
+
+COMPONENT guide_8 = Guide_gravity(
+ w1 = 0.04799, h1 = 0.04799,
+ w2 = 0.04774, h2 = 0.04774,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 22.6) RELATIVE a1
+
+COMPONENT guide_9 = Guide_gravity(
+ w1 = 0.04774, h1 = 0.04774,
+ w2 = 0.04718, h2 = 0.04718,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 23.6) RELATIVE a1
+
+COMPONENT guide_10 = Guide_gravity(
+ w1 = 0.04718, h1 = 0.04718,
+ w2 = 0.0463, h2 = 0.0463,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 24.6) RELATIVE a1
+
+COMPONENT guide_11 = Guide_gravity(
+ w1 = 0.0463, h1 = 0.0463,
+ w2 = 0.04507, h2 = 0.04507,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 25.6) RELATIVE a1
+
+COMPONENT guide_12 = Guide_gravity(
+ w1 = 0.04507, h1 = 0.04507,
+ w2 = 0.04347, h2 = 0.04347,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 26.6) RELATIVE a1
+
+COMPONENT guide_13 = Guide_gravity(
+ w1 = 0.04347, h1 = 0.04347,
+ w2 = 0.04146, h2 = 0.04146,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 3,
+ m = 3.2, W = 0.001,
+ G = -9.81)
+AT (0, 0, 27.6) RELATIVE a1
+
+COMPONENT guide_14 = Guide_gravity(
+ w1 = 0.04146, h1 = 0.04146,
+ w2 = 0.0384, h2 = 0.0384,
+ l = 1.2-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 4,
+ m = 4.0, W = 0.0015,
+ G = -9.81)
+AT (0, 0, 28.6) RELATIVE a1
+
+COMPONENT guide_15 = Guide_gravity(
+ w1 = 0.0384, h1 = 0.0384,
+ w2 = 0.03519, h2 = 0.03519,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 4,
+ m = 4.0, W = 0.0015,
+ G = -9.81)
+AT (0, 0, 29.8) RELATIVE a1
+
+COMPONENT guide_16 = Guide_gravity(
+ w1 = 0.03519, h1 = 0.03519,
+ w2 = 0.0312, h2 = 0.0312,
+ l = 1.0-0.0000001, R0 = 0.99,
+ Qc = 0.0217, alpha = 4,
+ m = 4.0, W = 0.0015,
+ G = -9.81)
+AT (0, 0, 30.8) RELATIVE a1
+
+COMPONENT slt1 = Slit(
+ xwidth = 0.0292, yheight = 0.035)
+AT (0, 0, 31.845) RELATIVE a1
+
+COMPONENT slt2 = Slit(
+ xwidth = 0.0115, yheight = 0.022)
+AT (0, 0, 33.615) RELATIVE a1
+
+COMPONENT sample_position = Arm()
+AT (0, 0, 34.8025) RELATIVE a1
+
+COMPONENT init = Union_init()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Al_total = NCrystal_process(
+ cfg = "Al_sg225.ncmat;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Al = Union_make_material(
+ process_string = "Al_total", my_absorption = 1.3913680371664054)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Separator_total = NCrystal_process(
+ cfg = "structures/detector/SiO2.ncmat;temp=25C;density=0.8x")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Separator = Union_make_material(
+ process_string = "Separator_total", my_absorption = 0.27081241835412795)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT PW_cubic_total = NCrystal_process(
+ cfg = "phases<0.7*structures/battery/PW cubic.ncmat&0.2*structures/battery/carbon/V1/C.ncmat&0.1*structures/battery/teflon.ncmat>;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT PW_cubic = Union_make_material(
+ process_string = "PW_cubic_total", my_absorption = 4.23764707357728)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT PW_R_3H_total = NCrystal_process(
+ cfg = "phases<0.7*structures/battery/PW R-3H.ncmat&0.2*structures/battery/carbon/V1/C.ncmat&0.1*structures/battery/teflon.ncmat>;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT PW_R_3H = Union_make_material(
+ process_string = "PW_R_3H_total", my_absorption = 5.287998813023364)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Teflon_total = NCrystal_process(
+ cfg = "structures/battery/teflon.ncmat;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Teflon = Union_make_material(
+ process_string = "Teflon_total", my_absorption = 0.05742489988160327)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Scintillator_total = NCrystal_process(
+ cfg = "structures/detector/Gd2O3.ncmat;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Scintillator = Union_make_material(
+ process_string = "Scintillator_total", my_absorption = 126040.89545059373)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT SiO2_total = NCrystal_process(
+ cfg = "structures/detector/SiO2.ncmat;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT SiO2 = Union_make_material(
+ process_string = "SiO2_total", my_absorption = 0.3385155229426599)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT LiF_total = NCrystal_process(
+ cfg = "phases<0.333*structures/detector/6LiF.ncmat&0.667*structures/detector/ZnS.ncmat>;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT LiF = Union_make_material(
+ process_string = "LiF_total", my_absorption = 1749.7710031696834)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT B4C_total = NCrystal_process(
+ cfg = "structures/instrument/B4C.ncmat;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT B4C = Union_make_material(
+ process_string = "B4C_total", my_absorption = 39512.03431740696)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Air_total = NCrystal_process(
+ cfg = "gasmix::air")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Air = Union_make_material(
+ process_string = "Air_total", my_absorption = 0.00744370250733777)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Cu_random_total = NCrystal_process(
+ cfg = "structures/grain/Cu.ncmat;dir1=@crys_hkl:0,0,1@lab:0,0,1;dir2=@crys_hkl:0,1,0@lab:0,1,0;mos=20.0arcmin;temp=25C")
+AT (0, 0, 0) ABSOLUTE
+ROTATED (203.10869790484898, 302.0484941693489, 10.53945059954913) ABSOLUTE
+
+COMPONENT Cu_random = Union_make_material(
+ process_string = "Cu_random_total", my_absorption = 33.02466016689016)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT pre_sample_slit_box = Union_box(
+ material_string = "B4C", priority = -100,
+ xwidth = 0.068, yheight = 0.165,
+ zdepth = 0.125)
+AT (0, -0.0005000000000000004, -0.1305) RELATIVE sample_position
+
+COMPONENT pre_sample_slit_box_Air = Union_box(
+ material_string = "Air", priority = -99,
+ xwidth = 0.06080000000000001, yheight = 0.18150000000000002,
+ zdepth = 0.125)
+AT (0, 0, -0.004) RELATIVE pre_sample_slit_box
+
+COMPONENT pre_sample_slit_gap = Union_box(
+ material_string = "Air", priority = -98,
+ xwidth = 0.032, yheight = 0.005,
+ zdepth = 0.0044)
+AT (0.0, -0.001, -0.07) RELATIVE sample_position
+
+COMPONENT surrounding_air = Union_cylinder(
+ material_string = "Air", priority = -10000,
+ radius = 1.5, yheight = 1.0)
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT transmission_arm = Arm()
+AT (0, 0, 0.026) RELATIVE sample_position
+ROTATED (0, 0, -90) RELATIVE sample_position
+
+COMPONENT Plastic_incoherent = Incoherent_process(
+ sigma = 3.28, unit_cell_volume = 66.4)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Plastic_powder = Powder_process(
+ reflections = "Al.laz")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT Plastic = Union_make_material(
+ process_string = "Plastic_incoherent,Plastic_powder", my_absorption = 1.391566265060241)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT transmission_face = Union_box(
+ material_string = "Al", priority = 285,
+ xwidth = 0.05, yheight = 0.05,
+ zdepth = 0.015)
+AT (0, 0, 0.0075) RELATIVE transmission_arm
+
+COMPONENT transmission_face_opening = Union_box(
+ material_string = "Air", priority = 286,
+ xwidth = 0.02, yheight = 0.02,
+ zdepth = 0.004)
+AT (0, 0, -0.0065) RELATIVE transmission_face
+
+COMPONENT transmission_face_air = Union_box(
+ material_string = "Air", priority = 287,
+ xwidth = 0.046, yheight = 0.046,
+ zdepth = 0.011)
+AT (0, 0, 0) RELATIVE transmission_face
+
+COMPONENT transmission_active_area = Union_box(
+ material_string = "Scintillator", priority = 299,
+ xwidth = 0.03, yheight = 0.03,
+ zdepth = 3e-05)
+AT (0, 0, -0.0055) RELATIVE transmission_face
+
+COMPONENT transmission_detector_face_exit = Union_cylinder(
+ material_string = "Air", priority = 295,
+ radius = 0.022, yheight = 0.00203)
+AT (0, 0, 0.0065) RELATIVE transmission_face
+ROTATED (90, 0, 0) RELATIVE transmission_face
+
+COMPONENT transmission_exit_box = Arm()
+AT (0, 0, 0.015019999999999999) RELATIVE transmission_arm
+
+COMPONENT transmission_lens_body = Union_cylinder(
+ material_string = "Al", priority = 260,
+ radius = 0.046, yheight = 0.162)
+AT (0, 0, 0.0813) RELATIVE transmission_exit_box
+ROTATED (90, 0, 0) RELATIVE transmission_exit_box
+
+COMPONENT transmission_lens_air = Union_cylinder(
+ material_string = "Air", priority = 261,
+ radius = 0.037, yheight = 0.15209999999999999)
+AT (0, 0.005, 0) RELATIVE transmission_lens_body
+
+COMPONENT transmission_lens_path = Union_cylinder(
+ material_string = "Air", priority = 263,
+ radius = 0.0225, yheight = 0.1622)
+AT (0, 0, 0) RELATIVE transmission_lens_body
+
+COMPONENT transmission_exit_large_lens = Arm()
+AT (0, 0, 0.1626) RELATIVE transmission_exit_box
+
+COMPONENT transmission_corner_base_Plastic = Union_box(
+ material_string = "Plastic", priority = 250,
+ xwidth = 0.073, yheight = 0.07,
+ zdepth = 0.075)
+AT (0.011514999999999996, 0, 0.039) RELATIVE transmission_exit_large_lens
+
+COMPONENT transmission_cut_arm = Arm()
+AT (0, 0, 0) RELATIVE transmission_corner_base_Plastic
+ROTATED (0, 45, 0) RELATIVE transmission_corner_base_Plastic
+
+COMPONENT transmission_corner_cut_top = Union_box(
+ material_string = "Air", priority = 253,
+ xwidth = 0.0949, yheight = 0.07,
+ zdepth = 0.075, visualize = 0)
+AT (0, 0.060000000000000005, 0.04881370849898476) RELATIVE transmission_cut_arm
+
+COMPONENT transmission_corner_cut = Union_box(
+ material_string = "Air", priority = 253.1,
+ xwidth = 0.0803, yheight = 0.04999,
+ zdepth = 0.075, xwidth2 = 0.2409,
+ visualize = 0)
+AT (0, 0, 0.0365) RELATIVE transmission_cut_arm
+
+COMPONENT transmission_corner_base_Al = Union_box(
+ material_string = "Al", priority = 258,
+ xwidth = 0.05, yheight = 0.05,
+ zdepth = 0.05)
+AT (0, 0, 0.026499) RELATIVE transmission_exit_large_lens
+
+COMPONENT transmission_corner_base_plastic_pass_through = Union_box(
+ material_string = "Air", priority = 257.5,
+ xwidth = 0.049, yheight = 0.049,
+ zdepth = 0.07500000000000001)
+AT (0, 0, 0.014500000000000006) RELATIVE transmission_corner_base_Al
+
+COMPONENT transmission_corner_entry = Union_cylinder(
+ material_string = "Air", priority = 290.7,
+ radius = 0.0185, yheight = 0.0022)
+AT (0, 0, -0.024) RELATIVE transmission_corner_base_Al
+ROTATED (90, 0, 0) RELATIVE transmission_corner_base_Al
+
+COMPONENT transmission_optical_direction = Arm()
+AT (0, 0, 0) RELATIVE transmission_corner_base_Al
+ROTATED (0, -90, 0) RELATIVE transmission_corner_base_Al
+
+COMPONENT transmission_corner_exit = Union_cylinder(
+ material_string = "Air", priority = 290.8,
+ radius = 0.0185, yheight = 0.0022)
+AT (0, 0, 0.024) RELATIVE transmission_optical_direction
+ROTATED (90, 0, 0) RELATIVE transmission_optical_direction
+
+COMPONENT transmission_exit_corner = Arm()
+AT (0, 0, 0.025) RELATIVE transmission_optical_direction
+
+COMPONENT transmission_cut_arm_Al = Arm()
+AT (0, 0, 0) RELATIVE transmission_corner_base_Al
+ROTATED (0, 45, 0) RELATIVE transmission_corner_base_Al
+
+COMPONENT transmission_corner_base_Al_Mask = Union_box(
+ priority = 258.1, xwidth = 0.15,
+ yheight = 0.15, zdepth = 0.15,
+ visualize = 0, mask_string = "transmission_corner_base_Al")
+AT (0, 0, -0.075) RELATIVE transmission_cut_arm_Al
+
+COMPONENT transmission_corner_base_Al_air = Union_box(
+ material_string = "Air", priority = 259,
+ xwidth = 0.046, yheight = 0.046,
+ zdepth = 0.046)
+AT (0, 0, 0) RELATIVE transmission_corner_base_Al
+
+COMPONENT transmission_corner_base_Al_air_Mask = Union_box(
+ priority = 258.2, xwidth = 0.14,
+ yheight = 0.14, zdepth = 0.14,
+ visualize = 0, mask_string = "transmission_corner_base_Al_air")
+AT (0, 0, -0.07200000000000001) RELATIVE transmission_cut_arm_Al
+
+COMPONENT transmission_corner_holder = Union_cylinder(
+ material_string = "Al", priority = 290.5,
+ radius = 0.0185, yheight = 0.18)
+AT (0.08, -0.08209999999999999, 0) RELATIVE transmission_corner_base_Plastic
+
+COMPONENT transmission_corner_holder_box = Union_box(
+ material_string = "Al", priority = 252.4,
+ xwidth = 0.06, yheight = 0.06,
+ zdepth = 0.05)
+AT (0.06, -0.0651, 0) RELATIVE transmission_corner_base_Plastic
+
+COMPONENT transmission_corner_support = Union_box(
+ material_string = "Al", priority = 252.6,
+ xwidth = 0.073, yheight = 0.008,
+ zdepth = 0.07)
+AT (0, -0.039200000000000006, 0) RELATIVE transmission_corner_base_Plastic
+
+COMPONENT transmission_corner_holder_brace = Union_box(
+ material_string = "Al", priority = 223.6,
+ xwidth = 0.08, yheight = 0.01,
+ zdepth = 0.03)
+AT (0.005, -0.024, 0) RELATIVE transmission_corner_support
+ROTATED (0, 0, -45) RELATIVE transmission_corner_support
+
+COMPONENT transmission_small_lens_body = Union_cylinder(
+ material_string = "Al", priority = 263.1,
+ radius = 0.0265, yheight = 0.085)
+AT (0, 0, 0.042800000000000005) RELATIVE transmission_exit_corner
+ROTATED (90, 0, 0) RELATIVE transmission_exit_corner
+
+COMPONENT transmission_small_lens_air = Union_cylinder(
+ material_string = "Air", priority = 263.2,
+ radius = 0.020499999999999997, yheight = 0.07710000000000002)
+AT (0, 0.004, 0) RELATIVE transmission_small_lens_body
+
+COMPONENT transmission_small_lens_path = Union_cylinder(
+ material_string = "Air", priority = 263.4,
+ radius = 0.0185, yheight = 0.08520000000000001)
+AT (0, 0, 0) RELATIVE transmission_small_lens_body
+
+COMPONENT transmission_exit_small_lens = Arm()
+AT (0, 0, 0.08560000000000001) RELATIVE transmission_exit_corner
+
+COMPONENT transmission_photomultiplier_body = Union_cylinder(
+ material_string = "Al", priority = 264,
+ radius = 0.0175, yheight = 0.08)
+AT (0, 0, 0.0402) RELATIVE transmission_exit_small_lens
+ROTATED (90, 0, 0) RELATIVE transmission_exit_small_lens
+
+COMPONENT transmission_photomultiplier_path = Union_cylinder(
+ material_string = "Air", priority = 264.2,
+ radius = 0.014500000000000002, yheight = 0.0801)
+AT (0, 0, 0) RELATIVE transmission_photomultiplier_body
+
+COMPONENT transmission_ph_box_direction = Arm()
+AT (0, 0, 0) RELATIVE transmission_photomultiplier_body
+ROTATED (0, 60, 0) RELATIVE transmission_photomultiplier_body
+
+COMPONENT transmission_ph_box = Union_box(
+ material_string = "Al", priority = 220,
+ xwidth = 0.03, yheight = 0.06,
+ zdepth = 0.03)
+AT (0.028, 0, 0) RELATIVE transmission_ph_box_direction
+
+COMPONENT transmission_ph_box_exit = Arm()
+AT (0, 0, 0.08020000000000001) RELATIVE transmission_exit_small_lens
+
+COMPONENT transmission_timepix_body = Union_box(
+ material_string = "Al", priority = 225,
+ xwidth = 0.08, yheight = 0.28,
+ zdepth = 0.09)
+AT (0, 0.098, 0.0452) RELATIVE transmission_ph_box_exit
+
+COMPONENT transmission_mounting_table = Union_box(
+ material_string = "Al", priority = 205,
+ xwidth = 0.6, yheight = 0.01,
+ zdepth = 0.3)
+AT (-0.15, -0.177, 0.21) RELATIVE transmission_arm
+
+COMPONENT transmission_logger_space_zx = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.12,
+ D1_max = 0.28, n1 = 300,
+ D_direction_2 = "x", D2_min = -0.17,
+ D2_max = 0.5, n2 = 300,
+ filename = "transmission_logger_zx.dat")
+AT (0, 0, 0) RELATIVE transmission_arm
+
+COMPONENT transmission_logger_space_zy = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.12,
+ D1_max = 0.28, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.19,
+ D2_max = 0.2, n2 = 300,
+ filename = "transmission_logger_zy.dat")
+AT (0, 0, 0) RELATIVE transmission_arm
+
+COMPONENT transmission_logger_space_xy = Union_logger_2D_space(
+ D_direction_1 = "x", D1_min = -0.17,
+ D1_max = 0.5, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.19,
+ D2_max = 0.2, n2 = 300,
+ filename = "transmission_logger_xy.dat")
+AT (0, 0, 0) RELATIVE transmission_arm
+
+COMPONENT transmission_signal = Union_abs_logger_2D_space(
+ target_geometry = "transmission_active_area", D_direction_1 = "x",
+ D1_min = -0.01, D1_max = 0.01,
+ n1 = 1000, D_direction_2 = "y",
+ D2_min = -0.01, D2_max = 0.01,
+ n2 = 1000, filename = "transmission_histogram_signal.dat")
+AT (0, 0, 0) RELATIVE transmission_active_area
+
+COMPONENT transmission_event_signal = Union_abs_logger_event(
+ target_geometry = "transmission_active_area", filename = "transmission_event_signal.dat")
+AT (0, 0, 0) RELATIVE transmission_active_area
+
+COMPONENT detector_0_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -22.5, 0) RELATIVE sample_position
+
+COMPONENT detector_0_case = Union_box(
+ material_string = "Al", priority = -1995,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.9899) RELATIVE detector_0_direction
+
+COMPONENT detector_0_case_shield = Union_box(
+ material_string = "B4C", priority = -1994,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_0_case
+
+COMPONENT detector_0_case_air = Union_box(
+ material_string = "Air", priority = -1993,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_0_case
+
+COMPONENT detector_0_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1980,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_0_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_0_direction
+
+COMPONENT detector_0_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1979,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_0_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_0_direction
+
+COMPONENT detector_0_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1970,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_0_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_0_direction
+
+COMPONENT detector_0_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1969,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_0_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_0_direction
+
+COMPONENT detector_0_detector_0 = Union_box(
+ material_string = "LiF", priority = -1960,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 1.1809) RELATIVE detector_0_direction
+
+COMPONENT detector_0_detector_1 = Union_box(
+ material_string = "LiF", priority = -1959,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 1.1809) RELATIVE detector_0_direction
+
+COMPONENT detector_0_detector_2 = Union_box(
+ material_string = "LiF", priority = -1958,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 1.1809) RELATIVE detector_0_direction
+
+COMPONENT detector_1_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -45.0, 0) RELATIVE sample_position
+
+COMPONENT detector_1_case = Union_box(
+ material_string = "Al", priority = -1895,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.9899) RELATIVE detector_1_direction
+
+COMPONENT detector_1_case_shield = Union_box(
+ material_string = "B4C", priority = -1894,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_1_case
+
+COMPONENT detector_1_case_air = Union_box(
+ material_string = "Air", priority = -1893,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_1_case
+
+COMPONENT detector_1_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1880,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_1_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_1_direction
+
+COMPONENT detector_1_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1879,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_1_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_1_direction
+
+COMPONENT detector_1_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1870,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_1_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_1_direction
+
+COMPONENT detector_1_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1869,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_1_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_1_direction
+
+COMPONENT detector_1_detector_0 = Union_box(
+ material_string = "LiF", priority = -1860,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 1.1809) RELATIVE detector_1_direction
+
+COMPONENT detector_1_detector_1 = Union_box(
+ material_string = "LiF", priority = -1859,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 1.1809) RELATIVE detector_1_direction
+
+COMPONENT detector_1_detector_2 = Union_box(
+ material_string = "LiF", priority = -1858,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 1.1809) RELATIVE detector_1_direction
+
+COMPONENT detector_2_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -67.5, 0) RELATIVE sample_position
+
+COMPONENT detector_2_case = Union_box(
+ material_string = "Al", priority = -1795,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.9899) RELATIVE detector_2_direction
+
+COMPONENT detector_2_case_shield = Union_box(
+ material_string = "B4C", priority = -1794,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_2_case
+
+COMPONENT detector_2_case_air = Union_box(
+ material_string = "Air", priority = -1793,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_2_case
+
+COMPONENT detector_2_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1780,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_2_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_2_direction
+
+COMPONENT detector_2_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1779,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_2_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_2_direction
+
+COMPONENT detector_2_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1770,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_2_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_2_direction
+
+COMPONENT detector_2_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1769,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_2_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_2_direction
+
+COMPONENT detector_2_detector_0 = Union_box(
+ material_string = "LiF", priority = -1760,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 1.1809) RELATIVE detector_2_direction
+
+COMPONENT detector_2_detector_1 = Union_box(
+ material_string = "LiF", priority = -1759,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 1.1809) RELATIVE detector_2_direction
+
+COMPONENT detector_2_detector_2 = Union_box(
+ material_string = "LiF", priority = -1758,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 1.1809) RELATIVE detector_2_direction
+
+COMPONENT detector_3_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -90.0, 0) RELATIVE sample_position
+
+COMPONENT detector_3_case = Union_box(
+ material_string = "Al", priority = -1695,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_3_direction
+
+COMPONENT detector_3_case_shield = Union_box(
+ material_string = "B4C", priority = -1694,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_3_case
+
+COMPONENT detector_3_case_air = Union_box(
+ material_string = "Air", priority = -1693,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_3_case
+
+COMPONENT detector_3_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1680,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_3_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_3_direction
+
+COMPONENT detector_3_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1679,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_3_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_3_direction
+
+COMPONENT detector_3_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1670,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_3_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_3_direction
+
+COMPONENT detector_3_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1669,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_3_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_3_direction
+
+COMPONENT detector_3_detector_0 = Union_box(
+ material_string = "LiF", priority = -1660,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_3_direction
+
+COMPONENT detector_3_detector_1 = Union_box(
+ material_string = "LiF", priority = -1659,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_3_direction
+
+COMPONENT detector_3_detector_2 = Union_box(
+ material_string = "LiF", priority = -1658,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_3_direction
+
+COMPONENT detector_4_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -112.5, 0) RELATIVE sample_position
+
+COMPONENT detector_4_case = Union_box(
+ material_string = "Al", priority = -1595,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_4_direction
+
+COMPONENT detector_4_case_shield = Union_box(
+ material_string = "B4C", priority = -1594,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_4_case
+
+COMPONENT detector_4_case_air = Union_box(
+ material_string = "Air", priority = -1593,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_4_case
+
+COMPONENT detector_4_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1580,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_4_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_4_direction
+
+COMPONENT detector_4_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1579,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_4_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_4_direction
+
+COMPONENT detector_4_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1570,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_4_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_4_direction
+
+COMPONENT detector_4_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1569,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_4_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_4_direction
+
+COMPONENT detector_4_detector_0 = Union_box(
+ material_string = "LiF", priority = -1560,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_4_direction
+
+COMPONENT detector_4_detector_1 = Union_box(
+ material_string = "LiF", priority = -1559,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_4_direction
+
+COMPONENT detector_4_detector_2 = Union_box(
+ material_string = "LiF", priority = -1558,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_4_direction
+
+COMPONENT detector_5_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -135.0, 0) RELATIVE sample_position
+
+COMPONENT detector_5_case = Union_box(
+ material_string = "Al", priority = -1495,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_5_direction
+
+COMPONENT detector_5_case_shield = Union_box(
+ material_string = "B4C", priority = -1494,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_5_case
+
+COMPONENT detector_5_case_air = Union_box(
+ material_string = "Air", priority = -1493,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_5_case
+
+COMPONENT detector_5_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1480,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_5_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_5_direction
+
+COMPONENT detector_5_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1479,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_5_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_5_direction
+
+COMPONENT detector_5_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1470,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_5_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_5_direction
+
+COMPONENT detector_5_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1469,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_5_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_5_direction
+
+COMPONENT detector_5_detector_0 = Union_box(
+ material_string = "LiF", priority = -1460,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_5_direction
+
+COMPONENT detector_5_detector_1 = Union_box(
+ material_string = "LiF", priority = -1459,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_5_direction
+
+COMPONENT detector_5_detector_2 = Union_box(
+ material_string = "LiF", priority = -1458,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_5_direction
+
+COMPONENT detector_6_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -157.5, 0) RELATIVE sample_position
+
+COMPONENT detector_6_case = Union_box(
+ material_string = "Al", priority = -1395,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.9899) RELATIVE detector_6_direction
+
+COMPONENT detector_6_case_shield = Union_box(
+ material_string = "B4C", priority = -1394,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_6_case
+
+COMPONENT detector_6_case_air = Union_box(
+ material_string = "Air", priority = -1393,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_6_case
+
+COMPONENT detector_6_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1380,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_6_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_6_direction
+
+COMPONENT detector_6_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1379,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_6_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_6_direction
+
+COMPONENT detector_6_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1370,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_6_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_6_direction
+
+COMPONENT detector_6_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1369,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_6_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_6_direction
+
+COMPONENT detector_6_detector_0 = Union_box(
+ material_string = "LiF", priority = -1360,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 1.1809) RELATIVE detector_6_direction
+
+COMPONENT detector_6_detector_1 = Union_box(
+ material_string = "LiF", priority = -1359,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 1.1809) RELATIVE detector_6_direction
+
+COMPONENT detector_6_detector_2 = Union_box(
+ material_string = "LiF", priority = -1358,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 1.1809) RELATIVE detector_6_direction
+
+COMPONENT detector_7_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -202.5, 0) RELATIVE sample_position
+
+COMPONENT detector_7_case = Union_box(
+ material_string = "Al", priority = -1295,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_7_direction
+
+COMPONENT detector_7_case_shield = Union_box(
+ material_string = "B4C", priority = -1294,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_7_case
+
+COMPONENT detector_7_case_air = Union_box(
+ material_string = "Air", priority = -1293,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_7_case
+
+COMPONENT detector_7_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1280,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_7_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_7_direction
+
+COMPONENT detector_7_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1279,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_7_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_7_direction
+
+COMPONENT detector_7_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1270,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_7_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_7_direction
+
+COMPONENT detector_7_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1269,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_7_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_7_direction
+
+COMPONENT detector_7_detector_0 = Union_box(
+ material_string = "LiF", priority = -1260,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_7_direction
+
+COMPONENT detector_7_detector_1 = Union_box(
+ material_string = "LiF", priority = -1259,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_7_direction
+
+COMPONENT detector_7_detector_2 = Union_box(
+ material_string = "LiF", priority = -1258,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_7_direction
+
+COMPONENT detector_8_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -225.0, 0) RELATIVE sample_position
+
+COMPONENT detector_8_case = Union_box(
+ material_string = "Al", priority = -1195,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_8_direction
+
+COMPONENT detector_8_case_shield = Union_box(
+ material_string = "B4C", priority = -1194,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_8_case
+
+COMPONENT detector_8_case_air = Union_box(
+ material_string = "Air", priority = -1193,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_8_case
+
+COMPONENT detector_8_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1180,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_8_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_8_direction
+
+COMPONENT detector_8_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1179,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_8_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_8_direction
+
+COMPONENT detector_8_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1170,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_8_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_8_direction
+
+COMPONENT detector_8_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1169,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_8_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_8_direction
+
+COMPONENT detector_8_detector_0 = Union_box(
+ material_string = "LiF", priority = -1160,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_8_direction
+
+COMPONENT detector_8_detector_1 = Union_box(
+ material_string = "LiF", priority = -1159,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_8_direction
+
+COMPONENT detector_8_detector_2 = Union_box(
+ material_string = "LiF", priority = -1158,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_8_direction
+
+COMPONENT detector_9_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -247.5, 0) RELATIVE sample_position
+
+COMPONENT detector_9_case = Union_box(
+ material_string = "Al", priority = -1095,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_9_direction
+
+COMPONENT detector_9_case_shield = Union_box(
+ material_string = "B4C", priority = -1094,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_9_case
+
+COMPONENT detector_9_case_air = Union_box(
+ material_string = "Air", priority = -1093,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_9_case
+
+COMPONENT detector_9_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -1080,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_9_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_9_direction
+
+COMPONENT detector_9_top_blade_Al = Union_box(
+ material_string = "Al", priority = -1079,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_9_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_9_direction
+
+COMPONENT detector_9_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -1070,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_9_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_9_direction
+
+COMPONENT detector_9_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -1069,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_9_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_9_direction
+
+COMPONENT detector_9_detector_0 = Union_box(
+ material_string = "LiF", priority = -1060,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_9_direction
+
+COMPONENT detector_9_detector_1 = Union_box(
+ material_string = "LiF", priority = -1059,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_9_direction
+
+COMPONENT detector_9_detector_2 = Union_box(
+ material_string = "LiF", priority = -1058,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_9_direction
+
+COMPONENT detector_10_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -270.0, 0) RELATIVE sample_position
+
+COMPONENT detector_10_case = Union_box(
+ material_string = "Al", priority = -995,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_10_direction
+
+COMPONENT detector_10_case_shield = Union_box(
+ material_string = "B4C", priority = -994,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_10_case
+
+COMPONENT detector_10_case_air = Union_box(
+ material_string = "Air", priority = -993,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_10_case
+
+COMPONENT detector_10_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -980,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_10_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_10_direction
+
+COMPONENT detector_10_top_blade_Al = Union_box(
+ material_string = "Al", priority = -979,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_10_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_10_direction
+
+COMPONENT detector_10_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -970,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_10_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_10_direction
+
+COMPONENT detector_10_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -969,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_10_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_10_direction
+
+COMPONENT detector_10_detector_0 = Union_box(
+ material_string = "LiF", priority = -960,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_10_direction
+
+COMPONENT detector_10_detector_1 = Union_box(
+ material_string = "LiF", priority = -959,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_10_direction
+
+COMPONENT detector_10_detector_2 = Union_box(
+ material_string = "LiF", priority = -958,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_10_direction
+
+COMPONENT detector_11_direction = Arm()
+AT (0, 0, 0) RELATIVE sample_position
+ROTATED (0, -292.5, 0) RELATIVE sample_position
+
+COMPONENT detector_11_case = Union_box(
+ material_string = "Al", priority = -895,
+ xwidth = 0.16, yheight = 0.514,
+ zdepth = 0.3798, xwidth2 = 0.266,
+ yheight2 = 0.9159999999999999)
+AT (0, 0, 0.6099) RELATIVE detector_11_direction
+
+COMPONENT detector_11_case_shield = Union_box(
+ material_string = "B4C", priority = -894,
+ xwidth = 0.157, yheight = 0.511,
+ zdepth = 0.37579, xwidth2 = 0.263,
+ yheight2 = 0.9129999999999999, p_interact = 0.2)
+AT (0, 0, 0) RELATIVE detector_11_case
+
+COMPONENT detector_11_case_air = Union_box(
+ material_string = "Air", priority = -893,
+ xwidth = 0.15, yheight = 0.504,
+ zdepth = 0.3798, xwidth2 = 0.256,
+ yheight2 = 0.9059999999999999)
+AT (0, 0, -0.002) RELATIVE detector_11_case
+
+COMPONENT detector_11_top_blade_shield = Union_box(
+ material_string = "B4C", priority = -880,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_11_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_11_direction
+
+COMPONENT detector_11_top_blade_Al = Union_box(
+ material_string = "Al", priority = -879,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, 0.11833333333333333, 0) RELATIVE detector_11_case
+ROTATED (-10.889534609986953, 0, 0) RELATIVE detector_11_direction
+
+COMPONENT detector_11_bottom_blade_shield = Union_box(
+ material_string = "B4C", priority = -870,
+ xwidth = 0.159999, yheight = 0.01,
+ zdepth = 0.38644079034755696, xwidth2 = 0.26599900000000004)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_11_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_11_direction
+
+COMPONENT detector_11_bottom_blade_Al = Union_box(
+ material_string = "Al", priority = -869,
+ xwidth = 0.153, yheight = 0.003,
+ zdepth = 0.37944079034755696, xwidth2 = 0.259)
+AT (0, -0.11833333333333333, 0) RELATIVE detector_11_case
+ROTATED (10.889534609986953, 0, 0) RELATIVE detector_11_direction
+
+COMPONENT detector_11_detector_0 = Union_box(
+ material_string = "LiF", priority = -860,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, -0.308, 0.8009000000000001) RELATIVE detector_11_direction
+
+COMPONENT detector_11_detector_1 = Union_box(
+ material_string = "LiF", priority = -859,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.0, 0.8009000000000001) RELATIVE detector_11_direction
+
+COMPONENT detector_11_detector_2 = Union_box(
+ material_string = "LiF", priority = -858,
+ xwidth = 0.256, yheight = 0.256,
+ zdepth = 0.002)
+AT (0, 0.308, 0.8009000000000001) RELATIVE detector_11_direction
+
+COMPONENT rim = Union_cylinder(
+ material_string = "Al", priority = -1999.9,
+ radius = 0.475, yheight = 0.045)
+AT (0, -0.3029, 0) RELATIVE sample_position
+
+COMPONENT rim_hole = Union_cylinder(
+ material_string = "Air", priority = -1999.8,
+ radius = 0.36, yheight = 0.0451)
+AT (0, 0, 0) RELATIVE rim
+
+COMPONENT table = Union_cylinder(
+ material_string = "Al", priority = -1999.7,
+ radius = 0.4, yheight = 0.041)
+AT (0, -0.397, 0) RELATIVE sample_position
+
+COMPONENT get_lost = Union_cylinder(
+ material_string = "Al", priority = -1999.5,
+ radius = 0.118, yheight = 1.5)
+AT (0, 0, 1.65) RELATIVE sample_position
+ROTATED (90, 0, 0) RELATIVE sample_position
+
+COMPONENT get_lost_rim = Union_cylinder(
+ material_string = "Air", priority = -1999.3,
+ radius = 0.148, yheight = 0.02)
+AT (0, -0.74001, 0) RELATIVE get_lost
+
+COMPONENT get_lost_air = Union_cylinder(
+ material_string = "Air", priority = -1999.2,
+ radius = 0.108, yheight = 1.49)
+AT (0, -0.0050200000000000045, 0) RELATIVE get_lost
+
+COMPONENT get_lost_tube_holder = Union_box(
+ material_string = "Al", priority = -1999.99,
+ xwidth = 0.33, yheight = 0.03,
+ zdepth = 0.2)
+AT (0, -0.301, 0.1) RELATIVE get_lost
+
+COMPONENT time_logger = Union_logger_1D(
+ min_value = 0.035, max_value = 0.037,
+ n1 = 1000, variable = "time")
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT full_logger_space_zx = Union_logger_2D_space(
+ D_direction_1 = "z", D1_min = -0.1,
+ D1_max = 0.5, n1 = 300,
+ D_direction_2 = "y", D2_min = -0.12,
+ D2_max = 0.4, n2 = 300,
+ filename = "full_logger_zx.dat")
+AT (0, 0, 0) RELATIVE sample_position
+
+COMPONENT master = Union_master(
+ allow_inside_start = 1)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT stop = Union_stop()
+AT (0, 0, 0) ABSOLUTE
+
+FINALLY 
+%{
+// Start of finally for generated BL18_SENJU_generated
+%}
+
+END
