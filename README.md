@@ -6,7 +6,7 @@ It provides two different ways to do this.
 
 The first is to use the mcstas-to-cad script like:
 
-`python3 mcstas_to_cad.py --input_file=my_mcstas_instr.py --export --out_file={YOUR_FILE_NAME}`
+`python3 mcstas_to_cad.py --input_file my_mcstas_instr.py --export --out_file {YOUR_FILE_NAME}`
 
 The second is to use the union_viewer.py script to launch an interactive interface with live updates of your chosen mcstas instrument:
 
