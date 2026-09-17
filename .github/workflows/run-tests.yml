@@ -38,6 +38,12 @@ jobs:
             echo "Running mcstas_to_cad on $file"
             python src/mcstas_to_cad.py --input_file="$file"
           done
+
+
+      - name: Run unit tests
+        shell: bash -l {0}
+        run: |
+          python -m unittest discover -s tests_unit -v
   #
   # run-union_viewer:
   #   runs-on: ubuntu-latest
