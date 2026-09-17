@@ -139,22 +139,138 @@ def parse_param(expr, var_map):
 # treating the placeholder "" as a literal (string) value.
 NUMERIC_DECLARE_TYPES = {"double", "float", "int", "long"}
 
+# mcstasscript stores DECLARE/USERVARS content it can't parse into a typed
+# variable as plain strings (one per physical source line) rather than
+# DeclareVariable objects: function bodies, struct/union definitions, and
+# #define/#pragma lines. Most of that genuinely has no computable value -
+# it's "declared" (a function, a type, a macro) but never "initialized" in
+# the sense we care about. But mcstasscript's own "is this a function?"
+# heuristic (a line with "(" and no ";" yet) can also misfire on an ordinary
+# multi-line variable initializer, e.g.:
+#   double result = fabs(
+#       -5.0
+#   );
+# which gets dumped as three raw-string entries even though eval_expr could
+# trivially compute it. _recover_declare_assignments rejoins a run of these
+# raw lines and tries to pull a real "name = expr;" out of it before giving
+# up on the rest.
+_DECLARE_TYPE_KEYWORDS = {
+    "double", "float", "int", "long", "char", "short", "unsigned", "signed", "const",
+}
 
-def create_var_map(instr: ms.McStas_instr):
-    all_vars = (
-        list(instr.declare_list) + list(instr.user_var_list) + list(instr.parameters)
-    )
-    var_map = {}
-    for v in all_vars:
-        # mcstasscript stores DECLARE entries it can't parse into a typed
-        # variable (C functions, structs, raw array declarations) as plain
-        # strings rather than DeclareVariable objects; they have no .value.
+
+def _strip_leading_declare_type(stmt):
+    parts = stmt.split(None, 1)
+    while len(parts) == 2 and parts[0] in _DECLARE_TYPE_KEYWORDS:
+        stmt = parts[1]
+        parts = stmt.split(None, 1)
+    return stmt
+
+
+def _iter_top_level_statements(text):
+    """Split C-ish text on top-level ';' (i.e. not inside (), [], or a
+    string/char literal), yielding each stripped statement (without the
+    trailing ';'). Doesn't need to understand {}/if/for - it's only used to
+    isolate individual statements for a plain assignment check."""
+    depth = 0
+    in_str = None
+    start = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == "\\":
+                i += 2
+                continue
+            if c == in_str:
+                in_str = None
+        elif c in ("'", '"'):
+            in_str = c
+        elif c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == ";" and depth <= 0:
+            stmt = text[start:i].strip()
+            if stmt:
+                yield stmt
+            start = i + 1
+        i += 1
+    tail = text[start:].strip()
+    if tail:
+        yield tail
+
+
+_DECLARE_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
+
+
+def _recover_declare_assignments(raw_lines, var_map):
+    text = "\n".join(raw_lines)
+    if "{" in text or "}" in text:
+        # A genuine function or struct body always has a brace pair (that's
+        # how mcstasscript itself knows where the block ends - see
+        # read_declare.py's bracket-counting loop). Statements *inside* one
+        # are function-local, not instrument-global variables, so treating
+        # them as top-level assignments would be wrong, not just noisy (e.g.
+        # a helper function's "result = a + b;" is not a DECLARE variable).
+        # The misclassified-multi-line-expression case this function exists
+        # to recover (see module comment above) never has braces at all, so
+        # this cleanly tells the two apart.
+        return
+    for stmt in _iter_top_level_statements(text):
+        stmt = _strip_leading_declare_type(stmt)
+        match = _DECLARE_ASSIGNMENT_RE.match(stmt)
+        if not match:
+            # No "name = expr" shape at all - a function signature/body line,
+            # a struct definition, a #define/#pragma, a bare declaration with
+            # no initializer, etc. This is the expected common case, not a
+            # parser gap, so stay silent.
+            continue
+        name, expr = match.groups()
+        expr = "".join(expr.split())
+        try:
+            var_map[name] = eval_expr(expr, var_map)
+        except Exception as e:
+            print(f"Warning: Failed to evaluate {stmt};: {e}")
+
+
+def _add_declare_vars_to_map(entries, var_map):
+    """Populate var_map from one DECLARE/USERVARS source list, recovering
+    any evaluable assignment hiding in a run of mcstasscript's raw-string
+    entries instead of silently discarding the whole run."""
+    i = 0
+    n = len(entries)
+    while i < n:
+        v = entries[i]
         if isinstance(v, str):
+            j = i
+            raw_lines = []
+            while j < n and isinstance(entries[j], str):
+                raw_lines.append(entries[j])
+                j += 1
+            _recover_declare_assignments(raw_lines, var_map)
+            i = j
             continue
         value = v.value
         if value == "" and getattr(v, "type", None) in NUMERIC_DECLARE_TYPES:
             value = 0.0
         var_map[v.name] = value
+        i += 1
+
+
+def create_var_map(instr: ms.McStas_instr):
+    var_map = {}
+    _add_declare_vars_to_map(list(instr.declare_list), var_map)
+    _add_declare_vars_to_map(list(instr.user_var_list), var_map)
+    for v in instr.parameters:
+        # Defensive: parameters are resolved from the DEFINE INSTRUMENT(...)
+        # line, not the DECLARE-raw-string mechanism above, so this isn't
+        # expected to ever be a bare string - but skip rather than crash if
+        # it ever is.
+        if isinstance(v, str):
+            continue
+        var_map[v.name] = v.value
     ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*;$")
 
     lines = instr.initialize_section.splitlines()

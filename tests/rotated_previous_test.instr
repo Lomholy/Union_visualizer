@@ -26,6 +26,18 @@
 *     declare_list. create_var_map used to assume every declare_list entry
 *     has a .value attribute and crashed with AttributeError.
 *
+* (create_var_map also recovers an evaluable "name = expr;" assignment that
+* mcstasscript's own "is this a function?" heuristic can misfire on and dump
+* as raw strings alongside genuine function/struct/#define content - see
+* _recover_declare_assignments and its unit-level tests. That specific
+* mcstasscript misclassification is fragile to reproduce inside a full
+* instrument file: embedding it here was found to trip a *different*,
+* unrelated mcstasscript reader crash - IndexError inside DeclareVariable's
+* constructor - by corrupting the DECLARE/INITIALIZE section boundary
+* detection, before preprocess.py's own code ever runs. So that fix is
+* covered by direct unit tests against create_var_map/
+* _recover_declare_assignments instead of an .instr fixture here.)
+*
 * %End
 ********************************************************************************/
 
