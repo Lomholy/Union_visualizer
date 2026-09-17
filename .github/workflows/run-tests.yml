@@ -39,6 +39,7 @@ jobs:
             echo "Running mcstas_to_cad on $file"
             python src/mcstas_to_cad.py --input_file="$file" || status=1
           done
+          exit $status
 
 
       - name: Run unit tests
