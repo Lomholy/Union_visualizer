@@ -239,29 +239,61 @@ def compute_world_matrices(instr, verbose=False):
         )
         return Rx @ Ry @ Rz
 
-    def find_relative(comp, instr):
+    def local_rotation(comp):
+        rx, ry, rz = np.array(comp.ROTATED_data) * np.pi / 180
+        return rotation_matrix(rx, ry, rz)
+
+    def find_relative_parents(comp, instr):
+        # AT and ROTATED are resolved against independent reference
+        # components in real McStas (see cogen_comp_init_position() in
+        # McCode's cogen.c.in): a component's world position always uses
+        # its AT reference, and its world rotation always uses its ROTATED
+        # reference, even when the two differ.
         AT_rel = comp.AT_relative
-        ROT_rel = comp.ROTATED_relative
+        # When ROTATED is omitted in the source, mcstasscript leaves
+        # ROTATED_relative at its "ABSOLUTE" default, but real McStas
+        # instead defaults an omitted ROTATED to the *same* reference as
+        # AT (instrument.y: orientation_rel = isdefault ? place_rel : ...).
+        # comp.ROTATED_specified tells us whether ROTATED was actually
+        # written in the source, so we can apply the correct default
+        # ourselves instead of trusting mcstasscript's "ABSOLUTE".
+        ROT_rel = comp.ROTATED_relative if comp.ROTATED_specified else comp.AT_relative
 
         if AT_rel.startswith("RELATIVE"):
             AT_rel = AT_rel.split(" ")[1]
         if ROT_rel.startswith("RELATIVE"):
             ROT_rel = ROT_rel.split(" ")[1]
 
-        if AT_rel.startswith("PREVIOUS") or ROT_rel.startswith("PREVIOUS"):
+        if AT_rel == "PREVIOUS" or ROT_rel == "PREVIOUS":
             idx = instr.component_list.index(comp)
-            previous_name = instr.component_list[idx - 1].name
-            if AT_rel.startswith("PREVIOUS"):
-                AT_rel = previous_name
-            if ROT_rel.startswith("PREVIOUS"):
-                ROT_rel = previous_name
+            if idx == 0:
+                # Real McStas's own grammar (instrument.y: compref -> PREVIOUS)
+                # handles a first-component PREVIOUS reference the same way:
+                # print a warning and fall back to ABSOLUTE, rather than a
+                # hard error. This isn't just theoretical - several real
+                # instruments in the McCode corpus do this (e.g. ILL_H53_D16,
+                # ILL_H22_D1B), presumably as a copy-paste artifact, and McStas
+                # itself still compiles and runs them.
+                print(
+                    f"Warning: Component '{comp.name}' is RELATIVE PREVIOUS "
+                    f"but is the first component in the instrument; no "
+                    f"previous component exists. Using ABSOLUTE, matching "
+                    f"McStas's own fallback for this case."
+                )
+                if AT_rel == "PREVIOUS":
+                    AT_rel = "ABSOLUTE"
+                if ROT_rel == "PREVIOUS":
+                    ROT_rel = "ABSOLUTE"
+            else:
+                previous_name = instr.component_list[idx - 1].name
+                if AT_rel == "PREVIOUS":
+                    AT_rel = previous_name
+                if ROT_rel == "PREVIOUS":
+                    ROT_rel = previous_name
 
-        if ROT_rel != "ABSOLUTE":
-            return ROT_rel
+        return AT_rel, ROT_rel
 
-        return AT_rel
-
-    def local_matrix(comp):
+    def compute_matrix(comp, AT_parent, ROT_parent, world):
         unresolved = [v for v in comp.ROTATED_data if isinstance(v, str)]
         unresolved += [v for v in comp.AT_data if isinstance(v, str)]
         if unresolved:
@@ -272,10 +304,18 @@ def compute_world_matrices(instr, verbose=False):
                 f"eval_expr/MCSTAS_CONSTANTS."
             )
 
+        R_parent = np.eye(3) if ROT_parent == "ABSOLUTE" else world[ROT_parent][:3, :3]
+        R = R_parent @ local_rotation(comp)
+
+        AT_data = np.array(comp.AT_data, dtype=float)
+        if AT_parent == "ABSOLUTE":
+            t = AT_data
+        else:
+            t = world[AT_parent][:3, 3] + world[AT_parent][:3, :3] @ AT_data
+
         M = np.eye(4)
-        rx, ry, rz = np.array(comp.ROTATED_data) * np.pi / 180
-        M[:3, :3] = rotation_matrix(rx, ry, rz)
-        M[:3, 3] = comp.AT_data
+        M[:3, :3] = R
+        M[:3, 3] = t
         return M
 
     world = {}
@@ -285,18 +325,13 @@ def compute_world_matrices(instr, verbose=False):
         progressed = False
 
         for comp in remaining[:]:
-            rel = find_relative(comp, instr)
+            AT_parent, ROT_parent = find_relative_parents(comp, instr)
 
-            # Absolute → no dependency
-            if rel == "ABSOLUTE":
-                world[comp.name] = local_matrix(comp)
-                remaining.remove(comp)
-                progressed = True
-                continue
+            at_ready = AT_parent == "ABSOLUTE" or AT_parent in world
+            rot_ready = ROT_parent == "ABSOLUTE" or ROT_parent in world
 
-            # Relative → need parent first
-            if rel in world:
-                world[comp.name] = world[rel] @ local_matrix(comp)
+            if at_ready and rot_ready:
+                world[comp.name] = compute_matrix(comp, AT_parent, ROT_parent, world)
                 if verbose:
                     print(f"COMPONENT {comp.name} MATRIX IS : \n{world[comp.name]}")
                 remaining.remove(comp)
