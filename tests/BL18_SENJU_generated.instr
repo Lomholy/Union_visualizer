@@ -56,7 +56,10 @@ COMPONENT a1 = Arm()
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT mod = SNS_source(
- filename = "source_BL18.txt", xwidth = 0.1,
+ // Substituted for mcdisplay debugging: original "source_BL18.txt" is not present in
+ // this checkout. Using a bundled McStas SNS decoupled-poisoned moderator table instead,
+ // since BL18_SENJU is itself a spallation-source beamline.
+ filename = "source_sct091_tu_02_1.dat", xwidth = 0.1,
  yheight = 0.1, dist = 15.19,
  focus_xw = 0.041, focus_yh = 0.041,
  Emin = pow((2*PI/L_max)*K2V,2.0)*VS2E, Emax = pow((2*PI/L_min)*K2V,2.0)*VS2E)
@@ -246,7 +249,9 @@ COMPONENT Al = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Separator_total = NCrystal_process(
- cfg = "structures/detector/SiO2.ncmat;temp=25C;density=0.8x")
+ // Substituted: "structures/detector/SiO2.ncmat" is not present here; using the
+ // equivalent NCrystal standard-library quartz polymorph.
+ cfg = "SiO2-alpha_sg154_AlphaQuartz.ncmat;temp=25C;density=0.8x")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Separator = Union_make_material(
@@ -254,7 +259,10 @@ COMPONENT Separator = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT PW_cubic_total = NCrystal_process(
- cfg = "phases<0.7*structures/battery/PW cubic.ncmat&0.2*structures/battery/carbon/V1/C.ncmat&0.1*structures/battery/teflon.ncmat>;temp=25C")
+ // Substituted: local "structures/battery/..." files are not present here. Approximating
+ // the Prussian-White cathode phase as a virtual NCrystal solid (composition-only, no
+ // crystal structure), the carbon additive as pyrolytic graphite, and the binder as PTFE.
+ cfg = "phases<0.7*solid::Na2Fe2C6N6/1.9gcm3&0.2*C_sg194_pyrolytic_graphite.ncmat&0.1*solid::C2F4/2.2gcm3>;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT PW_cubic = Union_make_material(
@@ -262,7 +270,10 @@ COMPONENT PW_cubic = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT PW_R_3H_total = NCrystal_process(
- cfg = "phases<0.7*structures/battery/PW R-3H.ncmat&0.2*structures/battery/carbon/V1/C.ncmat&0.1*structures/battery/teflon.ncmat>;temp=25C")
+ // Substituted: same rationale as PW_cubic_total above; the R-3H (rhombohedral) polymorph
+ // is not distinguishable via the virtual "solid::" composition, so the same approximate
+ // composition is reused here.
+ cfg = "phases<0.7*solid::Na2Fe2C6N6/1.9gcm3&0.2*C_sg194_pyrolytic_graphite.ncmat&0.1*solid::C2F4/2.2gcm3>;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT PW_R_3H = Union_make_material(
@@ -270,7 +281,9 @@ COMPONENT PW_R_3H = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Teflon_total = NCrystal_process(
- cfg = "structures/battery/teflon.ncmat;temp=25C")
+ // Substituted: no stdlib PTFE .ncmat file; approximating with a virtual composition
+ // solid at PTFE's nominal density.
+ cfg = "solid::C2F4/2.2gcm3;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Teflon = Union_make_material(
@@ -278,7 +291,9 @@ COMPONENT Teflon = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Scintillator_total = NCrystal_process(
- cfg = "structures/detector/Gd2O3.ncmat;temp=25C")
+ // Substituted: no stdlib Gd2O3 .ncmat crystal file; using NCrystal's built-in virtual
+ // Gd2O3 solid (correct composition/density, no crystal structure).
+ cfg = "solid::Gd2O3/7.07gcm3;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Scintillator = Union_make_material(
@@ -286,7 +301,8 @@ COMPONENT Scintillator = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT SiO2_total = NCrystal_process(
- cfg = "structures/detector/SiO2.ncmat;temp=25C")
+ // Substituted: see Separator_total above.
+ cfg = "SiO2-alpha_sg154_AlphaQuartz.ncmat;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT SiO2 = Union_make_material(
@@ -294,7 +310,9 @@ COMPONENT SiO2 = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT LiF_total = NCrystal_process(
- cfg = "phases<0.333*structures/detector/6LiF.ncmat&0.667*structures/detector/ZnS.ncmat>;temp=25C")
+ // Substituted: no local 6Li-enriched LiF / ZnS files here; using the stdlib natural-Li
+ // LiF and ZnS(sphalerite) phases (a standard ZnS:Ag/LiF scintillator screen composition).
+ cfg = "phases<0.333*LiF_sg225_LithiumFlouride.ncmat&0.667*ZnS_sg216_Sphalerite.ncmat>;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT LiF = Union_make_material(
@@ -302,7 +320,8 @@ COMPONENT LiF = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT B4C_total = NCrystal_process(
- cfg = "structures/instrument/B4C.ncmat;temp=25C")
+ // Substituted: no local B4C file; using the NCrystal standard-library boron carbide.
+ cfg = "B4C_sg166_BoronCarbide.ncmat;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT B4C = Union_make_material(
@@ -318,7 +337,8 @@ COMPONENT Air = Union_make_material(
 AT (0, 0, 0) ABSOLUTE
 
 COMPONENT Cu_random_total = NCrystal_process(
- cfg = "structures/grain/Cu.ncmat;dir1=@crys_hkl:0,0,1@lab:0,0,1;dir2=@crys_hkl:0,1,0@lab:0,1,0;mos=20.0arcmin;temp=25C")
+ // Substituted: no local Cu file; using the NCrystal standard-library copper crystal.
+ cfg = "Cu_sg225.ncmat;dir1=@crys_hkl:0,0,1@lab:0,0,1;dir2=@crys_hkl:0,1,0@lab:0,1,0;mos=20.0arcmin;temp=25C")
 AT (0, 0, 0) ABSOLUTE
 ROTATED (203.10869790484898, 302.0484941693489, 10.53945059954913) ABSOLUTE
 
