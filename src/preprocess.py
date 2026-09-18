@@ -125,7 +125,41 @@ class OpaqueRuntimeCall(Exception):
 OPAQUE_RUNTIME_CALLS = {"malloc", "create_darr1d", "mcget_ncount"}
 
 
-def eval_expr(expr, var_map=None):
+def _resolve_comp_getpar(node, comp_context):
+    """COMP_GETPAR(CompName, param) / COMP_GETPAR(PREVIOUS, param) is a
+    McStas macro meaning "read param off the named (or previous)
+    component" - directly answerable from instr.component_list, unlike a
+    generic unsupported function call. comp_context is (instr, comp), comp
+    being the component whose AT/ROTATED/parameters are currently being
+    resolved (needed to find "the previous component")."""
+    if comp_context is None:
+        raise ValueError(f"COMP_GETPAR used outside a component context: {ast.unparse(node)}")
+    instr, comp = comp_context
+    if len(node.args) != 2 or not all(isinstance(a, ast.Name) for a in node.args):
+        raise ValueError(f"Unsupported COMP_GETPAR usage: {ast.unparse(node)}")
+    comp_token, param_token = node.args[0].id, node.args[1].id
+    if comp_token == "PREVIOUS":
+        idx = instr.component_list.index(comp)
+        if idx == 0:
+            raise ValueError(
+                f"COMP_GETPAR(PREVIOUS, {param_token}) used on '{comp.name}', "
+                f"the first component in the instrument; no previous "
+                f"component exists"
+            )
+        target = instr.component_list[idx - 1]
+    else:
+        matches = [c for c in instr.component_list if c.name == comp_token]
+        if not matches:
+            raise ValueError(f"COMP_GETPAR: no component named '{comp_token}'")
+        target = matches[0]
+    if not hasattr(target, param_token):
+        raise ValueError(
+            f"COMP_GETPAR: component '{target.name}' has no parameter '{param_token}'"
+        )
+    return getattr(target, param_token)
+
+
+def eval_expr(expr, var_map=None, comp_context=None):
     if var_map is None:
         var_map = {}
 
@@ -164,6 +198,8 @@ def eval_expr(expr, var_map=None):
                 raise ValueError(f"Unknown variable: {node.id}")
 
         elif isinstance(node, ast.Call):  # function calls
+            if isinstance(node.func, ast.Name) and node.func.id == "COMP_GETPAR":
+                return _resolve_comp_getpar(node, comp_context)
             if isinstance(node.func, ast.Name) and node.func.id in OPAQUE_RUNTIME_CALLS:
                 # Bail out before evaluating func/args - the args are often
                 # not even valid Python (e.g. malloc(150*sizeof(char))),
@@ -174,6 +210,12 @@ def eval_expr(expr, var_map=None):
             args = [_eval(arg) for arg in node.args]
             return func(*args)
 
+        elif isinstance(node, ast.Attribute):  # obj.field - struct member access
+            # DECLARE-time C structs aren't modeled as Python objects here;
+            # per the plan this is a deliberate, visible "left unresolved"
+            # rather than an attempt to model arbitrary structs.
+            raise ValueError(f"Unsupported: struct member access '{ast.unparse(node)}'")
+
         else:
             raise TypeError(f"Unsupported expression: {expr}")
 
@@ -181,12 +223,22 @@ def eval_expr(expr, var_map=None):
     return _eval(tree.body)
 
 
-def parse_param(expr, var_map):
-    if type(expr) is str:
-        expr = "".join(expr.split())
+def parse_param(expr, var_map, comp_context=None):
+    if type(expr) is not str:
+        # Already numeric (mcstasscript resolved it itself) - nothing to
+        # evaluate, and critically nothing to warn about either.
+        return expr
+    stripped = "".join(expr.split())
     try:
-        return eval_expr(expr, var_map)
-    except Exception:
+        return eval_expr(stripped, var_map, comp_context)
+    except OpaqueRuntimeCall as e:
+        print(f"Info: {expr} depends on runtime state ({e}()), left unresolved")
+        return expr
+    except Exception as e:
+        # Unlike create_var_map, this used to fail completely silently -
+        # invisible until it blew up later in compute_world_matrices, a
+        # worse failure mode than a warning here and now.
+        print(f"Warning: Failed to evaluate {expr}: {e}")
         return expr
 
 
@@ -398,6 +450,10 @@ def create_var_map(instr: ms.McStas_instr):
 
 
 def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr, var_map: dict):
+    # (instr, comp) context so parse_param can resolve COMP_GETPAR(...) -
+    # it needs to look up other components by name/position, not just the
+    # plain var_map of DECLARE/INITIALIZE values.
+    comp_context = (instr, comp)
     # Parameters exist in the following spaces in each component:
     # AT vector, the ROT vector,
     # the component_parameters
@@ -405,22 +461,22 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr, var_map: 
     for name in comp.parameter_names:
         value = getattr(comp, name)
         if isinstance(value, (str, int, float)):
-            val = parse_param(value, var_map)
+            val = parse_param(value, var_map, comp_context)
             setattr(comp, name, val)
         elif isinstance(value, (list, tuple, set)):
             converted = []
 
             for val in value:
-                res = parse_param(val, var_map)
+                res = parse_param(val, var_map, comp_context)
                 converted.append(res)
 
             setattr(comp, name, type(value)(converted))
     # Then go over AT and ROT vector
     for i, val in enumerate(comp.AT_data):
-        value = parse_param(val, var_map)
+        value = parse_param(val, var_map, comp_context)
         comp.AT_data[i] = value
     for i, val in enumerate(comp.ROTATED_data):
-        value = parse_param(val, var_map)
+        value = parse_param(val, var_map, comp_context)
         comp.ROTATED_data[i] = value
 
     return comp
@@ -515,16 +571,31 @@ def compute_world_matrices(instr, verbose=False):
 
         return AT_rel, ROT_rel
 
+    def default_unresolved_to_zero(comp, values, kind):
+        # A component with a genuinely unresolved AT/ROTATED expression
+        # doesn't mean the whole instrument is broken - abort just this
+        # component's own local transform (defaulting it to zero) rather
+        # than the entire preprocessing run, so the rest of the instrument
+        # is still visualizable. Mutates values in place (comp.AT_data /
+        # comp.ROTATED_data), matching how attempt_conversion already
+        # treats these lists as mutable.
+        unresolved = [v for v in values if isinstance(v, str)]
+        if not unresolved:
+            return
+        print(
+            f"Warning: Component '{comp.name}': could not resolve {kind} "
+            f"expression(s) to numeric values: {unresolved}. Check for "
+            f"undefined variables or missing constants in "
+            f"eval_expr/MCSTAS_CONSTANTS; defaulting to 0 for this "
+            f"component's local transform."
+        )
+        for i, v in enumerate(values):
+            if isinstance(v, str):
+                values[i] = 0.0
+
     def compute_matrix(comp, AT_parent, ROT_parent, world):
-        unresolved = [v for v in comp.ROTATED_data if isinstance(v, str)]
-        unresolved += [v for v in comp.AT_data if isinstance(v, str)]
-        if unresolved:
-            raise ValueError(
-                f"Component '{comp.name}': could not resolve AT/ROTATED "
-                f"expression(s) to numeric values: {unresolved}. Check for "
-                f"undefined variables or missing constants in "
-                f"eval_expr/MCSTAS_CONSTANTS."
-            )
+        default_unresolved_to_zero(comp, comp.ROTATED_data, "ROTATED")
+        default_unresolved_to_zero(comp, comp.AT_data, "AT")
 
         R_parent = np.eye(3) if ROT_parent == "ABSOLUTE" else world[ROT_parent][:3, :3]
         R = R_parent @ local_rotation(comp)
