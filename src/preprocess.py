@@ -108,6 +108,23 @@ MCSTAS_CONSTANTS = {
 }
 
 
+class OpaqueRuntimeCall(Exception):
+    """Raised by eval_expr when an expression calls a function that
+    genuinely has no static value at preprocessing time - not a parser
+    gap, just something only known once a simulation actually runs."""
+
+
+# Calls that are fundamentally uncomputable ahead of time, verified against
+# the mcstas-comps corpus (not speculative): dynamic-allocation calls
+# (malloc, McStas's create_darr1d) and runtime-state reads (mcget_ncount() -
+# the neutron count, only known once a simulation runs). These used to be
+# reported identically to a typo'd variable name ("Unknown variable: X"),
+# which is misleading - they're not bugs to fix, they're a fundamentally
+# different category, so eval_expr raises OpaqueRuntimeCall for them
+# instead of the generic ValueError a real unknown name gets.
+OPAQUE_RUNTIME_CALLS = {"malloc", "create_darr1d", "mcget_ncount"}
+
+
 def eval_expr(expr, var_map=None):
     if var_map is None:
         var_map = {}
@@ -147,6 +164,12 @@ def eval_expr(expr, var_map=None):
                 raise ValueError(f"Unknown variable: {node.id}")
 
         elif isinstance(node, ast.Call):  # function calls
+            if isinstance(node.func, ast.Name) and node.func.id in OPAQUE_RUNTIME_CALLS:
+                # Bail out before evaluating func/args - the args are often
+                # not even valid Python (e.g. malloc(150*sizeof(char))),
+                # and none of that matters since the call itself has no
+                # static value regardless of what its arguments evaluate to.
+                raise OpaqueRuntimeCall(node.func.id)
             func = _eval(node.func)
             args = [_eval(arg) for arg in node.args]
             return func(*args)
@@ -270,6 +293,8 @@ def _recover_raw_declare_block(raw_lines, var_map):
         expr = "".join(expr.split())
         try:
             var_map[name] = eval_expr(expr, var_map)
+        except OpaqueRuntimeCall as e:
+            print(f"Info: {statement}; depends on runtime state ({e}()), left unresolved")
         except Exception as e:
             print(f"Warning: Failed to evaluate {statement};: {e}")
 
@@ -324,6 +349,8 @@ def _recover_raw_parameter(raw_text, var_map):
     expr = "".join(expr.split())
     try:
         var_map[name] = eval_expr(expr, var_map)
+    except OpaqueRuntimeCall as e:
+        print(f"Info: parameter {statement}; depends on runtime state ({e}()), left unresolved")
     except Exception as e:
         print(f"Warning: Failed to evaluate parameter {statement};: {e}")
 
@@ -363,6 +390,8 @@ def create_var_map(instr: ms.McStas_instr):
         try:
             value = eval_expr(expr, var_map)
             var_map[name] = value
+        except OpaqueRuntimeCall as e:
+            print(f"Info: {line} depends on runtime state ({e}()), left unresolved")
         except Exception as e:
             print(f"Warning: Failed to evaluate {line}: {e}")
     return var_map
