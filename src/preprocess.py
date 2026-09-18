@@ -75,6 +75,23 @@ OPERATORS = {
 UNARY = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
+    ast.Not: operator.not_,   # the "!" -> " not " substitution ahead of a
+                               # single-line "if (cond) ..." turns C's "!"
+                               # into an ast.UnaryOp(ast.Not, ...) node,
+                               # which the existing UNARY dispatch handles
+                               # for free once it's in this table.
+}
+
+# Comparison operators for "if (cond) name = expr;" conditions (2.1 part 2).
+# Chained comparisons (a < b < c) are walked pairwise in eval_expr, mirroring
+# how OPERATORS/UNARY are already node-type -> callable lookup tables.
+COMPARE_OPERATORS = {
+    ast.Lt: operator.lt,
+    ast.Gt: operator.gt,
+    ast.LtE: operator.le,
+    ast.GtE: operator.ge,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
 }
 
 # Allowed math functions/constants
@@ -184,8 +201,37 @@ def eval_expr(expr, var_map=None, comp_context=None):
                 )
                 return 0
 
-        elif isinstance(node, ast.UnaryOp):  # -x
+        elif isinstance(node, ast.UnaryOp):  # -x, or "not x" from a translated C "!x"
             return UNARY[type(node.op)](_eval(node.operand))
+
+        elif isinstance(node, ast.Compare):  # a < b, chained a < b < c, etc.
+            left = _eval(node.left)
+            for op, comparator in zip(node.ops, node.comparators):
+                if type(op) not in COMPARE_OPERATORS:
+                    raise TypeError(f"Unsupported comparison operator: {type(op).__name__}")
+                right = _eval(comparator)
+                if not COMPARE_OPERATORS[type(op)](left, right):
+                    return False
+                left = right
+            return True
+
+        elif isinstance(node, ast.BoolOp):  # translated C "&&"/"||"
+            if isinstance(node.op, ast.And):
+                result = True
+                for value in node.values:
+                    result = _eval(value)
+                    if not result:
+                        return result
+                return result
+            elif isinstance(node.op, ast.Or):
+                result = False
+                for value in node.values:
+                    result = _eval(value)
+                    if result:
+                        return result
+                return result
+            else:
+                raise TypeError(f"Unsupported boolean operator: {type(node.op).__name__}")
 
         elif isinstance(node, ast.Name):  # variables
             if node.id in var_map:
@@ -260,6 +306,8 @@ _PARAM_TYPE_KEYWORDS = _C_TYPE_KEYWORDS | {"string"}
 
 _RAW_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
 _QUOTED_STRING_RE = re.compile(r'^"(.*)"$', re.S)
+_ELSE_ASSIGNMENT_RE = re.compile(r"^else\s+([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
+_NEGATION_RE = re.compile(r"!(?!=)")  # a bare "!", not part of "!="
 
 
 def _resolved_value(entry):
@@ -305,6 +353,43 @@ def _split_top_level_statements(text):
     if tail:
         statements.append(tail)
     return statements
+
+
+def _c_bool_ops_to_python(text):
+    """Textually translate C's boolean operators to Python's before handing
+    a condition to eval_expr (ast.parse rejects "&&"/"||"/bare "!" outright,
+    they aren't Python syntax at all). "!=" is left untouched - it's already
+    valid Python and _NEGATION_RE's negative lookahead skips it."""
+    text = text.replace("&&", " and ").replace("||", " or ")
+    return _NEGATION_RE.sub(" not ", text)
+
+
+def _split_if_statement(statement):
+    """Split a statement starting with "if (" into (cond, rest), where rest
+    is everything after the condition's *matching* close-paren. A naive
+    regex like r"if\\s*\\((.+)\\)" stops at the first ")", which breaks on
+    any condition that has parens of its own, e.g. "if ((a<b) && c) x=1" -
+    so this walks the text counting paren depth instead, the same technique
+    _split_top_level_statements already uses for ';'. Returns None if the
+    statement doesn't start with "if (" or the parens never balance."""
+    match = re.match(r"^if\s*\(", statement)
+    if not match:
+        return None
+    i = match.end()
+    depth = 1
+    start = i
+    n = len(statement)
+    while i < n and depth > 0:
+        if statement[i] == "(":
+            depth += 1
+        elif statement[i] == ")":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        return None
+    cond = statement[start:i - 1].strip()
+    rest = statement[i:].strip()
+    return cond, rest
 
 
 def _strip_c_type_prefix(statement, type_keywords=_C_TYPE_KEYWORDS):
@@ -407,6 +492,47 @@ def _recover_raw_parameter(raw_text, var_map):
         print(f"Warning: Failed to evaluate parameter {statement};: {e}")
 
 
+def _assign_or_warn(var_map, name, expr, display_text):
+    """Evaluate expr and store it under name in var_map, or print the
+    appropriate Info:/Warning: message and leave it unresolved - shared by
+    a plain "name = expr;" statement and whichever branch of an
+    "if (cond) name = expr; [else name2 = expr2;]" actually gets taken."""
+    try:
+        var_map[name] = eval_expr(expr, var_map)
+    except OpaqueRuntimeCall as e:
+        print(f"Info: {display_text} depends on runtime state ({e}()), left unresolved")
+    except Exception as e:
+        print(f"Warning: Failed to evaluate {display_text}: {e}")
+
+
+def _apply_conditional_statement(cond, name, expr, else_name, else_expr, var_map):
+    """Handle one "if (cond) name = expr;", optionally paired with
+    "else name2 = expr2;". Real C semantics: only the taken branch is ever
+    executed, so the untaken one must never be evaluated or warned about -
+    a failing expression that's never reached isn't a bug."""
+    display = f"if ({cond}) {name} = {expr};"
+    if else_name is not None:
+        display += f" else {else_name} = {else_expr};"
+
+    try:
+        # ast.parse(mode="eval") treats leading whitespace as an
+        # (invalid) indent, not just insignificant padding - and "!x" at
+        # the very start of a condition becomes " not x" after the
+        # substitution below, so this can't skip the strip().
+        cond_value = eval_expr(_c_bool_ops_to_python(cond).strip(), var_map)
+    except OpaqueRuntimeCall as e:
+        print(f"Info: {display} depends on runtime state ({e}()), left unresolved")
+        return
+    except Exception as e:
+        print(f"Warning: Failed to evaluate {display}: {e}")
+        return
+
+    if cond_value:
+        _assign_or_warn(var_map, name, expr, display)
+    elif else_name is not None:
+        _assign_or_warn(var_map, else_name, else_expr, display)
+
+
 def create_var_map(instr: ms.McStas_instr):
     var_map = {}
     _populate_declare_vars(list(instr.declare_list), var_map)
@@ -422,8 +548,6 @@ def create_var_map(instr: ms.McStas_instr):
             continue
         var_map[param.name] = _resolved_value(param)
 
-    ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*;$")
-
     lines = instr.initialize_section.splitlines()
 
     for line in lines:
@@ -432,20 +556,45 @@ def create_var_map(instr: ms.McStas_instr):
         if not line or line.startswith("//"):
             continue
 
-        match = ASSIGNMENT_RE.match(line)
+        # C allows several ';'-terminated statements on one line (McStas
+        # INITIALIZE sections use this constantly, e.g. "SM=1; SS=-1;
+        # SA=1;"), so split on top-level ';' first and process each
+        # resulting statement independently, instead of matching (and
+        # requiring) exactly one assignment for the whole line.
+        statements = _split_top_level_statements(line)
+        idx = 0
+        n = len(statements)
+        while idx < n:
+            statement = statements[idx]
 
-        if not match:
-            continue
+            if_split = _split_if_statement(statement)
+            if if_split is not None:
+                cond, rest = if_split
+                match = _RAW_ASSIGNMENT_RE.match(rest)
+                if match:
+                    name, expr = match.groups()
+                    else_name = else_expr = None
+                    # An "if (cond) x=a;" and its "else x=b;" become two
+                    # separate chunks after the ';'-split above - look ahead
+                    # one chunk to re-associate them before evaluating.
+                    if idx + 1 < n:
+                        else_match = _ELSE_ASSIGNMENT_RE.match(statements[idx + 1])
+                        if else_match:
+                            else_name, else_expr = else_match.groups()
+                            idx += 1
+                    _apply_conditional_statement(
+                        cond, name, expr.strip(), else_name,
+                        else_expr.strip() if else_expr is not None else None,
+                        var_map,
+                    )
+                idx += 1
+                continue
 
-        name, expr = match.groups()
-
-        try:
-            value = eval_expr(expr, var_map)
-            var_map[name] = value
-        except OpaqueRuntimeCall as e:
-            print(f"Info: {line} depends on runtime state ({e}()), left unresolved")
-        except Exception as e:
-            print(f"Warning: Failed to evaluate {line}: {e}")
+            match = _RAW_ASSIGNMENT_RE.match(statement)
+            if match:
+                name, expr = match.groups()
+                _assign_or_warn(var_map, name, expr, f"{statement};")
+            idx += 1
     return var_map
 
 
