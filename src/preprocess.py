@@ -117,7 +117,21 @@ def eval_expr(expr, var_map=None):
             return node.value
 
         elif isinstance(node, ast.BinOp):  # x + y
-            return OPERATORS[type(node.op)](_eval(node.left), _eval(node.right))
+            left, right = _eval(node.left), _eval(node.right)
+            try:
+                return OPERATORS[type(node.op)](left, right)
+            except ZeroDivisionError:
+                # A parameter hitting a division by zero here doesn't mean
+                # the instrument is broken - it may not even be essential to
+                # the Union geometry being visualized - so we warn and let
+                # the rest of preprocessing continue rather than aborting
+                # this assignment (and cascading into every later expression
+                # that depends on it) the way an unhandled exception would.
+                print(
+                    f"Warning: Division by zero evaluating '{ast.unparse(node)}' "
+                    f"in '{expr}'; defaulting to 0"
+                )
+                return 0
 
         elif isinstance(node, ast.UnaryOp):  # -x
             return UNARY[type(node.op)](_eval(node.operand))
