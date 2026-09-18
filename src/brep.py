@@ -103,7 +103,7 @@ def build_comp_brep(comp, world_matrices):
         brep = BRepPrimAPI_MakeBox(axis, comp.xwidth, comp.yheight, comp.zdepth).Shape()
 
     elif c_type == "Union_cylinder":
-        pnt = pnt - np.array([0, comp.yheight / 2, 0])
+        pnt = pnt - comp.yheight/2 * y_dir
         axis = gp_Ax2(gp_Pnt(*pnt), gp_Dir(*y_dir))
         brep = BRepPrimAPI_MakeCylinder(axis, comp.radius, comp.yheight).Shape()
     elif c_type == "Union_cone":
