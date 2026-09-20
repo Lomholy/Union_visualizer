@@ -7,6 +7,53 @@ from dual_cont import build_mesh_dual
 from brep import build_brep_meshes, build_single_brep_mesh
 
 
+# What each mesher's dock controls actually mean, read by the GUI so it can
+# grey out (and explain) a control that would otherwise silently do nothing:
+#
+# - "resolution": does build_mesh/build_all_meshes's `res` grid resolution
+#   argument affect this mesher's output? Only marching cubes rasterises
+#   onto a res^3 grid; brep triangulates an exact OCC solid via its own
+#   deflection tolerance instead, and dual contouring's build_mesh_dual
+#   takes no resolution argument at all.
+# - "deflection": does the `deflection` argument (BRepMesh_IncrementalMesh's
+#   linear deflection, formerly hard-coded to 0.01) affect this mesher's
+#   output? Only brep triangulates a BRep solid at all.
+# - "clip": does the clip dict actually cut this mesher's output? True for
+#   all three - mc and dc both mesh `final_sdfs`, which already has the
+#   clip half-space intersected into it (signed_distance_functions.build_sdfs),
+#   and brep applies the same clip dict directly to the OCC solid
+#   (brep.clip_component).
+# - "incremental_rebuild": does build_mesh (a single component's rebuild,
+#   used by union_viewer's per-component cache) actually work for this
+#   mesher? mc and brep both build a real mesh; dc's build_mesh branch is
+#   `if mesher == "dc": return` unconditionally, so a single-component
+#   rebuild under dc always yields None - only build_all_meshes's dc path
+#   (via build_mesh_dual) produces real output, on a full rebuild.
+MESHER_CAPABILITIES = {
+    "mc": {
+        "resolution": True,
+        "deflection": False,
+        "clip": True,
+        "incremental_rebuild": True,
+    },
+    "dc": {
+        "resolution": False,
+        "deflection": False,
+        "clip": True,
+        "incremental_rebuild": False,
+    },
+    "brep": {
+        "resolution": False,
+        "deflection": True,
+        "clip": True,
+        "incremental_rebuild": True,
+    },
+}
+
+# The deflection BRepMesh_IncrementalMesh used before it became a parameter.
+DEFAULT_BREP_DEFLECTION = 0.01
+
+
 def make_grid(sdf, bbox_min, bbox_max, resolution):
     xs = np.linspace(bbox_min[0], bbox_max[0], resolution)
     ys = np.linspace(bbox_min[1], bbox_max[1], resolution)
@@ -43,6 +90,7 @@ def build_mesh(
     export=True,
     verbose=False,
     mesher="mc",
+    deflection=DEFAULT_BREP_DEFLECTION,
 ):
     if verbose:
         print(f"build single mesh! Building {comp.name}!")
@@ -64,7 +112,10 @@ def build_mesh(
     if mesher == "dc":
         return
     if mesher == "brep":
-        mesh = build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose)
+        mesh = build_single_brep_mesh(
+            comp, union_geometries, world_matrices, clip, verbose,
+            deflection=deflection,
+        )
         return mesh
 
     try:
@@ -106,6 +157,7 @@ def build_all_meshes(
     export=True,
     verbose=False,
     mesher="brep",
+    deflection=DEFAULT_BREP_DEFLECTION,
 ):
     meshes_dict = {}
     if mesher == "dc":
@@ -118,7 +170,9 @@ def build_all_meshes(
             meshes_dict,
         )
     if mesher == "brep":
-        meshes_dict = build_brep_meshes(union_geometries, world_matrices, clip, verbose)
+        meshes_dict = build_brep_meshes(
+            union_geometries, world_matrices, clip, verbose, deflection=deflection
+        )
     for name, comp in union_geometries.items():
         print(mesher)
         if mesher != "mc":
