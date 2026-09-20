@@ -323,7 +323,9 @@ def clip_component(shape, clip):
     return result.Shape()
 
 
-def build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose):
+def build_single_brep_mesh(
+    comp, union_geometries, world_matrices, clip, verbose, deflection=0.01
+):
     if hasattr(comp, 'mask_string'):
         if comp.mask_string != None:
             if verbose:
@@ -340,7 +342,7 @@ def build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose
     res_comp = intersect_with_masks(res_comp, mask_comps, mask_setting)
     res_comp = clip_component(res_comp, clip)
 
-    BRepMesh_IncrementalMesh(res_comp, 0.01).Perform()
+    BRepMesh_IncrementalMesh(res_comp, deflection).Perform()
     vertices = []
     faces = []
 
@@ -393,12 +395,13 @@ def build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose
     return mesh
 
 
-def build_brep_meshes(union_geometries, world_matrices, clip, verbose):
+def build_brep_meshes(union_geometries, world_matrices, clip, verbose, deflection=0.01):
     meshes_dict = {}
 
     for name, comp in union_geometries.items():
         mesh = build_single_brep_mesh(
-            comp, union_geometries, world_matrices, clip, verbose
+            comp, union_geometries, world_matrices, clip, verbose,
+            deflection=deflection,
         )
         meshes_dict[name] = mesh
     return meshes_dict

@@ -7,6 +7,32 @@ from dual_cont import build_mesh_dual
 from brep import build_brep_meshes, build_single_brep_mesh
 
 
+# What each mesher's dock controls actually do.
+MESHER_CAPABILITIES = {
+    "mc": {
+        "resolution": True,
+        "deflection": False,
+        "clip": True,
+        "incremental_rebuild": True,
+    },
+    "dc": {
+        "resolution": False,
+        "deflection": False,
+        "clip": True,
+        "incremental_rebuild": False,
+    },
+    "brep": {
+        "resolution": False,
+        "deflection": True,
+        "clip": True,
+        "incremental_rebuild": True,
+    },
+}
+
+# The deflection BRepMesh_IncrementalMesh used before it became a parameter.
+DEFAULT_BREP_DEFLECTION = 0.01
+
+
 def make_grid(sdf, bbox_min, bbox_max, resolution):
     xs = np.linspace(bbox_min[0], bbox_max[0], resolution)
     ys = np.linspace(bbox_min[1], bbox_max[1], resolution)
@@ -43,6 +69,7 @@ def build_mesh(
     export=True,
     verbose=False,
     mesher="mc",
+    deflection=DEFAULT_BREP_DEFLECTION,
 ):
     if verbose:
         print(f"build single mesh! Building {comp.name}!")
@@ -64,7 +91,10 @@ def build_mesh(
     if mesher == "dc":
         return
     if mesher == "brep":
-        mesh = build_single_brep_mesh(comp, union_geometries, world_matrices, clip, verbose)
+        mesh = build_single_brep_mesh(
+            comp, union_geometries, world_matrices, clip, verbose,
+            deflection=deflection,
+        )
         return mesh
 
     try:
@@ -106,6 +136,7 @@ def build_all_meshes(
     export=True,
     verbose=False,
     mesher="brep",
+    deflection=DEFAULT_BREP_DEFLECTION,
 ):
     meshes_dict = {}
     if mesher == "dc":
@@ -118,7 +149,9 @@ def build_all_meshes(
             meshes_dict,
         )
     if mesher == "brep":
-        meshes_dict = build_brep_meshes(union_geometries, world_matrices, clip, verbose)
+        meshes_dict = build_brep_meshes(
+            union_geometries, world_matrices, clip, verbose, deflection=deflection
+        )
     for name, comp in union_geometries.items():
         print(mesher)
         if mesher != "mc":
