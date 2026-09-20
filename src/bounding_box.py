@@ -2,6 +2,7 @@
 import numpy as np
 import trimesh
 
+from preprocess import box_dimensions
 
 
 def compute_local_bbox(comp):
@@ -10,7 +11,11 @@ def compute_local_bbox(comp):
     t = comp.component_name.lower()
 
     if t == "union_box":
-        b = np.array([comp.xwidth, comp.yheight, comp.zdepth]) / 2
+        # A tapered box (xwidth2/yheight2) is widest at whichever of its two
+        # faces is larger, so the bounding box takes the max of the pair
+        # rather than the -z face alone.
+        x1, y1, x2, y2 = box_dimensions(comp)
+        b = np.array([max(x1, x2), max(y1, y2), float(comp.zdepth)]) / 2
         return -b, b
 
     elif t == "union_sphere":

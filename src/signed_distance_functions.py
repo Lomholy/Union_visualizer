@@ -1,6 +1,8 @@
 import numpy as np
 import trimesh
 
+from preprocess import box_dimensions
+
 
 # =============================================================================
 # =========================== BASIC SDFS FOR EACH GEOM ========================
@@ -22,13 +24,39 @@ def sdf_cylinder(comp, p):
 
 
 def sdf_box(comp, p):
-    b = np.array([comp.xwidth, comp.yheight, comp.zdepth]) / 2
-    d = np.abs(p) - b
+    x1, y1, x2, y2 = box_dimensions(comp)
+    zdepth = float(comp.zdepth)
 
-    outside = np.maximum(d, 0)
-    inside = np.minimum(np.maximum.reduce(d, axis=-1), 0)
+    if x1 == x2 and y1 == y2:
+        # Plain cuboid: the exact Euclidean box SDF. Worth keeping as its own
+        # branch because marching cubes' level-set crossing and sdf_normal's
+        # finite-difference gradient both behave best on a true distance
+        # field, and this is by far the common case.
+        b = np.array([x1, y1, zdepth]) / 2
+        d = np.abs(p) - b
 
-    return np.linalg.norm(outside, axis=-1) + inside
+        outside = np.maximum(d, 0)
+        inside = np.minimum(np.maximum.reduce(d, axis=-1), 0)
+
+        return np.linalg.norm(outside, axis=-1) + inside
+
+    # Tapered box (xwidth2/yheight2): a rectangular frustum whose half-extents
+    # interpolate linearly from the -z face to the +z face. This branch
+    # returns a bounded rather than exact distance - the same approximation
+    # sdf_cone already makes for the analogous circular frustum - so the
+    # gradient is not quite unit length on the slanted faces and the
+    # `verts += normal * 1e-4` nudge in meshing.py is correspondingly
+    # approximate there.
+    t = np.clip((p[..., 2] + zdepth / 2) / zdepth, 0, 1)
+
+    bx = 0.5 * (x1 + t * (x2 - x1))
+    by = 0.5 * (y1 + t * (y2 - y1))
+
+    d_x = np.abs(p[..., 0]) - bx
+    d_y = np.abs(p[..., 1]) - by
+    d_z = np.abs(p[..., 2]) - zdepth / 2
+
+    return np.maximum(np.maximum(d_x, d_y), d_z)
 
 
 def sdf_sphere(comp, p):

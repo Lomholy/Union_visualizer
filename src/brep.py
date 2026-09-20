@@ -22,10 +22,13 @@ from OCC.Core.BRepAlgoAPI import (
     BRepAlgoAPI_Cut,
     BRepAlgoAPI_Fuse,
 )
+from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_ThruSections
 from OCC.Core.TopAbs import TopAbs_SHELL
 from OCC.Core.TopoDS import Shell as topods_Shell
 import trimesh
 import numpy as np
+
+from preprocess import box_dimensions
 
 
 def _mesh_to_brep(mesh, name, verbose=False):
@@ -75,6 +78,68 @@ def _mesh_to_brep(mesh, name, verbose=False):
     return solid_maker.Solid()
 
 
+def _rectangle_wire(center, x_dir, y_dir, width, height):
+    """A closed rectangular wire of the given size, centred on `center` and
+    spanned by the (unit, orthogonal) directions x_dir/y_dir. Corners are
+    emitted in a fixed order relative to those directions so that two such
+    wires stacked along z traverse the same way round and the loft between
+    them does not come out twisted."""
+    half_x = 0.5 * width * x_dir
+    half_y = 0.5 * height * y_dir
+
+    polygon = BRepBuilderAPI_MakePolygon(
+        gp_Pnt(*(center - half_x - half_y)),
+        gp_Pnt(*(center + half_x - half_y)),
+        gp_Pnt(*(center + half_x + half_y)),
+        gp_Pnt(*(center - half_x + half_y)),
+        True,
+    )
+    return polygon.Wire()
+
+
+def _build_box_brep(comp, center, x_dir, y_dir, z_dir):
+    """Build a Union_box solid, which is a plain cuboid unless xwidth2 or
+    yheight2 taper it into a rectangular frustum."""
+    x1, y1, x2, y2 = box_dimensions(comp)
+    zdepth = float(comp.zdepth)
+
+    if x1 == x2 and y1 == y2:
+        corner = (
+            center
+            - 0.5 * x1 * x_dir
+            - 0.5 * y1 * y_dir
+            - 0.5 * zdepth * z_dir
+        )
+
+        axis = gp_Ax2(
+            gp_Pnt(*corner),
+            gp_Dir(*z_dir),  # local Z
+            gp_Dir(*x_dir),  # local X
+        )
+
+        return BRepPrimAPI_MakeBox(axis, x1, y1, zdepth).Shape()
+
+    # BRepPrimAPI_MakeBox cannot express a taper, so loft between the two
+    # end faces instead. isSolid=True gives a closed solid (which the
+    # BRepAlgoAPI_Cut/Common/Fuse calls downstream need) and ruled=True keeps
+    # the four side faces planar, which is what McStas's own box intersection
+    # code assumes - it stores one fixed normal per side (Union_box.comp,
+    # normal_vectors[2..5]).
+    loft = BRepOffsetAPI_ThruSections(True, True)
+    loft.AddWire(_rectangle_wire(center - 0.5 * zdepth * z_dir, x_dir, y_dir, x1, y1))
+    loft.AddWire(_rectangle_wire(center + 0.5 * zdepth * z_dir, x_dir, y_dir, x2, y2))
+    loft.Build()
+
+    if not loft.IsDone():
+        raise RuntimeError(
+            f"Could not build tapered box '{comp.name}' "
+            f"(xwidth={x1}, yheight={y1}, xwidth2={x2}, yheight2={y2}, "
+            f"zdepth={zdepth})"
+        )
+
+    return loft.Shape()
+
+
 def build_comp_brep(comp, world_matrices):
     name = comp.name
     c_type = comp.component_name
@@ -87,20 +152,7 @@ def build_comp_brep(comp, world_matrices):
     if c_type == "Union_sphere":
         brep = BRepPrimAPI_MakeSphere(axis, comp.radius).Shape()
     elif c_type == "Union_box":
-        corner = (
-            pnt
-            - 0.5 * comp.xwidth * x_dir
-            - 0.5 * comp.yheight * y_dir
-            - 0.5 * comp.zdepth * z_dir
-        )
-
-        axis = gp_Ax2(
-            gp_Pnt(*corner),
-            gp_Dir(*z_dir),  # local Z
-            gp_Dir(*x_dir),  # local X
-        )
-
-        brep = BRepPrimAPI_MakeBox(axis, comp.xwidth, comp.yheight, comp.zdepth).Shape()
+        brep = _build_box_brep(comp, pnt, x_dir, y_dir, z_dir)
 
     elif c_type == "Union_cylinder":
         pnt = pnt - comp.yheight/2 * y_dir
