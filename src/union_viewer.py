@@ -1,5 +1,4 @@
 import sys
-import random
 from pathlib import Path
 import traceback
 import numpy as np
@@ -11,17 +10,10 @@ from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
 from plot_union_cloud import generate_points
-from bounding_box import compute_world_bbox
-from gui_helpers import (
-    group_components_by_material,
-    group_meshes_by_material,
-    is_vacuum_material,
-)
+from gui_helpers import group_meshes_by_material, is_vacuum_material, assign_default_color
 import argparse
 
-# The meshers offered in the dock, in display order. Kept as a module-level
-# constant (rather than only inline inside Viewer.__init__) so tests can
-# check it against MESHER_CAPABILITIES without constructing a QApplication.
+# The meshers offered in the dock, in display order.
 MESHER_KEYS = ("mc", "dc", "brep")
 
 # ============================================================
@@ -67,7 +59,6 @@ def generate_group(
     res=64,
     verbose=True,
     group_by_material=False,
-    hide_vacuum=False,
     deflection=DEFAULT_BREP_DEFLECTION,
 ):
     instr, world_matrices, union_geometries = preprocess(
@@ -123,58 +114,35 @@ def generate_group(
                 print(f"Rebuilding {name}")
     points = new_points
 
-    # Decide what actually gets rendered: one entry per component, or one
-    # per material if group_by_material collapses same-material components
-    # together (a visual grouping via trimesh.util.concatenate of the
-    # already-built meshes, not a boolean fusion), with vacuum/exit
-    # materials dropped first if hide_vacuum is set. This is a presentation
-    # step over the already-built `meshes` dict - it never triggers or
-    # skips a rebuild, so the cache above stays keyed on component names
-    # regardless of how the result is displayed.
-    visible_geometries = union_geometries
-    if hide_vacuum:
-        visible_geometries = {
-            name: comp
-            for name, comp in union_geometries.items()
-            if not is_vacuum_material(getattr(comp, "material_string", None))
-        }
-
+    # One entry per component, or per material if grouped (trimesh
+    # concatenation, not a boolean fusion). Vacuum is not filtered here -
+    # Viewer.apply_geometry_visibility hides it client-side instead.
     if group_by_material:
-        render_meshes = group_meshes_by_material(visible_geometries, meshes)
-        geometry_components = {
-            material: names
-            for material, names in group_components_by_material(
-                visible_geometries
-            ).items()
-            if material in render_meshes
-        }
+        render_meshes = group_meshes_by_material(union_geometries, meshes)
+        geometry_is_vacuum = {material: is_vacuum_material(material) for material in render_meshes}
     else:
         render_meshes = {
             name: meshes[name]
-            for name in visible_geometries
+            for name in union_geometries
             if meshes.get(name) is not None
         }
-        geometry_components = {name: [name] for name in render_meshes}
+        geometry_is_vacuum = {
+            name: is_vacuum_material(getattr(union_geometries[name], "material_string", None))
+            for name in render_meshes
+        }
 
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
-    # {displayed key -> [underlying component names]}, so a caller like
-    # "centre view on this row" works the same way whether the row is one
-    # component or (under group_by_material) several sharing a material.
-    group.geometry_components = geometry_components
-    group.union_geometries = union_geometries
-    group.world_matrices = world_matrices
+    group.geometry_is_vacuum = geometry_is_vacuum
 
     for key, mesh in render_meshes.items():
-        if key not in colors and use_colors:
-            color = random.randrange(0, 2**24)
-            colors[key] = f"#{color:06x}"
-        elif not use_colors:
+        if group_by_material or use_colors:
+            if colors.get(key) == "#b6b6b6":
+                del colors[key]
+            assign_default_color(colors, key)
+        else:
             colors[key] = "#b6b6b6"
-        elif colors[key] == "#b6b6b6" and use_colors:
-            color = random.randrange(0, 2**24)
-            colors[key] = f"#{color:06x}"
 
         gfx_mesh = gfx.Mesh(
             gfx.geometry_from_trimesh(mesh),
@@ -274,19 +242,8 @@ def fit_camera_to_scene(camera, controller, scene, scale=2.0):
 
 
 def recentre_controller(controller, group):
-    """Keep the orbit pivot on the current geometry's centre, without
-    touching the camera's position or zoom.
-
-    fit_camera_to_scene also sets controller.target, but only ever ran once
-    per file (on first load / on File > Open) - every later reload (a clip
-    tweak, a resolution change, a mesher switch) left the pivot wherever it
-    was set at that first load. For geometry that isn't centred on the
-    world origin (a real instrument's Union components routinely sit tens
-    of metres downstream), that makes the camera orbit around empty space
-    instead of the model: rotating reads as swinging the model around
-    rather than turning it. This is the narrow fix - only the pivot moves,
-    so a parameter tweak never yanks the framing/zoom the way calling
-    fit_camera_to_scene on every reload would."""
+    """Move the orbit pivot to the group's centre, without touching the
+    camera's position or zoom."""
     if group is None:
         return
     bbox = group.get_world_bounding_box()
@@ -307,13 +264,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.resize(1400, 900)
         self.colors = {}
         self.input_file = input_file
-        # Previously only set inside `if input_file:`, so launching with no
-        # --input_file left this attribute missing entirely; the first tick
-        # of check_file_update's 100ms timer (before any file is opened via
-        # the menu) then raised AttributeError on self.start_input, silently
-        # swallowed by that method's bare `except`. Unconditional now so the
-        # no-argument launch path behaves the same as the fix already makes
-        # every other path behave.
         self.start_input = bool(input_file)
         self.last_mtime = None
         self.current_group = None
@@ -433,22 +383,18 @@ class Viewer(QtWidgets.QMainWindow):
         dock_layout.addWidget(self.color_checkbox)
 
         self.material_group_checkbox = QtWidgets.QCheckBox("Group by material")
+        self.material_group_checkbox.setChecked(True)
         self.material_group_checkbox.setToolTip(
             "Combine components that share a material into a single "
-            "object (trimesh concatenation, not a boolean fusion - "
-            "adjacent same-material volumes still keep their internal "
-            "walls, they just render and toggle together)."
+            "rendered object (trimesh concatenation, not a boolean fusion)."
         )
         dock_layout.addWidget(self.material_group_checkbox)
 
         self.vacuum_checkbox = QtWidgets.QCheckBox("Hide vacuum")
         self.vacuum_checkbox.setChecked(True)
         self.vacuum_checkbox.setToolTip(
-            "Hides Union volumes whose material_string is 'vacuum'/'Vacuum' "
-            "or 'exit'/'Exit' (McStas treats 'exit' as vacuum with the "
-            "ray marked as having left the instrument). Volumes with no "
-            "material set at all are not affected - only these two exact "
-            "spellings mean vacuum to McStas."
+            "Hides volumes whose material is 'vacuum'/'Vacuum' or "
+            "'exit'/'Exit' (McStas treats 'exit' as vacuum too)."
         )
         dock_layout.addWidget(self.vacuum_checkbox)
 
@@ -462,10 +408,6 @@ class Viewer(QtWidgets.QMainWindow):
             if not MESHER_CAPABILITIES[key]["incremental_rebuild"]:
                 label += " (full rebuild only)"
             self.mesher_box.addItem(label, key)
-        # self.mesher default (below) is "brep", which used to disagree
-        # with the combo's own default selection (index 0, "mc") until the
-        # user touched it - so the very first render used a mesher the
-        # dock never actually showed as selected. Align them.
         self.mesher_box.setCurrentIndex(self.mesher_box.findData(self.mesher))
 
         dock_layout.addWidget(self.mesher_box)
@@ -532,10 +474,7 @@ class Viewer(QtWidgets.QMainWindow):
         dock_layout.addLayout(resolution_layout)
 
         # ----------------------------------------
-        # Surface deflection (brep only - the marching-cubes-style
-        # Resolution combo above doesn't apply to an exact BRep solid;
-        # BRepMesh_IncrementalMesh's linear deflection is the mesher's own
-        # equivalent, previously hard-coded to 0.01)
+        # Surface deflection (brep only)
         # ----------------------------------------
 
         deflection_layout = QtWidgets.QHBoxLayout()
@@ -584,7 +523,7 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
 
         self.geometry_checkboxes = {}
-        self.geometry_center_buttons = {}
+        self.geometry_color_buttons = {}
         self.geometry_visibility = {}
 
         self.geometry_dock = QtWidgets.QDockWidget("Visible Geometries", self)
@@ -610,10 +549,6 @@ class Viewer(QtWidgets.QMainWindow):
         show_hide_layout.addWidget(self.hide_all_button)
         geometry_dock_layout.addLayout(show_hide_layout)
 
-        # The per-component/per-material checkbox list itself, in a scroll
-        # area: with dozens of Union volumes (a real instrument routinely
-        # has that many) the list used to run off the bottom of the dock
-        # with no way to reach the rest of it.
         self.geometry_widget = QtWidgets.QWidget()
         self.geometry_layout = QtWidgets.QVBoxLayout(self.geometry_widget)
         self.geometry_layout.addStretch()
@@ -645,10 +580,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.res_val.currentIndexChanged.connect(self.on_res_changed)
         self.deflection_val.valueChanged.connect(self.on_deflection_changed)
 
-        # Reflect what the mesher just selected in the combo (brep, by
-        # default - see the comment where the combo is built) actually
-        # supports, before anything has a chance to render with the wrong
-        # controls enabled.
         self.update_mesher_capability_ui()
 
     # ========================================================
@@ -673,26 +604,38 @@ class Viewer(QtWidgets.QMainWindow):
             self.current_group,
         )
 
+    def apply_geometry_visibility(self):
+        """Recompute mesh.visible for every row from the per-row checkbox
+        state and the "Hide vacuum" filter. Never rebuilds geometry - safe
+        to call on its own whenever either input changes."""
+        if self.current_group is None:
+            return
+        hide_vacuum = self.vacuum_checkbox.isChecked()
+        is_vacuum = self.current_group.geometry_is_vacuum
+        for key, mesh in self.current_group.geometry_meshes.items():
+            visible = self.geometry_visibility.get(key, True)
+            if hide_vacuum and is_vacuum.get(key, False):
+                visible = False
+            mesh.visible = visible
+
     def on_geometry_visibility_changed(self, name, mesh, checked):
         self.geometry_visibility[name] = checked
-        mesh.visible = checked
+        self.apply_geometry_visibility()
 
     def reset_geometry_visibility(self):
         self.geometry_visibility.clear()
         if self.current_group is None:
             return
-        for name, mesh in self.current_group.geometry_meshes.items():
-            mesh.visible = True
+        for name in self.current_group.geometry_meshes:
             if name in self.geometry_checkboxes:
                 self.geometry_checkboxes[name].blockSignals(True)
                 self.geometry_checkboxes[name].setChecked(True)
                 self.geometry_checkboxes[name].blockSignals(False)
+        self.apply_geometry_visibility()
 
     def _clear_geometry_layout_item(self, item):
-        """Delete whatever a takeAt() handed back - a bare widget (the old
-        one-checkbox-per-row layout) or, now that each row is its own
-        QHBoxLayout of [checkbox, centre button], a nested layout whose own
-        widgets need deleting one level down."""
+        """Delete whatever a takeAt() handed back: a widget, or a nested
+        row layout of [checkbox, colour button]."""
         if item.widget():
             item.widget().deleteLater()
         elif item.layout():
@@ -705,14 +648,13 @@ class Viewer(QtWidgets.QMainWindow):
             self._clear_geometry_layout_item(self.geometry_layout.takeAt(0))
 
         self.geometry_checkboxes.clear()
-        self.geometry_center_buttons.clear()
+        self.geometry_color_buttons.clear()
 
         if self.current_group is None:
             return
 
         for name, mesh in self.current_group.geometry_meshes.items():
             visible = self.geometry_visibility.get(name, True)
-            mesh.visible = visible
 
             row = QtWidgets.QHBoxLayout()
 
@@ -725,13 +667,14 @@ class Viewer(QtWidgets.QMainWindow):
             )
             row.addWidget(cb, 1)
 
-            center_button = QtWidgets.QToolButton()
-            center_button.setText("⊙")  # circled dot, reads as a target
-            center_button.setToolTip(f"Centre the view on '{name}'")
-            center_button.clicked.connect(
-                lambda checked=False, n=name: self.centre_on_geometry(n)
+            color_button = QtWidgets.QPushButton()
+            color_button.setFixedSize(20, 20)
+            color_button.setToolTip(f"Change colour for '{name}'")
+            color_button.clicked.connect(
+                lambda checked=False, n=name: self.pick_color(n)
             )
-            row.addWidget(center_button)
+            self._set_swatch_color(color_button, self.colors.get(name, "#b6b6b6"))
+            row.addWidget(color_button)
 
             self.geometry_layout.insertLayout(
                 self.geometry_layout.count() - 1,
@@ -739,7 +682,7 @@ class Viewer(QtWidgets.QMainWindow):
             )
 
             self.geometry_checkboxes[name] = cb
-            self.geometry_center_buttons[name] = center_button
+            self.geometry_color_buttons[name] = color_button
 
         self.on_geometry_filter_changed(self.geometry_filter.text())
 
@@ -748,51 +691,30 @@ class Viewer(QtWidgets.QMainWindow):
         for name, cb in self.geometry_checkboxes.items():
             match = text in name.lower()
             cb.setVisible(match)
-            button = self.geometry_center_buttons.get(name)
+            button = self.geometry_color_buttons.get(name)
             if button is not None:
                 button.setVisible(match)
 
     def set_all_geometry_visibility(self, visible):
-        """Show all / Hide all. Goes through each checkbox's own toggled
-        signal (on_geometry_visibility_changed) rather than writing
-        mesh.visible directly, so the checked state, self.geometry_visibility
-        and the actual mesh stay in sync the same single way they always do -
-        applies to every row regardless of what the text filter currently
-        shows, matching what the two button labels say."""
         for cb in self.geometry_checkboxes.values():
             cb.setChecked(visible)
 
-    def centre_on_geometry(self, key):
-        """Move the orbit pivot (not the camera position/zoom - see
-        recentre_controller) to the world-space bounding-box centre of
-        whichever original components this row represents. Ungrouped, that
-        is just the one component; under "Group by material" it is every
-        component sharing that material, unioned together."""
-        if self.current_group is None:
+    def _set_swatch_color(self, button, hex_color):
+        button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
+
+    def pick_color(self, key):
+        if self.current_group is None or key not in self.current_group.geometry_meshes:
             return
-        member_names = self.current_group.geometry_components.get(key, [key])
-        union_geometries = self.current_group.union_geometries
-        world_matrices = self.current_group.world_matrices
-
-        mins, maxs = [], []
-        for name in member_names:
-            comp = union_geometries.get(name)
-            if comp is None:
-                continue
-            try:
-                bmin, bmax = compute_world_bbox(comp, world_matrices)
-            except Exception as e:
-                print(f"Could not compute a bounding box for '{name}': {e}")
-                continue
-            mins.append(bmin)
-            maxs.append(bmax)
-
-        if not mins:
+        current = QtGui.QColor(self.colors.get(key, "#b6b6b6"))
+        color = QtWidgets.QColorDialog.getColor(current, self, f"Colour for '{key}'")
+        if not color.isValid():
             return
-
-        bmin = np.min(mins, axis=0)
-        bmax = np.max(maxs, axis=0)
-        self.controller.target = (bmin + bmax) / 2.0
+        hex_color = color.name()
+        self.colors[key] = hex_color
+        self.current_group.geometry_meshes[key].material.color = hex_color
+        button = self.geometry_color_buttons.get(key)
+        if button is not None:
+            self._set_swatch_color(button, hex_color)
 
     # ========================================================
     # Reload geometry
@@ -801,12 +723,8 @@ class Viewer(QtWidgets.QMainWindow):
     def reload_meshes(self, force_reload=False):
         if self.input_file is None:
             return
-        # Dual contouring has no working single-component rebuild path
-        # (meshing.build_mesh unconditionally returns None for it - see
-        # MESHER_CAPABILITIES' "incremental_rebuild" comment); without this,
-        # any dock control changed while "dc" is selected would silently
-        # blank out whichever components the point-cloud diff thought had
-        # changed, instead of visibly re-running the (working) full build.
+        # dc has no working incremental rebuild path (build_mesh returns
+        # None for it), so always fully rebuild while it's selected.
         if not MESHER_CAPABILITIES[self.mesher]["incremental_rebuild"]:
             force_reload = True
         print("Rebuilding meshes...")
@@ -822,11 +740,8 @@ class Viewer(QtWidgets.QMainWindow):
                 res=self.res_val.currentData(),
                 force_remesh=force_reload,
                 group_by_material=self.material_group_checkbox.isChecked(),
-                hide_vacuum=self.vacuum_checkbox.isChecked(),
                 deflection=self.deflection_val.value(),
             )
-            for name, mesh in new_group.geometry_meshes.items():
-                mesh.visible = self.geometry_visibility.get(name, True)
             if self.current_group is not None:
                 self.scene.remove(self.current_group)
             self.points = points
@@ -837,10 +752,7 @@ class Viewer(QtWidgets.QMainWindow):
             self.scene.add(self.current_group)
 
             self.rebuild_geometry_panel()
-            # Keep the orbit pivot on the geometry's centre on every reload,
-            # not just the first one - see recentre_controller's docstring
-            # for why leaving this to fit_camera_to_scene's one-shot calls
-            # left the camera orbiting empty space after the first load.
+            self.apply_geometry_visibility()
             recentre_controller(self.controller, self.current_group)
             print("Reload complete")
         except Exception as e:
@@ -895,7 +807,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.reload_meshes()
 
     def on_vacuum_changed(self):
-        self.reload_meshes()
+        self.apply_geometry_visibility()
 
     def on_res_changed(self):
         self.reload_meshes()
@@ -904,9 +816,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.reload_meshes()
 
     # ========================================================
-    # Mesher capability reflection (6d): grey out / explain a control
-    # that the currently selected mesher does not use, rather than
-    # leaving it interactive and silently doing nothing.
+    # Mesher capability reflection
     # ========================================================
 
     def update_mesher_capability_ui(self):
@@ -927,16 +837,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.deflection_label.setToolTip(tip)
 
     # ========================================================
-    # Reset view (6e)
+    # Reset view
     # ========================================================
 
     def reset_view(self):
-        # Refit to the actual loaded geometry when there is any; falling
-        # back to the (otherwise empty) scene - which is only the 1000-unit
-        # coordinate axes and grid - so the button and its shortcut don't
-        # raise before a file has ever been opened, rather than requiring
-        # self.current_group to be set the way the pre-existing call sites
-        # (open_file, the first-load branch of check_file_update) do.
         target = self.current_group if self.current_group is not None else self.scene
         fit_camera_to_scene(self.camera, self.controller, target)
 

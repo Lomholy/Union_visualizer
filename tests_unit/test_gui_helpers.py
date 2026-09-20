@@ -1,19 +1,14 @@
-"""Tests for the testable logic behind the union_viewer GUI improvements:
-material normalisation/grouping (6b), the vacuum/exit predicate (6c), and
-the mesher capability table (6d).
+"""Tests for gui_helpers.py: material normalisation/grouping, the
+vacuum/exit predicate, default colour assignment, and the mesher
+capability table.
 
-The GUI itself is not unit-testable without a display, so per
-Desktop/Union_visualizer_plan.md's step 6 this keeps the display-independent
-logic in gui_helpers.py / meshing.py and tests it directly rather than
-driving actual Qt widgets. union_viewer.py's own wiring (the scroll area,
-filter box, centre-on-selection, reset view, dc's forced full rebuild) was
+The GUI itself is not unit-testable without a display, so this covers the
+display-independent logic instead; union_viewer.py's own wiring was
 exercised interactively with QT_QPA_PLATFORM=offscreen against real test
-instruments while implementing this change, not here.
+instruments while implementing this change.
 
-This directory is intentionally NOT under tests/, since
-.github/workflows/run-tests.yml feeds every file in tests/* to
-src/mcstas_to_cad.py as a pipeline smoke test; a plain assertion script
-there would break that loop.
+Not under tests/: .github/workflows/run-tests.yml feeds every file there
+to src/mcstas_to_cad.py as a pipeline smoke test.
 """
 
 import sys
@@ -162,6 +157,43 @@ class TestGroupMeshesByMaterial(unittest.TestCase):
         meshes = {}
         grouped = gui_helpers.group_meshes_by_material(geometries, meshes)
         self.assertEqual(grouped, {})
+
+
+class TestAssignDefaultColor(unittest.TestCase):
+    def test_first_key_gets_first_cycle_color(self):
+        colors = {}
+        self.assertEqual(gui_helpers.assign_default_color(colors, "a"), "#E40303")
+
+    def test_distinct_keys_cycle_through_the_palette(self):
+        colors = {}
+        assigned = [
+            gui_helpers.assign_default_color(colors, k) for k in ("a", "b", "c")
+        ]
+        self.assertEqual(assigned, gui_helpers.DEFAULT_COLOR_CYCLE[:3])
+
+    def test_existing_entry_is_left_untouched(self):
+        colors = {"a": "#123456"}
+        self.assertEqual(gui_helpers.assign_default_color(colors, "a"), "#123456")
+
+    def test_cycle_wraps_around(self):
+        colors = {}
+        n = len(gui_helpers.DEFAULT_COLOR_CYCLE)
+        for i in range(n + 2):
+            gui_helpers.assign_default_color(colors, f"k{i}")
+        self.assertEqual(colors["k0"], colors[f"k{n}"])
+
+    def test_position_survives_deleting_and_reassigning_a_key(self):
+        """Regression: deleting a stale entry and letting it be reassigned
+        must not repeat the colour a sibling key was just given. This
+        happened in practice when un-hiding an entry parked at the grey
+        default: delete + reassign left len(colors) unchanged, so every
+        freshly-reassigned key landed on the same cycle position."""
+        colors = {}
+        gui_helpers.assign_default_color(colors, "a")
+        del colors["a"]
+        first = gui_helpers.assign_default_color(colors, "a")
+        second = gui_helpers.assign_default_color(colors, "b")
+        self.assertNotEqual(first, second)
 
 
 class TestMesherCapabilities(unittest.TestCase):
