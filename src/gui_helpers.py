@@ -50,7 +50,8 @@ def group_meshes_by_material(union_geometries, meshes):
     return grouped_meshes
 
 
-# Default colour cycle.
+# Default colour cycle. The first 11 are the requested starting colours;
+# the rest extend the cycle so it doesn't repeat until ~30 keys are in use.
 DEFAULT_COLOR_CYCLE = [
     "#E40303",  # Red
     "#FF8C00",  # Orange
@@ -63,6 +64,25 @@ DEFAULT_COLOR_CYCLE = [
     "#74D7EE",  # Light Blue
     "#FFAFC8",  # Pink
     "#FFFFFF",  # White
+    "#008080",  # Teal
+    "#800000",  # Maroon
+    "#808000",  # Olive
+    "#000080",  # Navy
+    "#32CD32",  # Lime
+    "#00FFFF",  # Cyan
+    "#FF00FF",  # Magenta
+    "#FFD700",  # Gold
+    "#4B0082",  # Indigo
+    "#FF7F50",  # Coral
+    "#40E0D0",  # Turquoise
+    "#FA8072",  # Salmon
+    "#808080",  # Gray
+    "#7FFF00",  # Chartreuse
+    "#DC143C",  # Crimson
+    "#6A5ACD",  # Slate Blue
+    "#F0E68C",  # Khaki
+    "#DA70D6",  # Orchid
+    "#4682B4",  # Steel Blue
 ]
 
 
@@ -71,13 +91,10 @@ _CYCLE_INDEX_KEY = "__cycle_index__"
 
 def assign_default_color(colors, key):
     """Ensure colors[key] exists, assigning the next unused colour from
-    DEFAULT_COLOR_CYCLE if not. Leaves an existing entry (cycle-assigned or
-    user-picked) untouched, and returns the resulting colour.
-
-    The cycle position is tracked in colors[_CYCLE_INDEX_KEY] rather than
-    derived from len(colors): a caller may delete and re-add an entry (e.g.
-    to force a stale default back onto the cycle), which would otherwise
-    leave len(colors) unchanged and hand out the same colour repeatedly."""
+    DEFAULT_COLOR_CYCLE if not. Leaves an existing entry untouched, and
+    returns the resulting colour. The cycle position is tracked separately
+    (colors[_CYCLE_INDEX_KEY]) rather than derived from len(colors), so it
+    still advances correctly after a delete-and-reassign."""
     if key not in colors:
         index = colors.get(_CYCLE_INDEX_KEY, 0)
         colors[key] = DEFAULT_COLOR_CYCLE[index % len(DEFAULT_COLOR_CYCLE)]

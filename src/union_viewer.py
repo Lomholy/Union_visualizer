@@ -54,7 +54,6 @@ def generate_group(
     meshes=None,
     points=None,
     mesher="brep",
-    use_colors=False,
     force_remesh=False,
     res=64,
     verbose=True,
@@ -137,12 +136,7 @@ def generate_group(
     group.geometry_is_vacuum = geometry_is_vacuum
 
     for key, mesh in render_meshes.items():
-        if group_by_material or use_colors:
-            if colors.get(key) == "#b6b6b6":
-                del colors[key]
-            assign_default_color(colors, key)
-        else:
-            colors[key] = "#b6b6b6"
+        assign_default_color(colors, key)
 
         gfx_mesh = gfx.Mesh(
             gfx.geometry_from_trimesh(mesh),
@@ -347,7 +341,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.watch_timer.start(100)
 
         # ----------------------------------------------------
-        # Clipping dock widget
+        # Clipping dock
         # ----------------------------------------------------
 
         self.clip_enable = False
@@ -361,26 +355,42 @@ class Viewer(QtWidgets.QMainWindow):
             "position": self.clip_position,
         }
 
-        dock = QtWidgets.QDockWidget("Clipping", self)
-
-        dock.setAllowedAreas(
-            QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
-            | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
-        )
-
-        dock_widget = QtWidgets.QWidget()
-
-        dock_layout = QtWidgets.QVBoxLayout(dock_widget)
-
-        # ----------------------------------------
-        # Enable checkbox
-        # ----------------------------------------
+        clipping_dock, clipping_layout = self._add_dock("Clipping")
 
         self.clip_checkbox = QtWidgets.QCheckBox("Enable clipping")
-        dock_layout.addWidget(self.clip_checkbox)
+        clipping_layout.addWidget(self.clip_checkbox)
 
-        self.color_checkbox = QtWidgets.QCheckBox("Color individual component")
-        dock_layout.addWidget(self.color_checkbox)
+        axis_layout = QtWidgets.QHBoxLayout()
+        axis_layout.addWidget(QtWidgets.QLabel("Axis"))
+        self.axis_combo = QtWidgets.QComboBox()
+        self.axis_combo.addItems(["X", "Y", "Z"])
+        axis_layout.addWidget(self.axis_combo)
+        clipping_layout.addLayout(axis_layout)
+
+        mode_layout = QtWidgets.QHBoxLayout()
+        mode_layout.addWidget(QtWidgets.QLabel("Mode"))
+        self.mode_combo = QtWidgets.QComboBox()
+        self.mode_combo.addItems(["Above", "Below"])
+        mode_layout.addWidget(self.mode_combo)
+        clipping_layout.addLayout(mode_layout)
+
+        position_layout = QtWidgets.QHBoxLayout()
+        position_layout.addWidget(QtWidgets.QLabel("Position"))
+        self.slice_val = QtWidgets.QDoubleSpinBox()
+        self.slice_val.setDecimals(5)
+        self.slice_val.setRange(-1e6, 1e6)
+        self.slice_val.setSingleStep(0.01)
+        self.slice_val.setValue(0.0)
+        position_layout.addWidget(self.slice_val)
+        clipping_layout.addLayout(position_layout)
+
+        clipping_layout.addStretch()
+
+        # ----------------------------------------------------
+        # Settings dock
+        # ----------------------------------------------------
+
+        settings_dock, settings_layout = self._add_dock("Settings")
 
         self.material_group_checkbox = QtWidgets.QCheckBox("Group by material")
         self.material_group_checkbox.setChecked(True)
@@ -388,7 +398,7 @@ class Viewer(QtWidgets.QMainWindow):
             "Combine components that share a material into a single "
             "rendered object (trimesh concatenation, not a boolean fusion)."
         )
-        dock_layout.addWidget(self.material_group_checkbox)
+        settings_layout.addWidget(self.material_group_checkbox)
 
         self.vacuum_checkbox = QtWidgets.QCheckBox("Hide vacuum")
         self.vacuum_checkbox.setChecked(True)
@@ -396,11 +406,7 @@ class Viewer(QtWidgets.QMainWindow):
             "Hides volumes whose material is 'vacuum'/'Vacuum' or "
             "'exit'/'Exit' (McStas treats 'exit' as vacuum too)."
         )
-        dock_layout.addWidget(self.vacuum_checkbox)
-
-        # ----------------------------------------
-        # Mesher selector
-        # ----------------------------------------
+        settings_layout.addWidget(self.vacuum_checkbox)
 
         self.mesher_box = QtWidgets.QComboBox()
         for key in MESHER_KEYS:
@@ -409,55 +415,22 @@ class Viewer(QtWidgets.QMainWindow):
                 label += " (full rebuild only)"
             self.mesher_box.addItem(label, key)
         self.mesher_box.setCurrentIndex(self.mesher_box.findData(self.mesher))
+        settings_layout.addWidget(self.mesher_box)
 
-        dock_layout.addWidget(self.mesher_box)
-        # ----------------------------------------
-        # Axis selector
-        # ----------------------------------------
+        self.reset_view_button = QtWidgets.QPushButton("Reset view")
+        self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
+        self.reset_view_button.clicked.connect(self.reset_view)
+        settings_layout.addWidget(self.reset_view_button)
+        self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
+        self.reset_view_shortcut.activated.connect(self.reset_view)
 
-        axis_layout = QtWidgets.QHBoxLayout()
-        axis_label = QtWidgets.QLabel("Axis")
-        self.axis_combo = QtWidgets.QComboBox()
-        self.axis_combo.addItems(["X", "Y", "Z"])
-        axis_layout.addWidget(axis_label)
-        axis_layout.addWidget(self.axis_combo)
-        dock_layout.addLayout(axis_layout)
+        settings_layout.addStretch()
 
-        # ----------------------------------------
-        # Mode selector
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # Mesher options dock
+        # ----------------------------------------------------
 
-        mode_layout = QtWidgets.QHBoxLayout()
-        mode_label = QtWidgets.QLabel("Mode")
-        self.mode_combo = QtWidgets.QComboBox()
-        self.mode_combo.addItems(
-            [
-                "Above",
-                "Below",
-            ]
-        )
-        mode_layout.addWidget(mode_label)
-        mode_layout.addWidget(self.mode_combo)
-        dock_layout.addLayout(mode_layout)
-
-        # ----------------------------------------
-        # Slice position slider
-        # ----------------------------------------
-
-        position_layout = QtWidgets.QHBoxLayout()
-        position_label = QtWidgets.QLabel("Position")
-        self.slice_val = QtWidgets.QDoubleSpinBox()
-        self.slice_val.setDecimals(5)
-        self.slice_val.setRange(-1e6, 1e6)
-        self.slice_val.setSingleStep(0.01)
-        self.slice_val.setValue(0.0)
-        position_layout.addWidget(position_label)
-        position_layout.addWidget(self.slice_val)
-        dock_layout.addLayout(position_layout)
-
-        # ----------------------------------------
-        # Resolution value
-        # ----------------------------------------
+        _, mesher_options_layout = self._add_dock("Mesher Options")
 
         resolution_layout = QtWidgets.QHBoxLayout()
         self.resolution_label = QtWidgets.QLabel("Resolution")
@@ -471,11 +444,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.res_val.setCurrentIndex(2)
         resolution_layout.addWidget(self.resolution_label)
         resolution_layout.addWidget(self.res_val)
-        dock_layout.addLayout(resolution_layout)
-
-        # ----------------------------------------
-        # Surface deflection (brep only)
-        # ----------------------------------------
+        mesher_options_layout.addLayout(resolution_layout)
 
         deflection_layout = QtWidgets.QHBoxLayout()
         self.deflection_label = QtWidgets.QLabel("Surface deflection")
@@ -486,37 +455,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.deflection_val.setValue(0.01)
         deflection_layout.addWidget(self.deflection_label)
         deflection_layout.addWidget(self.deflection_val)
-        dock_layout.addLayout(deflection_layout)
+        mesher_options_layout.addLayout(deflection_layout)
 
-        self.reset_visibility_button = QtWidgets.QPushButton(
-            "Reset all hidden geometries"
-        )
-        self.reset_visibility_button.clicked.connect(self.reset_geometry_visibility)
-        visibility_layout = QtWidgets.QHBoxLayout()
-        visibility_layout.addWidget(self.reset_visibility_button)
-        dock_layout.addLayout(visibility_layout)
-
-        # ----------------------------------------
-        # Reset view
-        # ----------------------------------------
-
-        self.reset_view_button = QtWidgets.QPushButton("Reset view")
-        self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
-        self.reset_view_button.clicked.connect(self.reset_view)
-        dock_layout.addWidget(self.reset_view_button)
-        self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
-        self.reset_view_shortcut.activated.connect(self.reset_view)
-
-        # ----------------------------------------
-        # Position value display
-        # ----------------------------------------
-
-        dock_layout.addStretch()
-        dock.setWidget(dock_widget)
-        self.addDockWidget(
-            QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
-            dock,
-        )
+        mesher_options_layout.addStretch()
 
         # ----------------------------------------------------
         # Geometry visibility dock
@@ -570,7 +511,6 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
 
         self.clip_checkbox.stateChanged.connect(self.on_clip_changed)
-        self.color_checkbox.stateChanged.connect(self.on_color_changed)
         self.material_group_checkbox.stateChanged.connect(self.on_material_group_changed)
         self.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
         self.mesher_box.currentIndexChanged.connect(self.on_mesher_changed)
@@ -581,6 +521,20 @@ class Viewer(QtWidgets.QMainWindow):
         self.deflection_val.valueChanged.connect(self.on_deflection_changed)
 
         self.update_mesher_capability_ui()
+
+    def _add_dock(self, title):
+        """Create a left-docked QDockWidget titled `title` and return
+        (dock, layout) for the caller to populate."""
+        dock = QtWidgets.QDockWidget(title, self)
+        dock.setAllowedAreas(
+            QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
+            | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        dock.setWidget(widget)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        return dock, layout
 
     # ========================================================
     # Open file dialog
@@ -620,17 +574,6 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_geometry_visibility_changed(self, name, mesh, checked):
         self.geometry_visibility[name] = checked
-        self.apply_geometry_visibility()
-
-    def reset_geometry_visibility(self):
-        self.geometry_visibility.clear()
-        if self.current_group is None:
-            return
-        for name in self.current_group.geometry_meshes:
-            if name in self.geometry_checkboxes:
-                self.geometry_checkboxes[name].blockSignals(True)
-                self.geometry_checkboxes[name].setChecked(True)
-                self.geometry_checkboxes[name].blockSignals(False)
         self.apply_geometry_visibility()
 
     def _clear_geometry_layout_item(self, item):
@@ -736,7 +679,6 @@ class Viewer(QtWidgets.QMainWindow):
                 meshes=self.meshes,
                 points=self.points,
                 mesher=self.mesher,
-                use_colors=self.color_checkbox.isChecked(),
                 res=self.res_val.currentData(),
                 force_remesh=force_reload,
                 group_by_material=self.material_group_checkbox.isChecked(),
@@ -799,9 +741,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.mesher = self.mesher_box.currentData()
         self.update_mesher_capability_ui()
         self.reload_meshes(force_reload=True)
-
-    def on_color_changed(self):
-        self.reload_meshes()
 
     def on_material_group_changed(self):
         self.reload_meshes()

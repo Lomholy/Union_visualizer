@@ -195,6 +195,21 @@ class TestAssignDefaultColor(unittest.TestCase):
         second = gui_helpers.assign_default_color(colors, "b")
         self.assertNotEqual(first, second)
 
+    def test_cycle_has_at_least_thirty_distinct_colors(self):
+        cycle = gui_helpers.DEFAULT_COLOR_CYCLE
+        self.assertGreaterEqual(len(cycle), 30)
+        self.assertEqual(len(cycle), len(set(cycle)))
+
+    def test_cycle_starts_with_the_requested_colors(self):
+        self.assertEqual(
+            gui_helpers.DEFAULT_COLOR_CYCLE[:11],
+            [
+                "#E40303", "#FF8C00", "#FFED00", "#008026", "#004DFF",
+                "#750787", "#000000", "#613915", "#74D7EE", "#FFAFC8",
+                "#FFFFFF",
+            ],
+        )
+
 
 class TestMesherCapabilities(unittest.TestCase):
     """Cross-checks against what union_viewer.py actually offers and does,
