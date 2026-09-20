@@ -632,6 +632,78 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr, var_map: 
 
 
 # =============================================================================
+# ======================== COMPONENT GEOMETRY PARAMETERS ======================
+# =============================================================================
+
+
+def _taper_dimension(value, untapered, comp_name, param_name):
+    """Normalise one optional Union_box taper parameter (xwidth2/yheight2)
+    into an actual dimension, falling back to the untapered one.
+
+    Union_box.comp declares these with a -1 default and treats any negative
+    value as "same as xwidth/yheight" (`if (xwidth2 < 0) xwidth2 = xwidth;`),
+    while rejecting a value that is <= 0 but not exactly -1. mcstasscript
+    reports a setting parameter the instrument never wrote as None rather
+    than as the component's own -1 default, so both spellings of "unset"
+    reach us here and both have to mean "untapered".
+
+    Anything McStas itself would reject (0, or a negative that isn't the -1
+    sentinel) warns and falls back to the untapered dimension, matching how
+    the rest of this module prefers a visible warning plus a still-usable
+    instrument over aborting the whole run."""
+    if value is None:
+        return untapered
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        # parse_param leaves an expression it could not evaluate as the
+        # original string, and has already warned about it.
+        print(
+            f"Warning: Component '{comp_name}': could not resolve {param_name} "
+            f"to a number ({value!r}); treating the box as untapered."
+        )
+        return untapered
+
+    if value == -1:
+        return untapered
+
+    if value <= 0:
+        print(
+            f"Warning: Component '{comp_name}': {param_name}={value} is not a "
+            f"usable dimension (McStas requires it to be > 0 or the -1 "
+            f"default); treating the box as untapered."
+        )
+        return untapered
+
+    return value
+
+
+def box_dimensions(comp):
+    """Return (x1, y1, x2, y2): a Union_box's cross-section at its -z face
+    and at its +z face.
+
+    McStas's Union_box takes optional xwidth2/yheight2 giving a different
+    width and height at the +z face, which turns the box into a rectangular
+    frustum whose cross-section varies linearly along local z. Every
+    consumer of box dimensions goes through this one helper so the "what
+    counts as unset" rule lives in a single place."""
+    x1 = float(comp.xwidth)
+    y1 = float(comp.yheight)
+    x2 = _taper_dimension(getattr(comp, "xwidth2", None), x1, comp.name, "xwidth2")
+    y2 = _taper_dimension(getattr(comp, "yheight2", None), y1, comp.name, "yheight2")
+    return x1, y1, x2, y2
+
+
+def box_is_tapered(comp):
+    """Does this Union_box actually need frustum handling? Kept next to
+    box_dimensions so the exact-equality test is written once: every caller
+    has a cheaper and more accurate untapered path worth preserving."""
+    x1, y1, x2, y2 = box_dimensions(comp)
+    return x1 != x2 or y1 != y2
+
+
+# =============================================================================
 # =========================== CALCULATE WORLD MATRICES ========================
 # =============================================================================
 
