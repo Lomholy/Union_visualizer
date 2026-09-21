@@ -9,7 +9,7 @@ from pygfx.utils.viewport import Viewport
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
-from plot_union_cloud import generate_points
+from bounding_box import compute_all_world_bboxes, component_dependency_signature
 from gui_helpers import group_meshes_by_material, is_vacuum_material, assign_default_color
 import argparse
 
@@ -32,6 +32,7 @@ def rebuild_mesh(
     clip,
     mesher,
     deflection=DEFAULT_BREP_DEFLECTION,
+    world_bboxes=None,
 ):
     meshes[name] = build_mesh(
         union_geometries[name],
@@ -43,6 +44,7 @@ def rebuild_mesh(
         clip,
         mesher=mesher,
         deflection=deflection,
+        world_bboxes=world_bboxes,
     )
     return meshes
 
@@ -52,7 +54,7 @@ def generate_group(
     clip,
     colors={},
     meshes=None,
-    points=None,
+    dependencies=None,
     mesher="brep",
     force_remesh=False,
     res=64,
@@ -64,14 +66,19 @@ def generate_group(
         input_file,
         verbose=False,
     )
+    world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     print("Building sdfs")
-    final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices, clip)
+    final_sdfs, sdfs = build_sdfs(
+        union_geometries, world_matrices, clip, world_bboxes=world_bboxes
+    )
     print("Building meshes")
 
-    new_points = generate_points(
-        union_geometries, sdfs, final_sdfs, world_matrices, 1000, verbose=False
-    )
-    if points == None or force_remesh == True:
+    new_dependencies = {
+        name: component_dependency_signature(name, union_geometries, world_bboxes)
+        for name in union_geometries
+    }
+
+    if meshes is None or force_remesh:
         meshes = build_all_meshes(
             union_geometries,
             world_matrices,
@@ -83,35 +90,27 @@ def generate_group(
             verbose=False,
             mesher=mesher,
             deflection=deflection,
+            world_bboxes=world_bboxes,
         )
-        points = new_points
-
-    print("Defining meshes")
-    print(meshes.keys(), points.keys())
-    for name in new_points.keys():
-        rebuild = 0
-        if name not in points.keys():
-            rebuild = 1
-        elif points[name].shape != new_points[name].shape:
-            rebuild = 1
-        elif np.any(abs(points[name] - new_points[name]) > 1e-10):
-            rebuild = 1
-        if rebuild:
-            meshes = rebuild_mesh(
-                meshes,
-                name,
-                union_geometries,
-                world_matrices,
-                sdfs,
-                final_sdfs,
-                res,
-                clip,
-                mesher,
-                deflection=deflection,
-            )
-            if verbose:
-                print(f"Rebuilding {name}")
-    points = new_points
+    else:
+        for name in new_dependencies:
+            if new_dependencies[name] != (dependencies or {}).get(name):
+                meshes = rebuild_mesh(
+                    meshes,
+                    name,
+                    union_geometries,
+                    world_matrices,
+                    sdfs,
+                    final_sdfs,
+                    res,
+                    clip,
+                    mesher,
+                    deflection=deflection,
+                    world_bboxes=world_bboxes,
+                )
+                if verbose:
+                    print(f"Rebuilding {name}")
+    dependencies = new_dependencies
 
     # One entry per component, or per material if grouped (trimesh
     # concatenation, not a boolean fusion). Vacuum is not filtered here -
@@ -150,7 +149,7 @@ def generate_group(
         group.add(gfx_mesh)
         group.geometry_meshes[key] = gfx_mesh
 
-    return (group, meshes, points)
+    return (group, meshes, dependencies)
 
 
 def make_coordinate_axes(
@@ -261,7 +260,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.start_input = bool(input_file)
         self.last_mtime = None
         self.current_group = None
-        self.points = None
+        self.dependencies = None
         self.meshes = None
         self.mesher = "brep"
 
@@ -672,12 +671,12 @@ class Viewer(QtWidgets.QMainWindow):
             force_reload = True
         print("Rebuilding meshes...")
         try:
-            new_group, meshes, points = generate_group(
+            new_group, meshes, dependencies = generate_group(
                 self.input_file,
                 self.clip,
                 self.colors,
                 meshes=self.meshes,
-                points=self.points,
+                dependencies=self.dependencies,
                 mesher=self.mesher,
                 res=self.res_val.currentData(),
                 force_remesh=force_reload,
@@ -686,7 +685,7 @@ class Viewer(QtWidgets.QMainWindow):
             )
             if self.current_group is not None:
                 self.scene.remove(self.current_group)
-            self.points = points
+            self.dependencies = dependencies
             self.meshes = meshes
 
             self.current_group = new_group
@@ -735,7 +734,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip["axis"] = self.axis_combo.currentText()
         self.clip["mode"] = self.mode_combo.currentText()
         self.clip["position"] = self.slice_val.value()
-        self.reload_meshes()
+        # Global cut, not part of any component's dependency signature.
+        self.reload_meshes(force_reload=True)
 
     def on_mesher_changed(self):
         self.mesher = self.mesher_box.currentData()
@@ -749,10 +749,11 @@ class Viewer(QtWidgets.QMainWindow):
         self.apply_geometry_visibility()
 
     def on_res_changed(self):
-        self.reload_meshes()
+        # Global mesher setting, not part of any dependency signature.
+        self.reload_meshes(force_reload=True)
 
     def on_deflection_changed(self):
-        self.reload_meshes()
+        self.reload_meshes(force_reload=True)
 
     # ========================================================
     # Mesher capability reflection

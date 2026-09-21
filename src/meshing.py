@@ -70,6 +70,7 @@ def build_mesh(
     verbose=False,
     mesher="mc",
     deflection=DEFAULT_BREP_DEFLECTION,
+    world_bboxes=None,
 ):
     if verbose:
         print(f"build single mesh! Building {comp.name}!")
@@ -93,7 +94,7 @@ def build_mesh(
     if mesher == "brep":
         mesh = build_single_brep_mesh(
             comp, union_geometries, world_matrices, clip, verbose,
-            deflection=deflection,
+            deflection=deflection, world_bboxes=world_bboxes,
         )
         return mesh
 
@@ -137,6 +138,7 @@ def build_all_meshes(
     verbose=False,
     mesher="brep",
     deflection=DEFAULT_BREP_DEFLECTION,
+    world_bboxes=None,
 ):
     meshes_dict = {}
     if mesher == "dc":
@@ -150,7 +152,8 @@ def build_all_meshes(
         )
     if mesher == "brep":
         meshes_dict = build_brep_meshes(
-            union_geometries, world_matrices, clip, verbose, deflection=deflection
+            union_geometries, world_matrices, clip, verbose, deflection=deflection,
+            world_bboxes=world_bboxes,
         )
     for name, comp in union_geometries.items():
         print(mesher)
