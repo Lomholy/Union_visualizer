@@ -1,6 +1,8 @@
 import sys
+import time
 from pathlib import Path
 import traceback
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import pygfx as gfx
 from qtpy import QtWidgets, QtCore, QtGui
@@ -15,6 +17,22 @@ import argparse
 
 # The meshers offered in the dock, in display order.
 MESHER_KEYS = ("mc", "dc", "brep")
+
+MESHER_DESCRIPTIONS = {
+    "mc": (
+        "Marching Cubes: samples the signed distance field on a uniform grid. "
+        "Fast, but curved surfaces are limited by the chosen resolution."
+    ),
+    "dc": (
+        "Dual Contouring: builds an adaptive octree from the point cloud. "
+        "Better at preserving sharp edges/corners than Marching Cubes."
+    ),
+    "brep": (
+        "BREP (exact CAD): uses OpenCASCADE boundary representation for exact, "
+        "resolution-independent geometry. Most accurate, but can be slower for "
+        "complex boolean operations."
+    ),
+}
 
 # ============================================================
 # Geometry generation
@@ -49,10 +67,9 @@ def rebuild_mesh(
     return meshes
 
 
-def generate_group(
+def compute_mesh_data(
     input_file,
     clip,
-    colors={},
     meshes=None,
     dependencies=None,
     mesher="brep",
@@ -62,6 +79,13 @@ def generate_group(
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
 ):
+    """Everything generate_group() needs to do that doesn't touch pygfx/Qt:
+    preprocessing, SDF/BREP mesh building (with dependency-based incremental
+    rebuild), and material grouping/vacuum tagging. Returns plain,
+    picklable data (trimesh objects + dicts), so this is safe to run in a
+    worker *process* rather than just a thread - some of the geometry
+    kernel calls it makes (OpenCASCADE, via pythonocc-core) don't release
+    the GIL, so running them on a QThread still freezes the GUI."""
     instr, world_matrices, union_geometries = preprocess(
         input_file,
         verbose=False,
@@ -129,6 +153,13 @@ def generate_group(
             for name in render_meshes
         }
 
+    return (render_meshes, geometry_is_vacuum, meshes, dependencies)
+
+
+def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
+    """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects.
+    Cheap (no geometry kernel calls) - safe to run on the GUI thread or a
+    plain QThread."""
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
@@ -149,6 +180,35 @@ def generate_group(
         group.add(gfx_mesh)
         group.geometry_meshes[key] = gfx_mesh
 
+    return group
+
+
+def generate_group(
+    input_file,
+    clip,
+    colors={},
+    meshes=None,
+    dependencies=None,
+    mesher="brep",
+    force_remesh=False,
+    res=64,
+    verbose=True,
+    group_by_material=False,
+    deflection=DEFAULT_BREP_DEFLECTION,
+):
+    render_meshes, geometry_is_vacuum, meshes, dependencies = compute_mesh_data(
+        input_file,
+        clip,
+        meshes=meshes,
+        dependencies=dependencies,
+        mesher=mesher,
+        force_remesh=force_remesh,
+        res=res,
+        verbose=verbose,
+        group_by_material=group_by_material,
+        deflection=deflection,
+    )
+    group = build_gfx_group(render_meshes, geometry_is_vacuum, colors)
     return (group, meshes, dependencies)
 
 
@@ -246,6 +306,77 @@ def recentre_controller(controller, group):
 
 
 # ============================================================
+# Background mesh building
+# ============================================================
+
+
+class MeshBuildWorker(QtCore.QObject):
+    """Off-loads a mesh rebuild so the GUI thread stays responsive.
+
+    The actual geometry-kernel work (compute_mesh_data) runs in a worker
+    *process*, not just this QThread: pythonocc-core's OpenCASCADE calls
+    (used by the "brep" mesher) don't release the GIL, so a long boolean
+    operation running on a plain QThread would still starve the main
+    thread's event loop and freeze the window. Blocking here on
+    future.result() is safe because waiting on inter-process I/O releases
+    the GIL, unlike the geometry-kernel call itself. Building the pygfx
+    objects from the returned trimesh data is cheap and stays on this
+    thread.
+    """
+
+    finished = QtCore.Signal(object, object, object)
+    failed = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        process_pool,
+        input_file,
+        clip,
+        colors,
+        meshes,
+        dependencies,
+        mesher,
+        res,
+        force_remesh,
+        group_by_material,
+        deflection,
+    ):
+        super().__init__()
+        self.process_pool = process_pool
+        self.input_file = input_file
+        self.clip = clip
+        self.colors = colors
+        self.meshes = meshes
+        self.dependencies = dependencies
+        self.mesher = mesher
+        self.res = res
+        self.force_remesh = force_remesh
+        self.group_by_material = group_by_material
+        self.deflection = deflection
+
+    def run(self):
+        try:
+            future = self.process_pool.submit(
+                compute_mesh_data,
+                self.input_file,
+                self.clip,
+                meshes=self.meshes,
+                dependencies=self.dependencies,
+                mesher=self.mesher,
+                force_remesh=self.force_remesh,
+                res=self.res,
+                group_by_material=self.group_by_material,
+                deflection=self.deflection,
+            )
+            render_meshes, geometry_is_vacuum, meshes, dependencies = future.result()
+            group = build_gfx_group(render_meshes, geometry_is_vacuum, self.colors)
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+            return
+        self.finished.emit(group, meshes, dependencies)
+
+
+# ============================================================
 # Main window
 # ============================================================
 
@@ -263,6 +394,20 @@ class Viewer(QtWidgets.QMainWindow):
         self.dependencies = None
         self.meshes = None
         self.mesher = "brep"
+
+        # ----------------------------------------------------
+        # Async mesh rebuild state
+        # ----------------------------------------------------
+        # Geometry-kernel work runs in this pool, not just a QThread - see
+        # MeshBuildWorker's docstring for why (pythonocc doesn't release
+        # the GIL, so a thread alone still freezes the GUI).
+        self._mesh_process_pool = ProcessPoolExecutor(max_workers=1)
+        self._reload_busy = False
+        self._reload_pending = False
+        self._reload_pending_force = False
+        self._reload_thread = None
+        self._reload_worker = None
+        self._pending_fit_camera = False
 
         # ----------------------------------------------------
         # Render widget
@@ -324,8 +469,51 @@ class Viewer(QtWidgets.QMainWindow):
         self.setMenuBar(menubar)
         file_menu = menubar.addMenu("File")
         open_action = QtGui.QAction("Open", self)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
+        # ----------------------------------------------------
+        # Loading indicator (status bar)
+        # ----------------------------------------------------
+        self._loading_base_pixmap = self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
+        ).pixmap(16, 16)
+        self._loading_spin_angle = 0
+        # A rotated 16x16 pixmap's bounding box grows to ~22x22 for any
+        # angle that isn't a multiple of 90 degrees (QPixmap.transformed()
+        # enlarges the pixmap to fit the rotated content). Painting into a
+        # fixed-size canvas instead of using that pixmap's own size keeps
+        # the label's geometry constant every tick - otherwise the label
+        # (and the status bar layout around it) resizes ~17 times/sec as
+        # the icon spins, which is what actually caused the flicker.
+        self._loading_icon_size = 24
+
+        self.loading_icon_label = QtWidgets.QLabel()
+        self.loading_icon_label.setFixedSize(
+            self._loading_icon_size, self._loading_icon_size
+        )
+        self.loading_icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.loading_icon_label.setPixmap(self._loading_base_pixmap)
+        self._loading_start_time = None
+        self.loading_text_label = QtWidgets.QLabel("Building meshes...")
+        # Fixed width sized for the longest plausible elapsed time, so the
+        # growing digit count doesn't resize the label (and reflow the
+        # status bar) every tick the way the un-fixed-size spinner icon
+        # used to - see _spin_loading_icon()'s canvas-painting comment.
+        self.loading_text_label.setFixedWidth(
+            self.loading_text_label.fontMetrics().horizontalAdvance(
+                "Building meshes for 9999.99 seconds"
+            )
+        )
+
+        self.statusBar().addWidget(self.loading_icon_label)
+        self.statusBar().addWidget(self.loading_text_label)
+        self.loading_icon_label.hide()
+        self.loading_text_label.hide()
+
+        self.loading_spin_timer = QtCore.QTimer(self)
+        self.loading_spin_timer.setInterval(60)
+        self.loading_spin_timer.timeout.connect(self._spin_loading_icon)
         # ----------------------------------------------------
         # Render timer
         # ----------------------------------------------------
@@ -340,7 +528,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.watch_timer.start(100)
 
         # ----------------------------------------------------
-        # Clipping dock
+        # Clipping state
         # ----------------------------------------------------
 
         self.clip_enable = False
@@ -353,6 +541,109 @@ class Viewer(QtWidgets.QMainWindow):
             "mode": self.clip_mode,
             "position": self.clip_position,
         }
+
+        # Docks are added in this order (Settings, Mesher options, Clipping,
+        # Visible geometries) so they stack top-to-bottom in the left panel.
+
+        # ----------------------------------------------------
+        # Settings dock
+        # ----------------------------------------------------
+
+        settings_dock, settings_layout = self._add_dock("Settings")
+
+        self.open_file_button = QtWidgets.QPushButton("Open File...")
+        self.open_file_button.setToolTip("Open a McStas instrument (shortcut: Ctrl+O)")
+        self.open_file_button.clicked.connect(self.open_file)
+        settings_layout.addWidget(self.open_file_button)
+
+        self.material_group_checkbox = QtWidgets.QCheckBox("Group by material")
+        self.material_group_checkbox.setChecked(True)
+        self.material_group_checkbox.setToolTip(
+            "Combine components that share a material into a single "
+            "rendered object (trimesh concatenation, not a boolean fusion)."
+        )
+        settings_layout.addWidget(self.material_group_checkbox)
+
+        self.vacuum_checkbox = QtWidgets.QCheckBox("Hide vacuum")
+        self.vacuum_checkbox.setChecked(True)
+        self.vacuum_checkbox.setToolTip(
+            "Hides volumes whose material is 'vacuum'/'Vacuum' or "
+            "'exit'/'Exit' (McStas treats 'exit' as vacuum too)."
+        )
+        settings_layout.addWidget(self.vacuum_checkbox)
+
+        self.reset_view_button = QtWidgets.QPushButton("Reset view")
+        self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
+        self.reset_view_button.clicked.connect(self.reset_view)
+        settings_layout.addWidget(self.reset_view_button)
+        self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
+        self.reset_view_shortcut.activated.connect(self.reset_view)
+
+        settings_layout.addStretch()
+        settings_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
+        # Mesher options dock
+        # ----------------------------------------------------
+
+        mesher_dock, mesher_options_layout = self._add_dock("Mesher Options")
+
+        mesher_selector_layout = QtWidgets.QHBoxLayout()
+        mesher_selector_layout.addWidget(QtWidgets.QLabel("Mesher"))
+        self.mesher_box = QtWidgets.QComboBox()
+        for key in MESHER_KEYS:
+            label = key
+            if not MESHER_CAPABILITIES[key]["incremental_rebuild"]:
+                label += " (full rebuild only)"
+            self.mesher_box.addItem(label, key)
+        self.mesher_box.setCurrentIndex(self.mesher_box.findData(self.mesher))
+        mesher_selector_layout.addWidget(self.mesher_box)
+        mesher_options_layout.addLayout(mesher_selector_layout)
+
+        self.mesher_description_label = QtWidgets.QLabel(
+            MESHER_DESCRIPTIONS.get(self.mesher, "")
+        )
+        self.mesher_description_label.setWordWrap(True)
+        self.mesher_description_label.setStyleSheet("color: gray; font-style: italic;")
+        mesher_options_layout.addWidget(self.mesher_description_label)
+
+        resolution_layout = QtWidgets.QHBoxLayout()
+        self.resolution_label = QtWidgets.QLabel("Resolution")
+        self.res_val = QtWidgets.QComboBox()
+        self.res_val.addItem("16", 16)
+        self.res_val.addItem("32", 32)
+        self.res_val.addItem("64", 64)
+        self.res_val.addItem("128", 128)
+        self.res_val.addItem("256", 256)
+        self.res_val.addItem("512", 512)
+        self.res_val.setCurrentIndex(2)
+        resolution_layout.addWidget(self.resolution_label)
+        resolution_layout.addWidget(self.res_val)
+        mesher_options_layout.addLayout(resolution_layout)
+
+        deflection_layout = QtWidgets.QHBoxLayout()
+        self.deflection_label = QtWidgets.QLabel("Surface deflection")
+        self.deflection_val = QtWidgets.QDoubleSpinBox()
+        self.deflection_val.setDecimals(4)
+        self.deflection_val.setRange(0.0001, 10.0)
+        self.deflection_val.setSingleStep(0.001)
+        self.deflection_val.setValue(0.01)
+        deflection_layout.addWidget(self.deflection_label)
+        deflection_layout.addWidget(self.deflection_val)
+        mesher_options_layout.addLayout(deflection_layout)
+
+        mesher_options_layout.addStretch()
+        mesher_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
+        # Clipping dock
+        # ----------------------------------------------------
 
         clipping_dock, clipping_layout = self._add_dock("Clipping")
 
@@ -384,79 +675,10 @@ class Viewer(QtWidgets.QMainWindow):
         clipping_layout.addLayout(position_layout)
 
         clipping_layout.addStretch()
-
-        # ----------------------------------------------------
-        # Settings dock
-        # ----------------------------------------------------
-
-        settings_dock, settings_layout = self._add_dock("Settings")
-
-        self.material_group_checkbox = QtWidgets.QCheckBox("Group by material")
-        self.material_group_checkbox.setChecked(True)
-        self.material_group_checkbox.setToolTip(
-            "Combine components that share a material into a single "
-            "rendered object (trimesh concatenation, not a boolean fusion)."
+        clipping_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
         )
-        settings_layout.addWidget(self.material_group_checkbox)
-
-        self.vacuum_checkbox = QtWidgets.QCheckBox("Hide vacuum")
-        self.vacuum_checkbox.setChecked(True)
-        self.vacuum_checkbox.setToolTip(
-            "Hides volumes whose material is 'vacuum'/'Vacuum' or "
-            "'exit'/'Exit' (McStas treats 'exit' as vacuum too)."
-        )
-        settings_layout.addWidget(self.vacuum_checkbox)
-
-        self.mesher_box = QtWidgets.QComboBox()
-        for key in MESHER_KEYS:
-            label = key
-            if not MESHER_CAPABILITIES[key]["incremental_rebuild"]:
-                label += " (full rebuild only)"
-            self.mesher_box.addItem(label, key)
-        self.mesher_box.setCurrentIndex(self.mesher_box.findData(self.mesher))
-        settings_layout.addWidget(self.mesher_box)
-
-        self.reset_view_button = QtWidgets.QPushButton("Reset view")
-        self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
-        self.reset_view_button.clicked.connect(self.reset_view)
-        settings_layout.addWidget(self.reset_view_button)
-        self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
-        self.reset_view_shortcut.activated.connect(self.reset_view)
-
-        settings_layout.addStretch()
-
-        # ----------------------------------------------------
-        # Mesher options dock
-        # ----------------------------------------------------
-
-        _, mesher_options_layout = self._add_dock("Mesher Options")
-
-        resolution_layout = QtWidgets.QHBoxLayout()
-        self.resolution_label = QtWidgets.QLabel("Resolution")
-        self.res_val = QtWidgets.QComboBox()
-        self.res_val.addItem("16", 16)
-        self.res_val.addItem("32", 32)
-        self.res_val.addItem("64", 64)
-        self.res_val.addItem("128", 128)
-        self.res_val.addItem("256", 256)
-        self.res_val.addItem("512", 512)
-        self.res_val.setCurrentIndex(2)
-        resolution_layout.addWidget(self.resolution_label)
-        resolution_layout.addWidget(self.res_val)
-        mesher_options_layout.addLayout(resolution_layout)
-
-        deflection_layout = QtWidgets.QHBoxLayout()
-        self.deflection_label = QtWidgets.QLabel("Surface deflection")
-        self.deflection_val = QtWidgets.QDoubleSpinBox()
-        self.deflection_val.setDecimals(4)
-        self.deflection_val.setRange(0.0001, 10.0)
-        self.deflection_val.setSingleStep(0.001)
-        self.deflection_val.setValue(0.01)
-        deflection_layout.addWidget(self.deflection_label)
-        deflection_layout.addWidget(self.deflection_val)
-        mesher_options_layout.addLayout(deflection_layout)
-
-        mesher_options_layout.addStretch()
 
         # ----------------------------------------------------
         # Geometry visibility dock
@@ -499,6 +721,10 @@ class Viewer(QtWidgets.QMainWindow):
         geometry_dock_layout.addWidget(geometry_scroll)
 
         self.geometry_dock.setWidget(geometry_dock_widget)
+        geometry_dock_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
 
         self.addDockWidget(
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
@@ -506,7 +732,7 @@ class Viewer(QtWidgets.QMainWindow):
         )
 
         # ----------------------------------------------------
-        # Clipping signals
+        # Signals
         # ----------------------------------------------------
 
         self.clip_checkbox.stateChanged.connect(self.on_clip_changed)
@@ -550,12 +776,8 @@ class Viewer(QtWidgets.QMainWindow):
             return
         self.input_file = filename
         self.last_mtime = Path(filename).stat().st_mtime
+        self._pending_fit_camera = True
         self.reload_meshes()
-        fit_camera_to_scene(
-            self.camera,
-            self.controller,
-            self.current_group,
-        )
 
     def apply_geometry_visibility(self):
         """Recompute mesh.visible for every row from the per-row checkbox
@@ -659,7 +881,7 @@ class Viewer(QtWidgets.QMainWindow):
             self._set_swatch_color(button, hex_color)
 
     # ========================================================
-    # Reload geometry
+    # Reload geometry (asynchronous)
     # ========================================================
 
     def reload_meshes(self, force_reload=False):
@@ -669,37 +891,122 @@ class Viewer(QtWidgets.QMainWindow):
         # None for it), so always fully rebuild while it's selected.
         if not MESHER_CAPABILITIES[self.mesher]["incremental_rebuild"]:
             force_reload = True
-        print("Rebuilding meshes...")
-        try:
-            new_group, meshes, dependencies = generate_group(
-                self.input_file,
-                self.clip,
-                self.colors,
-                meshes=self.meshes,
-                dependencies=self.dependencies,
-                mesher=self.mesher,
-                res=self.res_val.currentData(),
-                force_remesh=force_reload,
-                group_by_material=self.material_group_checkbox.isChecked(),
-                deflection=self.deflection_val.value(),
+
+        if self._reload_busy:
+            self._reload_pending = True
+            self._reload_pending_force = self._reload_pending_force or force_reload
+            return
+
+        self._reload_busy = True
+        self._reload_pending = False
+        self._reload_pending_force = False
+        self._set_loading(True)
+        print("Building meshes...")
+
+        thread = QtCore.QThread(self)
+        worker = MeshBuildWorker(
+            self._mesh_process_pool,
+            self.input_file,
+            dict(self.clip),
+            self.colors,
+            self.meshes,
+            self.dependencies,
+            self.mesher,
+            self.res_val.currentData(),
+            force_reload,
+            self.material_group_checkbox.isChecked(),
+            self.deflection_val.value(),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_reload_finished)
+        worker.failed.connect(self._on_reload_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_reload_thread_finished)
+
+        self._reload_thread = thread
+        self._reload_worker = worker
+        thread.start()
+
+    def _on_reload_finished(self, new_group, meshes, dependencies):
+        if self.current_group is not None:
+            self.scene.remove(self.current_group)
+        self.dependencies = dependencies
+        self.meshes = meshes
+
+        self.current_group = new_group
+
+        self.scene.add(self.current_group)
+
+        self.rebuild_geometry_panel()
+        self.apply_geometry_visibility()
+        recentre_controller(self.controller, self.current_group)
+        print("Reload complete")
+
+        if self._pending_fit_camera:
+            self._pending_fit_camera = False
+            fit_camera_to_scene(
+                self.camera,
+                self.controller,
+                self.current_group,
             )
-            if self.current_group is not None:
-                self.scene.remove(self.current_group)
-            self.dependencies = dependencies
-            self.meshes = meshes
 
-            self.current_group = new_group
+    def _on_reload_failed(self, error_text):
+        print("Mesh rebuild failed:")
+        print(error_text)
 
-            self.scene.add(self.current_group)
+    def _on_reload_thread_finished(self):
+        self._reload_thread = None
+        self._reload_worker = None
+        self._reload_busy = False
+        self._set_loading(False)
 
-            self.rebuild_geometry_panel()
-            self.apply_geometry_visibility()
-            recentre_controller(self.controller, self.current_group)
-            print("Reload complete")
-        except Exception as e:
-            print("Mesh rebuild failed:")
-            traceback.print_exc()
-            print(e)
+        if self._reload_pending:
+            pending_force = self._reload_pending_force
+            self._reload_pending = False
+            self._reload_pending_force = False
+            self.reload_meshes(force_reload=pending_force)
+
+    # ========================================================
+    # Loading indicator
+    # ========================================================
+
+    def _spin_loading_icon(self):
+        self._loading_spin_angle = (self._loading_spin_angle + 30) % 360
+
+        size = self._loading_icon_size
+        canvas = QtGui.QPixmap(size, size)
+        canvas.fill(QtCore.Qt.GlobalColor.transparent)
+
+        painter = QtGui.QPainter(canvas)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform)
+        painter.translate(size / 2, size / 2)
+        painter.rotate(self._loading_spin_angle)
+        base = self._loading_base_pixmap
+        painter.drawPixmap(
+            QtCore.QPointF(-base.width() / 2, -base.height() / 2), base
+        )
+        painter.end()
+
+        self.loading_icon_label.setPixmap(canvas)
+
+        elapsed = time.time() - self._loading_start_time
+        self.loading_text_label.setText(f"Building meshes for {elapsed:.2f} seconds")
+
+    def _set_loading(self, is_loading):
+        self.loading_icon_label.setVisible(is_loading)
+        self.loading_text_label.setVisible(is_loading)
+        if is_loading:
+            self._loading_start_time = time.time()
+            self.loading_text_label.setText("Building meshes for 0.00 seconds")
+            self.loading_spin_timer.start()
+        else:
+            self.loading_spin_timer.stop()
+            self.loading_icon_label.setPixmap(self._loading_base_pixmap)
 
     # ========================================================
     # Watch file changes
@@ -713,14 +1020,10 @@ class Viewer(QtWidgets.QMainWindow):
             if new_mtime != self.last_mtime:
                 self.last_mtime = new_mtime
                 print("File changed -> rebuilding")
-                self.reload_meshes()
                 if self.start_input:
-                    fit_camera_to_scene(
-                        self.camera,
-                        self.controller,
-                        self.current_group,
-                    )
+                    self._pending_fit_camera = True
                     self.start_input = False
+                self.reload_meshes()
 
         except Exception as e:
             print(e)
@@ -739,6 +1042,9 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_mesher_changed(self):
         self.mesher = self.mesher_box.currentData()
+        self.mesher_description_label.setText(
+            MESHER_DESCRIPTIONS.get(self.mesher, "")
+        )
         self.update_mesher_capability_ui()
         self.reload_meshes(force_reload=True)
 
@@ -797,6 +1103,14 @@ class Viewer(QtWidgets.QMainWindow):
         self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera)
 
         self.canvas.request_draw()
+
+    # ========================================================
+    # Shutdown
+    # ========================================================
+
+    def closeEvent(self, event):
+        self._mesh_process_pool.shutdown(wait=False, cancel_futures=True)
+        super().closeEvent(event)
 
 
 # ============================================================
