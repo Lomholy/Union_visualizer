@@ -478,8 +478,20 @@ class Viewer(QtWidgets.QMainWindow):
             QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
         ).pixmap(16, 16)
         self._loading_spin_angle = 0
+        # A rotated 16x16 pixmap's bounding box grows to ~22x22 for any
+        # angle that isn't a multiple of 90 degrees (QPixmap.transformed()
+        # enlarges the pixmap to fit the rotated content). Painting into a
+        # fixed-size canvas instead of using that pixmap's own size keeps
+        # the label's geometry constant every tick - otherwise the label
+        # (and the status bar layout around it) resizes ~17 times/sec as
+        # the icon spins, which is what actually caused the flicker.
+        self._loading_icon_size = 24
 
         self.loading_icon_label = QtWidgets.QLabel()
+        self.loading_icon_label.setFixedSize(
+            self._loading_icon_size, self._loading_icon_size
+        )
+        self.loading_icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.loading_icon_label.setPixmap(self._loading_base_pixmap)
         self.loading_text_label = QtWidgets.QLabel("Rebuilding meshes...")
 
@@ -954,11 +966,22 @@ class Viewer(QtWidgets.QMainWindow):
 
     def _spin_loading_icon(self):
         self._loading_spin_angle = (self._loading_spin_angle + 30) % 360
-        transform = QtGui.QTransform().rotate(self._loading_spin_angle)
-        rotated = self._loading_base_pixmap.transformed(
-            transform, QtCore.Qt.TransformationMode.SmoothTransformation
+
+        size = self._loading_icon_size
+        canvas = QtGui.QPixmap(size, size)
+        canvas.fill(QtCore.Qt.GlobalColor.transparent)
+
+        painter = QtGui.QPainter(canvas)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform)
+        painter.translate(size / 2, size / 2)
+        painter.rotate(self._loading_spin_angle)
+        base = self._loading_base_pixmap
+        painter.drawPixmap(
+            QtCore.QPointF(-base.width() / 2, -base.height() / 2), base
         )
-        self.loading_icon_label.setPixmap(rotated)
+        painter.end()
+
+        self.loading_icon_label.setPixmap(canvas)
 
     def _set_loading(self, is_loading):
         self.loading_icon_label.setVisible(is_loading)
