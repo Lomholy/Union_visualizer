@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 import traceback
 from concurrent.futures import ProcessPoolExecutor
@@ -493,7 +494,17 @@ class Viewer(QtWidgets.QMainWindow):
         )
         self.loading_icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.loading_icon_label.setPixmap(self._loading_base_pixmap)
-        self.loading_text_label = QtWidgets.QLabel("Rebuilding meshes...")
+        self._loading_start_time = None
+        self.loading_text_label = QtWidgets.QLabel("Building meshes...")
+        # Fixed width sized for the longest plausible elapsed time, so the
+        # growing digit count doesn't resize the label (and reflow the
+        # status bar) every tick the way the un-fixed-size spinner icon
+        # used to - see _spin_loading_icon()'s canvas-painting comment.
+        self.loading_text_label.setFixedWidth(
+            self.loading_text_label.fontMetrics().horizontalAdvance(
+                "Building meshes for 9999.99 seconds"
+            )
+        )
 
         self.statusBar().addWidget(self.loading_icon_label)
         self.statusBar().addWidget(self.loading_text_label)
@@ -890,7 +901,7 @@ class Viewer(QtWidgets.QMainWindow):
         self._reload_pending = False
         self._reload_pending_force = False
         self._set_loading(True)
-        print("Rebuilding meshes...")
+        print("Building meshes...")
 
         thread = QtCore.QThread(self)
         worker = MeshBuildWorker(
@@ -983,10 +994,15 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.loading_icon_label.setPixmap(canvas)
 
+        elapsed = time.time() - self._loading_start_time
+        self.loading_text_label.setText(f"Building meshes for {elapsed:.2f} seconds")
+
     def _set_loading(self, is_loading):
         self.loading_icon_label.setVisible(is_loading)
         self.loading_text_label.setVisible(is_loading)
         if is_loading:
+            self._loading_start_time = time.time()
+            self.loading_text_label.setText("Building meshes for 0.00 seconds")
             self.loading_spin_timer.start()
         else:
             self.loading_spin_timer.stop()
