@@ -78,6 +78,7 @@ def compute_mesh_data(
     verbose=True,
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
+    force_pygen=False,
 ):
     """Everything generate_group() needs to do that doesn't touch pygfx/Qt:
     preprocessing, SDF/BREP mesh building (with dependency-based incremental
@@ -89,6 +90,7 @@ def compute_mesh_data(
     instr, world_matrices, union_geometries = preprocess(
         input_file,
         verbose=False,
+        force_pygen=force_pygen,
     )
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     print("Building sdfs")
@@ -195,6 +197,7 @@ def generate_group(
     verbose=True,
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
+    force_pygen=False,
 ):
     render_meshes, geometry_is_vacuum, meshes, dependencies = compute_mesh_data(
         input_file,
@@ -207,6 +210,7 @@ def generate_group(
         verbose=verbose,
         group_by_material=group_by_material,
         deflection=deflection,
+        force_pygen=force_pygen,
     )
     group = build_gfx_group(render_meshes, geometry_is_vacuum, colors)
     return (group, meshes, dependencies)
@@ -340,6 +344,7 @@ class MeshBuildWorker(QtCore.QObject):
         force_remesh,
         group_by_material,
         deflection,
+        force_pygen,
     ):
         super().__init__()
         self.process_pool = process_pool
@@ -353,6 +358,7 @@ class MeshBuildWorker(QtCore.QObject):
         self.force_remesh = force_remesh
         self.group_by_material = group_by_material
         self.deflection = deflection
+        self.force_pygen = force_pygen
 
     def run(self):
         try:
@@ -367,6 +373,7 @@ class MeshBuildWorker(QtCore.QObject):
                 res=self.res,
                 group_by_material=self.group_by_material,
                 deflection=self.deflection,
+                force_pygen=self.force_pygen,
             )
             render_meshes, geometry_is_vacuum, meshes, dependencies = future.result()
             group = build_gfx_group(render_meshes, geometry_is_vacuum, self.colors)
@@ -572,6 +579,19 @@ class Viewer(QtWidgets.QMainWindow):
         )
         settings_layout.addWidget(self.vacuum_checkbox)
 
+        self.pygen_checkbox = QtWidgets.QCheckBox("Force mcstas-pygen preprocessing")
+        self.pygen_checkbox.setChecked(False)
+        self.pygen_checkbox.setToolTip(
+            "Translate a .instr input through the real McStas front-end "
+            "(mcstas-pygen) instead of mcstasscript's lightweight .instr "
+            "reader. mcstas-pygen already runs automatically whenever that "
+            "lightweight reader raises an error - this instead forces it "
+            "for every load, for instruments the lightweight reader "
+            "mis-parses without raising an error. Requires mcstas-pygen "
+            "on PATH (ships with the McStas install)."
+        )
+        settings_layout.addWidget(self.pygen_checkbox)
+
         self.reset_view_button = QtWidgets.QPushButton("Reset view")
         self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
         self.reset_view_button.clicked.connect(self.reset_view)
@@ -739,6 +759,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.material_group_checkbox.stateChanged.connect(self.on_material_group_changed)
         self.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
         self.mesher_box.currentIndexChanged.connect(self.on_mesher_changed)
+        self.pygen_checkbox.stateChanged.connect(self.on_pygen_changed)
         self.axis_combo.currentTextChanged.connect(self.on_clip_changed)
         self.mode_combo.currentTextChanged.connect(self.on_clip_changed)
         self.slice_val.valueChanged.connect(self.on_clip_changed)
@@ -916,6 +937,7 @@ class Viewer(QtWidgets.QMainWindow):
             force_reload,
             self.material_group_checkbox.isChecked(),
             self.deflection_val.value(),
+            self.pygen_checkbox.isChecked(),
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1050,6 +1072,11 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_material_group_changed(self):
         self.reload_meshes()
+
+    def on_pygen_changed(self):
+        # Switches which parser builds the McStas_instr entirely, so
+        # nothing from a previous load can be trusted as unchanged.
+        self.reload_meshes(force_reload=True)
 
     def on_vacuum_changed(self):
         self.apply_geometry_visibility()

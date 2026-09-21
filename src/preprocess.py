@@ -5,6 +5,9 @@ import ast
 import os
 import re
 import math
+import shutil
+import subprocess
+import tempfile
 import numpy as np
 
 
@@ -32,6 +35,118 @@ def execute_mcstasscript_file(input_file):
     return instruments[0]
 
 
+class PygenNotFoundError(RuntimeError):
+    """Raised when the mcstas-pygen binary can't be located."""
+
+
+def find_mcstas_pygen():
+    """Locate the mcstas-pygen binary. It ships alongside mcstas/mcrun (e.g.
+    as part of the same conda package that provides mcstasscript's backend),
+    so PATH lookup is normally enough once that environment is active;
+    MCSTAS_PYGEN lets it be pointed at explicitly otherwise."""
+    override = os.environ.get("MCSTAS_PYGEN")
+    if override:
+        if shutil.which(override) or os.path.isfile(override):
+            return override
+        raise PygenNotFoundError(
+            f"MCSTAS_PYGEN is set to '{override}', but no executable was found there."
+        )
+    found = shutil.which("mcstas-pygen")
+    if found:
+        return found
+    raise PygenNotFoundError(
+        "mcstas-pygen not found on PATH. It ships with the McStas install "
+        "(e.g. via the 'mcstas' conda package used by unviz_env.yml) - "
+        "activate that environment, or set MCSTAS_PYGEN to its path."
+    )
+
+
+def run_mcstas_pygen(instr_file, verbose=False):
+    """Translate a .instr file into a McStasScript module via mcstas-pygen,
+    the McStas-provided code generator that runs the instrument through the
+    real McStas front-end (component definitions and all) instead of
+    mcstasscript's own lightweight regex-based .instr reader. Useful for
+    instruments the lightweight reader can't parse. Returns the path to the
+    generated .py file, written into a fresh temp directory.
+
+    Component search: standard/contrib components (including Union) come
+    from the MCSTAS environment variable, same as mcrun/mcstas. mcstas-pygen
+    3.8.5's own -I flag errors out instead of extending that path (verified
+    against the installed binary - its --help text lists -I, but passing it
+    always falls straight to the usage banner), so the only way left to pick
+    up instrument-local .comp files is to run with the instrument's own
+    directory as cwd, which is what mcrun does too.
+    """
+    pygen = find_mcstas_pygen()
+    out_dir = tempfile.mkdtemp(prefix="union_viewer_pygen_")
+    abs_instr_file = os.path.abspath(instr_file)
+    instr_dir = os.path.dirname(abs_instr_file) or "."
+    base = os.path.splitext(os.path.basename(instr_file))[0]
+    out_file = os.path.join(out_dir, f"{base}_generated.py")
+    cmd = [pygen, "-o", out_file, abs_instr_file]
+
+    if verbose:
+        print("Running:", " ".join(cmd), "(cwd=%s)" % instr_dir)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=instr_dir)
+    if verbose and result.stdout:
+        print(result.stdout)
+
+    if result.returncode != 0 or not os.path.isfile(out_file):
+        message = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(
+            f"mcstas-pygen failed to translate '{instr_file}':\n{message}"
+        )
+    return out_file
+
+
+def _clear_pygen_unset_string_defaults(instr):
+    """Undo a mismatch pygen's output otherwise creates against the rest of
+    this codebase's expectations: McStas represents an omitted string
+    parameter with the literal, unquoted token 0 (e.g. `string
+    mask_string = 0` in a .comp DEFINE - a real string value is always
+    quoted, e.g. '"non"', so the bare '0' is unambiguous). mcstasscript's
+    lightweight .instr reader only sets attributes that are actually
+    written in the .instr text, so an omitted one simply stays absent and
+    reads back as the Component class's own default of None. pygen's
+    generated code instead assigns every declared parameter explicitly,
+    including that literal '0' sentinel for the ones the instrument never
+    set - and code elsewhere (e.g. brep.py's `hasattr(comp, 'mask_string')
+    and comp.mask_string != None` mask check) relies on the "still None"
+    state to know a parameter was never given a real value. Rewriting
+    each such sentinel back to None makes pygen-loaded components behave
+    like natively-read ones for every one of those checks."""
+    for comp in instr.component_list:
+        for pname, ptype in comp.parameter_types.items():
+            if ptype == "string" and getattr(comp, pname, None) == "0":
+                setattr(comp, pname, None)
+
+
+def execute_pygen_file(generated_file):
+    """Load the McStasScript instrument built by a mcstas-pygen-generated
+    module. Unlike a hand-written McStasScript script (which instantiates
+    McStas_instr at module scope, what execute_mcstasscript_file scans
+    for), pygen's output wraps construction in a make() factory function
+    and guards its demo CLI behind `if __name__ == "__main__"` - so this
+    calls make() directly rather than scanning module globals, and sets
+    __name__ to something other than "__main__" so exec() doesn't run
+    into that guard reading an undefined name."""
+    with open(generated_file, "r") as f:
+        code = f.read()
+
+    namespace = {"__name__": "mcstas_pygen_module"}
+    exec(compile(code, generated_file, "exec"), namespace)
+
+    make = namespace.get("make")
+    if make is None:
+        raise ValueError(
+            f"mcstas-pygen output '{generated_file}' has no make() function; "
+            "unexpected mcstas-pygen output format."
+        )
+    instr = make()
+    _clear_pygen_unset_string_defaults(instr)
+    return instr
+
+
 def get_union_geometries(instr: ms.McStas_instr):
     union_geometries = {}
     union_names = ["Union_cylinder",
@@ -45,13 +160,32 @@ def get_union_geometries(instr: ms.McStas_instr):
     return union_geometries
 
 
-def load_McStas_file(input_file):
+def load_McStas_file(input_file, force_pygen=False, verbose=False):
+    """Load a .py (McStasScript) or .instr (native McStas) file into an
+    McStas_instr. For .instr inputs there are two ways to reach the
+    mcstas-pygen path instead of mcstasscript's own lightweight .instr
+    reader: force_pygen=True always takes it (e.g. because a user enabled
+    it in the GUI settings for an instrument they know the lightweight
+    reader mishandles), and otherwise it's used automatically as a
+    fallback if the lightweight reader raises."""
     if input_file.endswith(".py"):
         instr = execute_mcstasscript_file(input_file)
     elif input_file.endswith(".instr"):
-        file = ms.McStas_file(input_file)
-        instr = ms.McStas_instr("union_cad")
-        file.add_to_instr(instr)
+        if force_pygen:
+            instr = execute_pygen_file(run_mcstas_pygen(input_file, verbose=verbose))
+        else:
+            try:
+                file = ms.McStas_file(input_file)
+                instr = ms.McStas_instr("union_cad")
+                file.add_to_instr(instr)
+            except Exception as exc:
+                print(
+                    f"mcstasscript's built-in .instr reader failed on "
+                    f"'{input_file}' ({exc}); falling back to mcstas-pygen."
+                )
+                instr = execute_pygen_file(
+                    run_mcstas_pygen(input_file, verbose=verbose)
+                )
     return instr
 
 
@@ -889,16 +1023,21 @@ def resolve_mesh_filenames(union_geometries, input_file):
             comp.filename = _resolve_relative_path(filename, base_dir)
 
 
-def preprocess(input_file: str, verbose: bool):
+def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
     """
     Function to preprocess the input file.
+
+    force_pygen: always translate a .instr input through mcstas-pygen
+        instead of mcstasscript's lightweight .instr reader (that reader is
+        still used as an automatic fallback on parse failure regardless of
+        this flag - see load_McStas_file).
 
     Returns:
         McStas_instr containing the processed instrument
         dict: {component_name_lower: 4x4 world matrix}
         list: Each union geometry in the instrument.
     """
-    instr = load_McStas_file(input_file)
+    instr = load_McStas_file(input_file, force_pygen=force_pygen, verbose=verbose)
     var_map = create_var_map(instr)
     for comp in instr.component_list:
         comp = attempt_conversion(comp, instr, var_map)
