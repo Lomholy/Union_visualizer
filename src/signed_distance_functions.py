@@ -2,6 +2,7 @@ import numpy as np
 import trimesh
 
 from preprocess import box_dimensions
+from bounding_box import compute_all_world_bboxes, overlapping
 
 
 # =============================================================================
@@ -168,7 +169,11 @@ def build_sdfs(
         "mode": "Above",
         "axis": "X",
     },
+    world_bboxes=None,
 ):
+    if world_bboxes is None:
+        world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
+
     sdfs = {}
     final_sdfs = {}
     for name, comp in union_geometries.items():
@@ -178,11 +183,13 @@ def build_sdfs(
         sdfs[comp.name] = make_sdf(comp, sdf, inv_mat)
 
     for name, comp in union_geometries.items():
-        higher_comps = [
-            sdfs[x.name]
+        candidates = [
+            x.name
             for x in union_geometries.values()
             if x.priority > comp.priority and x.component_name != "Union_mesh"
         ]
+        # A non-overlapping cutter can't affect the subtraction result.
+        higher_comps = [sdfs[n] for n in overlapping(name, candidates, world_bboxes)]
         final_sdfs[name] = sdf_subtract_all(sdfs[name], higher_comps)
 
     if clip.get("enable", True):

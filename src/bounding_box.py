@@ -36,8 +36,12 @@ def compute_local_bbox(comp):
         return -b, b
 
     elif t == "union_mesh":
+        # meshing.py/brep.py both apply coordinate_scale (defaulting to
+        # 1e-3) before using a Union_mesh's geometry; without it here the
+        # box is ~1000x too large for a millimetre-unit STL.
+        scale = float(comp.coordinate_scale) if comp.coordinate_scale is not None else 1e-3
         mesh = trimesh.load(comp.filename)
-        bounds = mesh.bounds  # (min, max)
+        bounds = mesh.bounds * scale  # (min, max)
         return bounds[0], bounds[1]
 
     else:
@@ -79,3 +83,74 @@ def compute_world_bbox(comp, world_matrices, margin=0.05):
     world_max += margin * size
 
     return world_min, world_max
+
+
+def compute_all_world_bboxes(union_geometries, world_matrices, margin=0.0):
+    """{name: (world_min, world_max)} for every component, computed once so
+    callers doing many overlap checks don't repeat mesh loads/transforms."""
+    return {
+        name: compute_world_bbox(comp, world_matrices, margin=margin)
+        for name, comp in union_geometries.items()
+    }
+
+
+def boxes_overlap(a_min, a_max, b_min, b_max, tol=1e-9):
+    """Do two world-space AABBs overlap (or touch, within tol)?"""
+    return bool(np.all(a_min <= b_max + tol) and np.all(b_min <= a_max + tol))
+
+
+def overlapping(name, candidate_names, world_bboxes, tol=1e-9):
+    """candidate_names whose world bbox overlaps world_bboxes[name]."""
+    a_min, a_max = world_bboxes[name]
+    return [
+        other
+        for other in candidate_names
+        if other != name
+        and boxes_overlap(a_min, a_max, *world_bboxes[other], tol=tol)
+    ]
+
+
+def component_dependency_signature(name, union_geometries, world_bboxes):
+    """A comparable value for what this component's mesh depends on: its
+    own world bbox, the (name, bbox) of every higher-priority component
+    whose bbox currently overlaps it, and the same for whatever currently
+    masks it (masks are matched by name, not bbox). Equal values across two
+    calls mean this component does not need remeshing.
+
+    Geometry-only: a shape parameter change is caught via its effect on
+    the bbox, not compared directly. Does not detect a Union_mesh's file
+    changing to different geometry with the same bounding box."""
+    comp = union_geometries[name]
+    own_min, own_max = world_bboxes[name]
+
+    higher_priority_names = [
+        c.name for c in union_geometries.values() if c.priority > comp.priority
+    ]
+    cutters = tuple(
+        sorted(
+            (n, tuple(world_bboxes[n][0]), tuple(world_bboxes[n][1]))
+            for n in overlapping(name, higher_priority_names, world_bboxes)
+        )
+    )
+
+    mask_string = getattr(comp, "mask_string", None)
+    masking_names = [
+        c.name
+        for c in union_geometries.values()
+        if getattr(c, "mask_string", None) and name in c.mask_string
+    ]
+    masks = tuple(
+        sorted(
+            (n, tuple(world_bboxes[n][0]), tuple(world_bboxes[n][1]))
+            for n in masking_names
+        )
+    )
+
+    return (
+        tuple(own_min),
+        tuple(own_max),
+        cutters,
+        masks,
+        mask_string,
+        getattr(comp, "mask_setting", None),
+    )

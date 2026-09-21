@@ -9,6 +9,7 @@ import argparse
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes
+from bounding_box import compute_all_world_bboxes
 
 from pathlib import Path
 # ==============================================================================
@@ -63,7 +64,10 @@ if __name__ == "__main__":
         }
 
     instr, world_matrices, union_geometries = preprocess(input_file, verbose)
-    final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices)
+    world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
+    final_sdfs, sdfs = build_sdfs(
+        union_geometries, world_matrices, world_bboxes=world_bboxes
+    )
     build_all_meshes(
         union_geometries,
         world_matrices,
@@ -74,5 +78,5 @@ if __name__ == "__main__":
         out_file=out_file,
         export=export,
         mesher=mesher,
-
+        world_bboxes=world_bboxes,
     )

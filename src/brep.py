@@ -29,6 +29,7 @@ import trimesh
 import numpy as np
 
 from preprocess import box_dimensions
+from bounding_box import compute_all_world_bboxes, overlapping
 
 
 def _mesh_to_brep(mesh, name, verbose=False):
@@ -324,15 +325,23 @@ def clip_component(shape, clip):
 
 
 def build_single_brep_mesh(
-    comp, union_geometries, world_matrices, clip, verbose, deflection=0.01
+    comp, union_geometries, world_matrices, clip, verbose, deflection=0.01,
+    world_bboxes=None,
 ):
     if hasattr(comp, 'mask_string'):
         if comp.mask_string != None:
             if verbose:
                 print(f"{comp.name} is a mask, and is therefore not meshed.")
             return None
+    if world_bboxes is None:
+        world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
+    # Only a higher-priority component whose world bbox actually overlaps
+    # this one can change the result of subtracting it.
+    candidates = [
+        x.name for n, x in union_geometries.items() if x.priority > comp.priority
+    ]
     higher_priority = [
-        x for n, x in union_geometries.items() if x.priority > comp.priority
+        union_geometries[n] for n in overlapping(comp.name, candidates, world_bboxes)
     ]
     res_comp = build_comp_brep(comp, world_matrices)
     mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
@@ -395,13 +404,19 @@ def build_single_brep_mesh(
     return mesh
 
 
-def build_brep_meshes(union_geometries, world_matrices, clip, verbose, deflection=0.01):
+def build_brep_meshes(
+    union_geometries, world_matrices, clip, verbose, deflection=0.01,
+    world_bboxes=None,
+):
+    if world_bboxes is None:
+        world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
+
     meshes_dict = {}
 
     for name, comp in union_geometries.items():
         mesh = build_single_brep_mesh(
             comp, union_geometries, world_matrices, clip, verbose,
-            deflection=deflection,
+            deflection=deflection, world_bboxes=world_bboxes,
         )
         meshes_dict[name] = mesh
     return meshes_dict
