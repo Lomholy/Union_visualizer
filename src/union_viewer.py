@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 import traceback
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import pygfx as gfx
 from qtpy import QtWidgets, QtCore, QtGui
@@ -65,10 +66,9 @@ def rebuild_mesh(
     return meshes
 
 
-def generate_group(
+def compute_mesh_data(
     input_file,
     clip,
-    colors={},
     meshes=None,
     dependencies=None,
     mesher="brep",
@@ -78,6 +78,13 @@ def generate_group(
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
 ):
+    """Everything generate_group() needs to do that doesn't touch pygfx/Qt:
+    preprocessing, SDF/BREP mesh building (with dependency-based incremental
+    rebuild), and material grouping/vacuum tagging. Returns plain,
+    picklable data (trimesh objects + dicts), so this is safe to run in a
+    worker *process* rather than just a thread - some of the geometry
+    kernel calls it makes (OpenCASCADE, via pythonocc-core) don't release
+    the GIL, so running them on a QThread still freezes the GUI."""
     instr, world_matrices, union_geometries = preprocess(
         input_file,
         verbose=False,
@@ -145,6 +152,13 @@ def generate_group(
             for name in render_meshes
         }
 
+    return (render_meshes, geometry_is_vacuum, meshes, dependencies)
+
+
+def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
+    """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects.
+    Cheap (no geometry kernel calls) - safe to run on the GUI thread or a
+    plain QThread."""
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
@@ -165,6 +179,35 @@ def generate_group(
         group.add(gfx_mesh)
         group.geometry_meshes[key] = gfx_mesh
 
+    return group
+
+
+def generate_group(
+    input_file,
+    clip,
+    colors={},
+    meshes=None,
+    dependencies=None,
+    mesher="brep",
+    force_remesh=False,
+    res=64,
+    verbose=True,
+    group_by_material=False,
+    deflection=DEFAULT_BREP_DEFLECTION,
+):
+    render_meshes, geometry_is_vacuum, meshes, dependencies = compute_mesh_data(
+        input_file,
+        clip,
+        meshes=meshes,
+        dependencies=dependencies,
+        mesher=mesher,
+        force_remesh=force_remesh,
+        res=res,
+        verbose=verbose,
+        group_by_material=group_by_material,
+        deflection=deflection,
+    )
+    group = build_gfx_group(render_meshes, geometry_is_vacuum, colors)
     return (group, meshes, dependencies)
 
 
@@ -267,13 +310,25 @@ def recentre_controller(controller, group):
 
 
 class MeshBuildWorker(QtCore.QObject):
-    """Runs generate_group() off the GUI thread so the UI stays responsive."""
+    """Off-loads a mesh rebuild so the GUI thread stays responsive.
+
+    The actual geometry-kernel work (compute_mesh_data) runs in a worker
+    *process*, not just this QThread: pythonocc-core's OpenCASCADE calls
+    (used by the "brep" mesher) don't release the GIL, so a long boolean
+    operation running on a plain QThread would still starve the main
+    thread's event loop and freeze the window. Blocking here on
+    future.result() is safe because waiting on inter-process I/O releases
+    the GIL, unlike the geometry-kernel call itself. Building the pygfx
+    objects from the returned trimesh data is cheap and stays on this
+    thread.
+    """
 
     finished = QtCore.Signal(object, object, object)
     failed = QtCore.Signal(str)
 
     def __init__(
         self,
+        process_pool,
         input_file,
         clip,
         colors,
@@ -286,6 +341,7 @@ class MeshBuildWorker(QtCore.QObject):
         deflection,
     ):
         super().__init__()
+        self.process_pool = process_pool
         self.input_file = input_file
         self.clip = clip
         self.colors = colors
@@ -299,18 +355,20 @@ class MeshBuildWorker(QtCore.QObject):
 
     def run(self):
         try:
-            group, meshes, dependencies = generate_group(
+            future = self.process_pool.submit(
+                compute_mesh_data,
                 self.input_file,
                 self.clip,
-                self.colors,
                 meshes=self.meshes,
                 dependencies=self.dependencies,
                 mesher=self.mesher,
-                res=self.res,
                 force_remesh=self.force_remesh,
+                res=self.res,
                 group_by_material=self.group_by_material,
                 deflection=self.deflection,
             )
+            render_meshes, geometry_is_vacuum, meshes, dependencies = future.result()
+            group = build_gfx_group(render_meshes, geometry_is_vacuum, self.colors)
         except Exception:
             self.failed.emit(traceback.format_exc())
             return
@@ -339,6 +397,10 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
         # Async mesh rebuild state
         # ----------------------------------------------------
+        # Geometry-kernel work runs in this pool, not just a QThread - see
+        # MeshBuildWorker's docstring for why (pythonocc doesn't release
+        # the GIL, so a thread alone still freezes the GUI).
+        self._mesh_process_pool = ProcessPoolExecutor(max_workers=1)
         self._reload_busy = False
         self._reload_pending = False
         self._reload_pending_force = False
@@ -406,6 +468,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.setMenuBar(menubar)
         file_menu = menubar.addMenu("File")
         open_action = QtGui.QAction("Open", self)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
         # ----------------------------------------------------
@@ -464,6 +527,11 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
 
         settings_dock, settings_layout = self._add_dock("Settings")
+
+        self.open_file_button = QtWidgets.QPushButton("Open File...")
+        self.open_file_button.setToolTip("Open a McStas instrument (shortcut: Ctrl+O)")
+        self.open_file_button.clicked.connect(self.open_file)
+        settings_layout.addWidget(self.open_file_button)
 
         self.material_group_checkbox = QtWidgets.QCheckBox("Group by material")
         self.material_group_checkbox.setChecked(True)
@@ -814,6 +882,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         thread = QtCore.QThread(self)
         worker = MeshBuildWorker(
+            self._mesh_process_pool,
             self.input_file,
             dict(self.clip),
             self.colors,
@@ -995,6 +1064,14 @@ class Viewer(QtWidgets.QMainWindow):
         self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera)
 
         self.canvas.request_draw()
+
+    # ========================================================
+    # Shutdown
+    # ========================================================
+
+    def closeEvent(self, event):
+        self._mesh_process_pool.shutdown(wait=False, cancel_futures=True)
+        super().closeEvent(event)
 
 
 # ============================================================
