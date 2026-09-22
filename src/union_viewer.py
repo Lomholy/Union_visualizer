@@ -438,9 +438,15 @@ class Viewer(QtWidgets.QMainWindow):
         key.look_at((0, 0, 0))
         self.scene.add(key)
 
-        # main light (like sun)
+        # second light, offset from `key` rather than its exact opposite:
+        # two perfectly antipodal directional lights each cover exactly
+        # one hemisphere of any convex surface with zero overlap, so the
+        # boundary between them is lit only by the (much weaker) ambient
+        # and fill light - visible as a hard "terminator" crease across
+        # curved geometry. Offsetting key2 away from -key avoids the two
+        # falloffs' zero-crossings coinciding.
         key2 = gfx.DirectionalLight(intensity=1.5)
-        key2.local.position = (-1, -1, -1)
+        key2.local.position = (-1, -1, 1)
         key2.look_at((0, 0, 0))
         self.scene.add(key2)
         # optional fill light (soft opposite side)
