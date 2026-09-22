@@ -472,15 +472,13 @@ class Viewer(QtWidgets.QMainWindow):
         self.gizmo_camera.local.position = (0, 0, 4)
 
         # ----------------------------------------------------
-        # Menu
+        # Open file shortcut (the "Open File..." button lives in the
+        # Settings dock; this just keeps Ctrl+O working)
         # ----------------------------------------------------
-        menubar = QtWidgets.QMenuBar(self)
-        self.setMenuBar(menubar)
-        file_menu = menubar.addMenu("File")
-        open_action = QtGui.QAction("Open", self)
-        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
-        open_action.triggered.connect(self.open_file)
-        file_menu.addAction(open_action)
+        self.open_file_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.Open, self
+        )
+        self.open_file_shortcut.activated.connect(self.open_file)
         # ----------------------------------------------------
         # Loading indicator (status bar)
         # ----------------------------------------------------
