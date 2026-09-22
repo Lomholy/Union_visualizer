@@ -85,7 +85,6 @@ def build_mesh(
         mesh.apply_transform(world_matrices[comp.name])
         mesh.export(f"{out_file}_{comp.name}.stl")
         return comp.name, mesh
-    sdf_func = final_sdfs[name]
     bmin, bmax = compute_world_bbox(comp, world_matrices)
     if verbose:
         print(f"BBOX {name}: {bmin} → {bmax}")
@@ -98,6 +97,10 @@ def build_mesh(
         )
         return mesh
 
+    # Only the "mc" mesher (below) actually needs final_sdfs - looked up
+    # here, rather than unconditionally at the top of this function, so
+    # callers building for "brep"/"dc" can skip populating it entirely.
+    sdf_func = final_sdfs[name]
     try:
         verts, faces = sdf_to_mesh(
             sdf_func,

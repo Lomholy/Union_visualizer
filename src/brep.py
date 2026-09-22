@@ -195,8 +195,11 @@ def intersect_with_masks(shape, mask_comps, mask_setting):
         result_shape = shape
 
         for mask_comp in mask_comps:
+            # BRepAlgoAPI_Common's two-shape constructor already performs
+            # the boolean operation; an explicit .Build() afterward reruns
+            # the same solve from scratch and throws the result away,
+            # roughly doubling the cost of every mask intersection.
             common = BRepAlgoAPI_Common(result_shape, mask_comp)
-            common.Build()
 
             if not common.IsDone():
                 raise RuntimeError(
@@ -212,8 +215,9 @@ def intersect_with_masks(shape, mask_comps, mask_setting):
         combined_mask = mask_comps[0]
 
         for mask_comp in mask_comps[1:]:
+            # See the "All" branch above: the two-shape constructor already
+            # builds the result, so no explicit .Build() call is needed.
             fuse = BRepAlgoAPI_Fuse(combined_mask, mask_comp)
-            fuse.Build()
 
             if not fuse.IsDone():
                 raise RuntimeError(
@@ -224,7 +228,6 @@ def intersect_with_masks(shape, mask_comps, mask_setting):
             combined_mask = fuse.Shape()
 
         common = BRepAlgoAPI_Common(shape, combined_mask)
-        common.Build()
 
         if not common.IsDone():
             raise RuntimeError(
@@ -254,8 +257,12 @@ def build_higher_priorities(higher_priorities, world_matrices):
 
 def subtract_higher_priorities(comp, prio_breps):
     for prio in prio_breps:
+        # BRepAlgoAPI_Cut's two-shape constructor already performs the
+        # boolean cut; an explicit .Build() afterward reruns the same
+        # solve from scratch, roughly doubling the cost of every cut (this
+        # is by far the hottest path in the mesher, so it dominates the
+        # savings from removing it).
         cut = BRepAlgoAPI_Cut(comp, prio)
-        cut.Build()
         if not cut.IsDone():
             raise RuntimeError("Boolean cut failed")
         comp = cut.Shape()
@@ -311,12 +318,12 @@ def clip_component(shape, clip):
         gp_Pnt(*keep_point)
     ).Solid()
 
+    # See subtract_higher_priorities: the two-shape constructor already
+    # builds the result, so no explicit .Build() call is needed.
     result = BRepAlgoAPI_Common(
         shape,
         halfspace
     )
-
-    result.Build()
 
     if not result.IsDone():
         raise RuntimeError("Clip operation failed")
