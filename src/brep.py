@@ -399,7 +399,6 @@ def build_single_brep_mesh(
         print(f"WARNING: empty mesh for {comp.name}")
         return None
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    mesh.fix_normals()
 
     return mesh
 
