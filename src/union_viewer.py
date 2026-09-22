@@ -454,6 +454,17 @@ class Viewer(QtWidgets.QMainWindow):
         fill.local.position = (-1, 1, -1)
         fill.look_at((0, 0, 0))
         self.scene.add(fill)
+        # key, key2 and fill sit at 3 of the 4 vertices of a regular
+        # tetrahedron ((1,1,1), (-1,-1,1) and (-1,1,-1) are mutually
+        # ~109.5 degrees apart) - three one-sided lights, however spread
+        # out, still leave a lune on a convex surface where all three
+        # graze at once and only ambient shows through (a dim, flat-
+        # looking patch amid otherwise-gradient shading). Lighting from
+        # the 4th tetrahedron vertex closes that gap.
+        rim = gfx.DirectionalLight(intensity=0.5)
+        rim.local.position = (1, -1, -1)
+        rim.look_at((0, 0, 0))
+        self.scene.add(rim)
         # ----------------------------------------------------
         # Camera
         # ----------------------------------------------------
