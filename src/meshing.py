@@ -97,9 +97,8 @@ def build_mesh(
         )
         return mesh
 
-    # Only the "mc" mesher (below) actually needs final_sdfs - looked up
-    # here, rather than unconditionally at the top of this function, so
-    # callers building for "brep"/"dc" can skip populating it entirely.
+    # Only the "mc" mesher below needs final_sdfs, so callers building for
+    # "brep"/"dc" can leave it unpopulated.
     sdf_func = final_sdfs[name]
     try:
         verts, faces = sdf_to_mesh(

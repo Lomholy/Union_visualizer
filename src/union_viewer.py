@@ -94,10 +94,7 @@ def compute_mesh_data(
         force_pygen=force_pygen,
     )
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
-    # The "brep" mesher never touches sdfs/final_sdfs (see build_mesh /
-    # build_all_meshes), so building them is pure waste when it's selected -
-    # and make_sdf() eagerly trimesh.load()s every Union_mesh component's
-    # file just to build a closure that would never be called.
+    # The "brep" mesher never touches sdfs/final_sdfs, so skip building them.
     if mesher == "brep":
         final_sdfs, sdfs = {}, {}
     else:
