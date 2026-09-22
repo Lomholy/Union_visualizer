@@ -398,8 +398,19 @@ def build_single_brep_mesh(
     if len(vertices) == 0 or len(faces) == 0:
         print(f"WARNING: empty mesh for {comp.name}")
         return None
+    # Don't call mesh.fix_normals() here: the winding above is already
+    # correct (derived directly from OCC's own face orientation), and
+    # trimesh's heuristic repair does the wrong thing for any component
+    # with a fully-enclosed cavity (e.g. a vacuum layer or sample nested
+    # inside a lower-priority shape via subtract_higher_priorities) -
+    # the outer shell and the inner cavity wall never share an edge, so
+    # trimesh treats them as separate bodies and, in multi-body mode,
+    # flips whichever one has a negative standalone volume. A cavity
+    # wall's standalone volume is *supposed* to be negative (its correct
+    # normal points into the void), so that "fix" inverts an
+    # already-correct normal and leaves the mesh with inconsistently
+    # facing faces.
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    mesh.fix_normals()
 
     return mesh
 
