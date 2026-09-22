@@ -196,7 +196,6 @@ def intersect_with_masks(shape, mask_comps, mask_setting):
 
         for mask_comp in mask_comps:
             common = BRepAlgoAPI_Common(result_shape, mask_comp)
-            common.Build()
 
             if not common.IsDone():
                 raise RuntimeError(
@@ -213,7 +212,6 @@ def intersect_with_masks(shape, mask_comps, mask_setting):
 
         for mask_comp in mask_comps[1:]:
             fuse = BRepAlgoAPI_Fuse(combined_mask, mask_comp)
-            fuse.Build()
 
             if not fuse.IsDone():
                 raise RuntimeError(
@@ -224,7 +222,6 @@ def intersect_with_masks(shape, mask_comps, mask_setting):
             combined_mask = fuse.Shape()
 
         common = BRepAlgoAPI_Common(shape, combined_mask)
-        common.Build()
 
         if not common.IsDone():
             raise RuntimeError(
@@ -254,8 +251,8 @@ def build_higher_priorities(higher_priorities, world_matrices):
 
 def subtract_higher_priorities(comp, prio_breps):
     for prio in prio_breps:
+        # Two-shape constructor already performs the cut - no .Build() needed.
         cut = BRepAlgoAPI_Cut(comp, prio)
-        cut.Build()
         if not cut.IsDone():
             raise RuntimeError("Boolean cut failed")
         comp = cut.Shape()
@@ -315,8 +312,6 @@ def clip_component(shape, clip):
         shape,
         halfspace
     )
-
-    result.Build()
 
     if not result.IsDone():
         raise RuntimeError("Clip operation failed")
