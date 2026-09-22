@@ -4,6 +4,7 @@ from pathlib import Path
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
+import trimesh
 import pygfx as gfx
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
@@ -166,6 +167,7 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     group = gfx.Group()
     group.geometry_meshes = {}
     group.geometry_is_vacuum = geometry_is_vacuum
+    group.geometry_trimeshes = render_meshes
 
     for key, mesh in render_meshes.items():
         assign_default_color(colors, key)
@@ -599,6 +601,13 @@ class Viewer(QtWidgets.QMainWindow):
         self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
         self.reset_view_shortcut.activated.connect(self.reset_view)
 
+        self.export_stl_button = QtWidgets.QPushButton("Export STL...")
+        self.export_stl_button.setToolTip(
+            "Export the currently visible meshes as a single .stl file."
+        )
+        self.export_stl_button.clicked.connect(self.export_stl)
+        settings_layout.addWidget(self.export_stl_button)
+
         settings_layout.addStretch()
         settings_dock.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Preferred,
@@ -900,6 +909,51 @@ class Viewer(QtWidgets.QMainWindow):
         button = self.geometry_color_buttons.get(key)
         if button is not None:
             self._set_swatch_color(button, hex_color)
+
+    # ========================================================
+    # Export STL
+    # ========================================================
+
+    def export_stl(self):
+        if self.current_group is None or not self.current_group.geometry_meshes:
+            QtWidgets.QMessageBox.warning(
+                self, "Export STL", "No geometry loaded to export."
+            )
+            return
+
+        trimeshes = self.current_group.geometry_trimeshes
+        parts = [
+            trimeshes[key]
+            for key, mesh in self.current_group.geometry_meshes.items()
+            if mesh.visible and trimeshes.get(key) is not None
+        ]
+        if not parts:
+            QtWidgets.QMessageBox.warning(
+                self, "Export STL", "No visible geometry to export."
+            )
+            return
+
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export STL", "", "STL Files (*.stl)"
+        )
+        if not filename:
+            return
+        if not filename.lower().endswith(".stl"):
+            filename += ".stl"
+
+        try:
+            combined = parts[0] if len(parts) == 1 else trimesh.util.concatenate(parts)
+            combined.export(filename)
+        except Exception as e:
+            traceback.print_exc()
+            QtWidgets.QMessageBox.critical(
+                self, "Export STL", f"Failed to export STL:\n{e}"
+            )
+            return
+
+        QtWidgets.QMessageBox.information(
+            self, "Export STL", f"Exported {len(parts)} mesh(es) to:\n{filename}"
+        )
 
     # ========================================================
     # Reload geometry (asynchronous)
