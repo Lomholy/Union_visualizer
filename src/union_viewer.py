@@ -570,14 +570,80 @@ class TraceWorker(QtCore.QObject):
         self.finished.emit(group, rays, time.time() - start)
 
 
+class CollapsibleTitleBar(QtWidgets.QWidget):
+    """Dock title bar whose arrow (or a double-click on the title)
+    collapses the dock to just this bar, so the other docks get the room.
+    The collapsed state is remembered in settings."""
+
+    def __init__(self, dock, settings, on_toggled=None):
+        super().__init__(dock)
+        self.dock = dock
+        self.settings = settings
+        self.on_toggled = on_toggled
+
+        # Hiding the dock's own widget would also cap the dock's width at
+        # this title bar's, so the content is hidden inside a wrapper that
+        # stays visible instead.
+        self.content = dock.widget()
+        wrapper = QtWidgets.QWidget()
+        wrapper_layout = QtWidgets.QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.addWidget(self.content)
+        dock.setWidget(wrapper)
+        self.settings_key = f"collapsed/{dock.windowTitle()}"
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        self.toggle_button = QtWidgets.QToolButton()
+        self.toggle_button.setAutoRaise(True)
+        self.toggle_button.setToolTip("Collapse or expand this panel")
+        self.toggle_button.clicked.connect(lambda: self.set_collapsed(not self.collapsed))
+        layout.addWidget(self.toggle_button)
+
+        title = QtWidgets.QLabel(dock.windowTitle())
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        layout.addWidget(title, 1)
+
+        float_button = QtWidgets.QToolButton()
+        float_button.setAutoRaise(True)
+        float_button.setIcon(
+            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_TitleBarNormalButton)
+        )
+        float_button.setToolTip("Undock or re-dock this panel")
+        float_button.clicked.connect(lambda: dock.setFloating(not dock.isFloating()))
+        layout.addWidget(float_button)
+
+        self.collapsed = False
+        self.set_collapsed(settings.value(self.settings_key, False, type=bool), notify=False)
+
+    def set_collapsed(self, collapsed, notify=True):
+        self.collapsed = collapsed
+        self.content.setVisible(not collapsed)
+        self.dock.setMaximumHeight(
+            self.sizeHint().height() if collapsed else QtWidgets.QWIDGETSIZE_MAX
+        )
+        self.toggle_button.setArrowType(
+            QtCore.Qt.ArrowType.RightArrow if collapsed else QtCore.Qt.ArrowType.DownArrow
+        )
+        self.settings.setValue(self.settings_key, collapsed)
+        if notify and self.on_toggled is not None:
+            self.on_toggled()
+
+    def mouseDoubleClickEvent(self, event):
+        self.set_collapsed(not self.collapsed)
+
+
 # ============================================================
 # Main window
 # ============================================================
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self, input_file=None):
+    def __init__(self, input_file=None, settings=None):
         super().__init__()
+        self.settings = settings or QtCore.QSettings("unviz", "union_viewer")
         self.setWindowTitle("Union Viewer")
         self.resize(1400, 900)
         self.colors = {}
@@ -1123,6 +1189,10 @@ class Viewer(QtWidgets.QMainWindow):
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
             self.geometry_dock,
         )
+        self.geometry_dock.setTitleBarWidget(
+            CollapsibleTitleBar(self.geometry_dock, self.settings, self.rebalance_docks)
+        )
+        QtCore.QTimer.singleShot(0, self.rebalance_docks)
 
         # ----------------------------------------------------
         # Signals
@@ -1152,8 +1222,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.update_mesher_capability_ui()
 
     def _add_dock(self, title):
-        """Create a left-docked QDockWidget titled `title` and return
-        (dock, layout) for the caller to populate."""
+        """Create a collapsible, left-docked QDockWidget titled `title` and
+        return (dock, layout) for the caller to populate."""
         dock = QtWidgets.QDockWidget(title, self)
         dock.setAllowedAreas(
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
@@ -1162,8 +1232,30 @@ class Viewer(QtWidgets.QMainWindow):
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
         dock.setWidget(widget)
+        dock.setTitleBarWidget(CollapsibleTitleBar(dock, self.settings, self.rebalance_docks))
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         return dock, layout
+
+    def rebalance_docks(self):
+        """Hand the height collapsed docks free up to the expanded ones:
+        each expanded dock gets its natural height and the Visible
+        Geometries dock takes whatever is left."""
+        docks = [
+            d for d in self.findChildren(QtWidgets.QDockWidget)
+            if d.isVisibleTo(self)
+            and not d.isFloating()
+            and self.dockWidgetArea(d) == QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
+        ]
+        if not docks:
+            return
+        sizes = [
+            d.titleBarWidget().sizeHint().height() if d.titleBarWidget().collapsed
+            else d.sizeHint().height()
+            for d in docks
+        ]
+        if self.geometry_dock in docks and not self.geometry_dock.titleBarWidget().collapsed:
+            sizes[docks.index(self.geometry_dock)] = self.height()
+        self.resizeDocks(docks, sizes, QtCore.Qt.Orientation.Vertical)
 
     # ========================================================
     # Open file dialog
