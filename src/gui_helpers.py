@@ -100,3 +100,32 @@ def assign_default_color(colors, key):
         colors[key] = DEFAULT_COLOR_CYCLE[index % len(DEFAULT_COLOR_CYCLE)]
         colors[_CYCLE_INDEX_KEY] = index + 1
     return colors[key]
+
+
+def component_color_key(name):
+    """Key into the shared colours dict for a McStas component, kept apart
+    from Union component and material keys."""
+    return f"comp:{name}"
+
+
+def clip_planes(clip):
+    """The viewer's clip settings as pygfx clipping planes. "Above" keeps
+    the side where the axis coordinate is greater than the position, like
+    brep.clip_component."""
+    if not clip["enable"]:
+        return []
+    normal = [0.0, 0.0, 0.0]
+    normal["XYZ".index(clip["axis"].upper())] = 1.0
+    position = float(clip["position"])
+    if clip["mode"] == "Above":
+        return [(*normal, -position)]
+    return [(*(-n for n in normal), position)]
+
+
+def parse_instrument_params(text):
+    """Split the "Instrument parameters" field into mcrun name=value args."""
+    params = text.replace(",", " ").split()
+    bad = [p for p in params if "=" not in p]
+    if bad:
+        raise ValueError(f"Expected name=value, got: {' '.join(bad)}")
+    return params

@@ -254,5 +254,34 @@ class TestMesherCapabilities(unittest.TestCase):
                 self.assertTrue(MESHER_CAPABILITIES[mesher]["clip"])
 
 
+class TraceHelpersTest(unittest.TestCase):
+    def test_component_color_key_does_not_collide_with_union_names(self):
+        self.assertNotEqual(gui_helpers.component_color_key("box"), "box")
+
+    def test_clip_planes_keep_the_same_side_as_brep(self):
+        # pygfx keeps points where a*x + b*y + c*z + d >= 0.
+        clip = {"enable": True, "axis": "Z", "mode": "Above", "position": 2.0}
+        (_, _, c, d), = gui_helpers.clip_planes(clip)
+        self.assertGreater(c * 3.0 + d, 0)
+        self.assertLess(c * 1.0 + d, 0)
+        clip["mode"] = "Below"
+        (_, _, c, d), = gui_helpers.clip_planes(clip)
+        self.assertGreater(c * 1.0 + d, 0)
+        self.assertLess(c * 3.0 + d, 0)
+
+    def test_clip_disabled_has_no_planes(self):
+        clip = {"enable": False, "axis": "X", "mode": "Above", "position": 0}
+        self.assertEqual(gui_helpers.clip_planes(clip), [])
+
+    def test_parse_instrument_params(self):
+        self.assertEqual(
+            gui_helpers.parse_instrument_params(" l_min=1, l_max=5 "),
+            ["l_min=1", "l_max=5"],
+        )
+        self.assertEqual(gui_helpers.parse_instrument_params(""), [])
+        with self.assertRaises(ValueError):
+            gui_helpers.parse_instrument_params("l_min")
+
+
 if __name__ == "__main__":
     unittest.main()

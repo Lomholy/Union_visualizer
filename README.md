@@ -14,6 +14,10 @@ The second is to use the union_viewer.py script to launch an interactive interfa
 
 And see your union environment become a CAD model!
 
+#### The rest of the instrument
+
+With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file. Parameters without a default can be given in the "Instrument parameters" field as `name=value` pairs.
+
 
 ---
 ### Dependencies:
