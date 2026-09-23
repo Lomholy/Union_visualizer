@@ -1,0 +1,147 @@
+    
+-----------------------------------------------------------
+
+Generating single GPU kernel or single CPU section layout: 
+
+-----------------------------------------------------------
+
+Generating GPU/CPU -DFUNNEL layout:
+Component master is NOACC, CPUONLY=1
+-> FUNNEL mode enabled, SPLIT within buffer.
+-> CPU section from component master
+-> GPU kernel from component stop
+
+-----------------------------------------------------------
+Using all default parameter values
+Instrument parameters for ODIN (simple_test.instr)
+INSTRUMENT:
+Instrument 'ODIN' (simple_test.instr)
+COMPONENT: "Origin"
+POS: 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                         Origin AT (0,0,0)
+COMPONENT: "src"
+POS: 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                            src AT (0,0,0)
+COMPONENT: "sample"
+POS: 0, 0, 10, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                         sample AT (0,0,10)
+COMPONENT: "right"
+POS: 0.2, 0, 10, 6.12323e-17, 1, 0, -1, 6.12323e-17, 0, 0, -0, 1
+Component                          right AT (0.2,0,10)
+COMPONENT: "left"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                           left AT (-0.2,0,10)
+COMPONENT: "init"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                           init AT (-0.2,0,10)
+COMPONENT: "non"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                            non AT (-0.2,0,10)
+COMPONENT: "mat"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                            mat AT (-0.2,0,10)
+COMPONENT: "box_left"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                       box_left AT (-0.2,0,10)
+COMPONENT: "box_lefttwo"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                    box_lefttwo AT (-0.2,0,10)
+COMPONENT: "master"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                         master AT (-0.2,0,10)
+COMPONENT: "stop"
+POS: -0.2, 0, 10, 1, 0, 0, -0, 6.12323e-17, 1, 0, -1, 6.12323e-17
+Component                           stop AT (-0.2,0,10)
+COMPONENT: "psd_det"
+POS: 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                        psd_det AT (0,0,11)
+[ODIN] Initialize
+Union_master component master initialized sucessfully
+MCDISPLAY: start
+MCDISPLAY: component Origin
+MCDISPLAY: component src
+MCDISPLAY: mcdiscircle('xy',0,0,0,0.1)
+MCDISPLAY: multiline(2,0,0,0,-0.0025,-0.00666667,1.11111)
+MCDISPLAY: multiline(2,-0.005,-0.0133333,2.22222,-0.0075,-0.02,3.33333)
+MCDISPLAY: multiline(2,-0.01,-0.0266667,4.44444,-0.0125,-0.0333333,5.55556)
+MCDISPLAY: multiline(2,-0.015,-0.04,6.66667,-0.0175,-0.0466667,7.77778)
+MCDISPLAY: multiline(2,-0.02,-0.0533333,8.88889,-0.0225,-0.06,10)
+MCDISPLAY: multiline(2,0,0,0,0.0025,-0.00666667,1.11111)
+MCDISPLAY: multiline(2,0.005,-0.0133333,2.22222,0.0075,-0.02,3.33333)
+MCDISPLAY: multiline(2,0.01,-0.0266667,4.44444,0.0125,-0.0333333,5.55556)
+MCDISPLAY: multiline(2,0.015,-0.04,6.66667,0.0175,-0.0466667,7.77778)
+MCDISPLAY: multiline(2,0.02,-0.0533333,8.88889,0.0225,-0.06,10)
+MCDISPLAY: multiline(2,0,0,0,0.0025,0.00666667,1.11111)
+MCDISPLAY: multiline(2,0.005,0.0133333,2.22222,0.0075,0.02,3.33333)
+MCDISPLAY: multiline(2,0.01,0.0266667,4.44444,0.0125,0.0333333,5.55556)
+MCDISPLAY: multiline(2,0.015,0.04,6.66667,0.0175,0.0466667,7.77778)
+MCDISPLAY: multiline(2,0.02,0.0533333,8.88889,0.0225,0.06,10)
+MCDISPLAY: multiline(2,0,0,0,-0.0025,0.00666667,1.11111)
+MCDISPLAY: multiline(2,-0.005,0.0133333,2.22222,-0.0075,0.02,3.33333)
+MCDISPLAY: multiline(2,-0.01,0.0266667,4.44444,-0.0125,0.0333333,5.55556)
+MCDISPLAY: multiline(2,-0.015,0.04,6.66667,-0.0175,0.0466667,7.77778)
+MCDISPLAY: multiline(2,-0.02,0.0533333,8.88889,-0.0225,0.06,10)
+MCDISPLAY: component sample
+MCDISPLAY: multiline(2,0,0,0,0.2,0,0)
+MCDISPLAY: multiline(2,0,0,0,0,0.2,0)
+MCDISPLAY: multiline(2,0,0,0,0,0,0.2)
+MCDISPLAY: mcdiscone(0.2, 0, 0, 0.01, 0.02, 1, 0, 0)
+MCDISPLAY: mcdiscone(0, 0.2, 0, 0.01, 0.02, 0, 1, 0)
+MCDISPLAY: mcdiscone(0, 0, 0.2, 0.01, 0.02, 0, 0, 1)
+MCDISPLAY: component right
+MCDISPLAY: multiline(2,0,0,0,0.2,0,0)
+MCDISPLAY: multiline(2,0,0,0,0,0.2,0)
+MCDISPLAY: multiline(2,0,0,0,0,0,0.2)
+MCDISPLAY: mcdiscone(0.2, 0, 0, 0.01, 0.02, 1, 0, 0)
+MCDISPLAY: mcdiscone(0, 0.2, 0, 0.01, 0.02, 0, 1, 0)
+MCDISPLAY: mcdiscone(0, 0, 0.2, 0.01, 0.02, 0, 0, 1)
+MCDISPLAY: component left
+MCDISPLAY: multiline(2,0,0,0,0.2,0,0)
+MCDISPLAY: multiline(2,0,0,0,0,0.2,0)
+MCDISPLAY: multiline(2,0,0,0,0,0,0.2)
+MCDISPLAY: mcdiscone(0.2, 0, 0, 0.01, 0.02, 1, 0, 0)
+MCDISPLAY: mcdiscone(0, 0.2, 0, 0.01, 0.02, 0, 1, 0)
+MCDISPLAY: mcdiscone(0, 0, 0.2, 0.01, 0.02, 0, 0, 1)
+MCDISPLAY: component master
+MCDISPLAY: multiline(2,-0.3,-0.3,-0.3,0.3,-0.3,-0.3)
+MCDISPLAY: multiline(2,0.3,-0.3,-0.3,0.3,0.3,-0.3)
+MCDISPLAY: multiline(2,0.3,0.3,-0.3,-0.3,0.3,-0.3)
+MCDISPLAY: multiline(2,-0.3,0.3,-0.3,-0.3,-0.3,-0.3)
+MCDISPLAY: multiline(2,-0.3,-0.3,0.3,0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,0.3,-0.3,0.3,0.3,0.3,0.3)
+MCDISPLAY: multiline(2,0.3,0.3,0.3,-0.3,0.3,0.3)
+MCDISPLAY: multiline(2,-0.3,0.3,0.3,-0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,-0.3,-0.3,-0.3,-0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,0.3,-0.3,-0.3,0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,0.3,0.3,-0.3,0.3,0.3,0.3)
+MCDISPLAY: multiline(2,-0.3,0.3,-0.3,-0.3,0.3,0.3)
+MCDISPLAY: multiline(2,-0.35,-0.25,-0.25,-0.3,-0.25,-0.25)
+MCDISPLAY: multiline(2,-0.3,-0.25,-0.25,0.3,-0.25,-0.25)
+MCDISPLAY: multiline(2,0.3,-0.25,-0.25,0.35,-0.25,-0.25)
+MCDISPLAY: multiline(2,0.35,-0.25,-0.25,0.35,0.25,-0.25)
+MCDISPLAY: multiline(2,0.35,0.25,-0.25,0.3,0.25,-0.25)
+MCDISPLAY: multiline(2,0.3,0.25,-0.25,-0.3,0.25,-0.25)
+MCDISPLAY: multiline(2,-0.3,0.25,-0.25,-0.35,0.25,-0.25)
+MCDISPLAY: multiline(2,-0.35,0.25,-0.25,-0.35,-0.25,-0.25)
+MCDISPLAY: multiline(2,-0.35,-0.25,0.25,-0.3,-0.25,0.25)
+MCDISPLAY: multiline(2,-0.3,-0.25,0.25,0.3,-0.25,0.25)
+MCDISPLAY: multiline(2,0.3,-0.25,0.25,0.35,-0.25,0.25)
+MCDISPLAY: multiline(2,0.35,-0.25,0.25,0.35,0.25,0.25)
+MCDISPLAY: multiline(2,0.35,0.25,0.25,0.3,0.25,0.25)
+MCDISPLAY: multiline(2,0.3,0.25,0.25,-0.3,0.25,0.25)
+MCDISPLAY: multiline(2,-0.3,0.25,0.25,-0.35,0.25,0.25)
+MCDISPLAY: multiline(2,-0.35,0.25,0.25,-0.35,-0.25,0.25)
+MCDISPLAY: multiline(2,-0.35,-0.25,-0.25,-0.35,-0.25,0.25)
+MCDISPLAY: multiline(2,0.35,-0.25,-0.25,0.35,-0.25,0.25)
+MCDISPLAY: multiline(2,0.35,0.25,-0.25,0.35,0.25,0.25)
+MCDISPLAY: multiline(2,-0.35,0.25,-0.25,-0.35,0.25,0.25)
+MCDISPLAY: component psd_det
+MCDISPLAY: multiline(5,-0.5,-0.5,0,0.5,-0.5,0,0.5,0.5,0,-0.5,0.5,0,-0.5,-0.5,0)
+MCDISPLAY: end
+INSTRUMENT END:
+*** TRACE end *** 
+
+Save [ODIN]
+Detector: psd_det_I=0 psd_det_ERR=0 psd_det_N=0 "psd_det.dat"
+
+Finally [ODIN: .]. Time: 497273 [h] 

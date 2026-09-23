@@ -1,7 +1,12 @@
 """Display-independent helpers for the union_viewer GUI: material name
 normalisation/grouping, vacuum detection, and default colour assignment."""
 
+import importlib.util
+
+import numpy as np
 import trimesh
+
+from clipping import clip_plane
 
 
 def normalize_material_string(material_string):
@@ -100,3 +105,73 @@ def assign_default_color(colors, key):
         colors[key] = DEFAULT_COLOR_CYCLE[index % len(DEFAULT_COLOR_CYCLE)]
         colors[_CYCLE_INDEX_KEY] = index + 1
     return colors[key]
+
+
+LABEL_WRAP_WIDTH = 18
+
+
+def wrap_label(text, width=LABEL_WRAP_WIDTH):
+    """text broken onto lines of at most width characters, for panel rows.
+    McStas names rarely contain spaces, so a line preferably ends just
+    after a separator (_ - . / or space) and is cut mid-word only when it
+    has none."""
+    lines = []
+    while len(text) > width:
+        cut = max(text.rfind(sep, 1, width) for sep in " _-./") + 1
+        if cut <= 1:
+            cut = width
+        lines.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    lines.append(text)
+    return "\n".join(lines)
+
+
+def component_color_key(name):
+    """Key into the shared colours dict for a McStas component, kept apart
+    from Union component and material keys."""
+    return f"comp:{name}"
+
+
+def clip_planes(clip):
+    """The viewer's clip settings as pygfx clipping planes (pygfx keeps
+    a*x + b*y + c*z + d >= 0), cutting the same side as the meshers."""
+    if not clip["enable"]:
+        return []
+    normal, point = clip_plane(clip)
+    return [(*(float(n) for n in normal), -float(normal @ point))]
+
+
+def instrument_param_args(param_values):
+    """mcrun name=value args for the parameters given a value; the rest
+    keep the instrument's defaults."""
+    return [f"{name}={text.strip()}" for name, text in param_values.items() if text.strip()]
+
+
+def _can_cap_slices():
+    """trimesh can only cap a cut mesh with shapely and mapbox_earcut."""
+    try:
+        return all(importlib.util.find_spec(m) for m in ("shapely", "mapbox_earcut"))
+    except (ImportError, ValueError):
+        return False
+
+
+def clip_mesh(mesh, clip):
+    """mesh cut by the viewer's clip plane, keeping the same side as the
+    view. The cut is capped when mesh is closed and trimesh's capping
+    dependencies are installed, and left open otherwise. None if nothing
+    is left."""
+    if not clip["enable"]:
+        return mesh
+    normal, origin = clip_plane(clip)
+    if mesh.is_watertight and _can_cap_slices():
+        try:
+            clipped = trimesh.intersections.slice_mesh_plane(mesh, normal, origin, cap=True)
+            return clipped if clipped is not None and len(clipped.faces) else None
+        except Exception as e:
+            print(f"Warning: could not cap the clipped mesh ({e}); exporting it open.")
+    vertices, faces = trimesh.intersections.slice_faces_plane(
+        mesh.vertices, mesh.faces, normal, origin
+    )[:2]
+    if len(faces) == 0:
+        return None
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)

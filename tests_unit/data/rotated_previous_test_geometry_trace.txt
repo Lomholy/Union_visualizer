@@ -1,0 +1,83 @@
+    
+-----------------------------------------------------------
+
+Generating single GPU kernel or single CPU section layout: 
+
+-----------------------------------------------------------
+
+Generating GPU/CPU -DFUNNEL layout:
+Component master is NOACC, CPUONLY=1
+-> FUNNEL mode enabled, SPLIT within buffer.
+-> CPU section from component master
+-> GPU kernel from component stop
+
+-----------------------------------------------------------
+Using all default parameter values
+Instrument parameters for ROTATED_PREVIOUS_TEST (rotated_previous_test.instr)
+INSTRUMENT:
+Instrument 'ROTATED_PREVIOUS_TEST' (rotated_previous_test.instr)
+COMPONENT: "Origin"
+POS: 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                         Origin AT (0,0,0)
+COMPONENT: "sample"
+POS: 0, 0, 10, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                         sample AT (0,0,10)
+COMPONENT: "spacer"
+POS: 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                         spacer AT (0,0,11)
+COMPONENT: "init"
+POS: 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                           init AT (0,0,11)
+COMPONENT: "non"
+POS: 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                            non AT (0,0,11)
+COMPONENT: "mat"
+POS: 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 1
+Component                            mat AT (0,0,11)
+COMPONENT: "box"
+POS: 0, 0, 10.2, 0.707107, 0, -0.707107, -0, 1, 0, 0.707107, -0, 0.707107
+Component                            box AT (0,0,10.2)
+COMPONENT: "master"
+POS: 0, 0, 10.2, 0.707107, 0, -0.707107, -0, 1, 0, 0.707107, -0, 0.707107
+Component                         master AT (0,0,10.2)
+COMPONENT: "stop"
+POS: 0, 0, 10.2, 0.707107, 0, -0.707107, -0, 1, 0, 0.707107, -0, 0.707107
+Component                           stop AT (0,0,10.2)
+[ROTATED_PREVIOUS_TEST] Initialize
+Union_master component master initialized sucessfully
+MCDISPLAY: start
+MCDISPLAY: component Origin
+MCDISPLAY: component sample
+MCDISPLAY: multiline(2,0,0,0,0.2,0,0)
+MCDISPLAY: multiline(2,0,0,0,0,0.2,0)
+MCDISPLAY: multiline(2,0,0,0,0,0,0.2)
+MCDISPLAY: mcdiscone(0.2, 0, 0, 0.01, 0.02, 1, 0, 0)
+MCDISPLAY: mcdiscone(0, 0.2, 0, 0.01, 0.02, 0, 1, 0)
+MCDISPLAY: mcdiscone(0, 0, 0.2, 0.01, 0.02, 0, 0, 1)
+MCDISPLAY: component spacer
+MCDISPLAY: multiline(2,0,0,0,0.2,0,0)
+MCDISPLAY: multiline(2,0,0,0,0,0.2,0)
+MCDISPLAY: multiline(2,0,0,0,0,0,0.2)
+MCDISPLAY: mcdiscone(0.2, 0, 0, 0.01, 0.02, 1, 0, 0)
+MCDISPLAY: mcdiscone(0, 0.2, 0, 0.01, 0.02, 0, 1, 0)
+MCDISPLAY: mcdiscone(0, 0, 0.2, 0.01, 0.02, 0, 0, 1)
+MCDISPLAY: component master
+MCDISPLAY: multiline(2,-0.3,-0.3,-0.3,0.3,-0.3,-0.3)
+MCDISPLAY: multiline(2,0.3,-0.3,-0.3,0.3,0.3,-0.3)
+MCDISPLAY: multiline(2,0.3,0.3,-0.3,-0.3,0.3,-0.3)
+MCDISPLAY: multiline(2,-0.3,0.3,-0.3,-0.3,-0.3,-0.3)
+MCDISPLAY: multiline(2,-0.3,-0.3,0.3,0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,0.3,-0.3,0.3,0.3,0.3,0.3)
+MCDISPLAY: multiline(2,0.3,0.3,0.3,-0.3,0.3,0.3)
+MCDISPLAY: multiline(2,-0.3,0.3,0.3,-0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,-0.3,-0.3,-0.3,-0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,0.3,-0.3,-0.3,0.3,-0.3,0.3)
+MCDISPLAY: multiline(2,0.3,0.3,-0.3,0.3,0.3,0.3)
+MCDISPLAY: multiline(2,-0.3,0.3,-0.3,-0.3,0.3,0.3)
+MCDISPLAY: end
+INSTRUMENT END:
+*** TRACE end *** 
+
+Save [ROTATED_PREVIOUS_TEST]
+
+Finally [ROTATED_PREVIOUS_TEST: .]. Time: 497273 [h] 

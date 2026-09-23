@@ -9,12 +9,23 @@ import pygfx as gfx
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
-from preprocess import preprocess
+from preprocess import preprocess, instrument_parameters
+from clipping import resolve_clip_frame
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
 from brep import build_many_brep_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
-from gui_helpers import group_meshes_by_material, is_vacuum_material, assign_default_color
+from gui_helpers import (
+    group_meshes_by_material,
+    is_vacuum_material,
+    assign_default_color,
+    component_color_key,
+    clip_planes,
+    instrument_param_args,
+    clip_mesh,
+    wrap_label,
+)
+from mcstas_trace import trace_instrument
 import argparse
 
 # The meshers offered in the dock, in display order.
@@ -81,6 +92,7 @@ def compute_mesh_data(
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
     force_pygen=False,
+    param_values=None,
 ):
     """Everything generate_group() needs to do that doesn't touch pygfx/Qt:
     preprocessing, SDF/BREP mesh building (with dependency-based incremental
@@ -93,7 +105,9 @@ def compute_mesh_data(
         input_file,
         verbose=False,
         force_pygen=force_pygen,
+        param_values=param_values,
     )
+    clip = resolve_clip_frame(clip, world_matrices)
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     # The "brep" mesher never touches sdfs/final_sdfs, so skip building them.
     if mesher == "brep":
@@ -176,7 +190,11 @@ def compute_mesh_data(
             for name in render_meshes
         }
 
-    return (render_meshes, geometry_is_vacuum, meshes, dependencies)
+    instrument_info = {
+        "parameters": instrument_parameters(instr),
+        "world_matrices": {name: M.tolist() for name, M in world_matrices.items()},
+    }
+    return (render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info)
 
 
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
@@ -207,6 +225,53 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     return group
 
 
+# The viewer clips Union meshes with pygfx clipping planes like everything
+# else, so its meshers never cut and a clip change never remeshes.
+NO_CLIP = {"enable": False, "axis": "X", "mode": "Above", "position": 0.0}
+
+
+def compute_trace_data(input_file, force_pygen, params):
+    """Run input_file through mcrun --trace. Worker-process side of
+    TraceWorker, like compute_mesh_data for MeshBuildWorker."""
+    return trace_instrument(input_file, params=params, force_pygen=force_pygen)
+
+
+def build_component_group(components, colors):
+    """pygfx objects for every McStas component: one Line for all of its
+    MCDISPLAY lines and one translucent Mesh for all of its solids."""
+    group = gfx.Group()
+    group.components = components
+    group.component_objects = {}
+    group.component_is_arm = {}
+    for name, comp in components.items():
+        color = assign_default_color(colors, component_color_key(name))
+        comp_group = gfx.Group()
+        if len(comp.segments):
+            comp_group.add(
+                gfx.Line(
+                    gfx.Geometry(positions=comp.segments.reshape(-1, 3).astype(np.float32)),
+                    gfx.LineSegmentMaterial(thickness=1.5, color=color),
+                )
+            )
+        if comp.solid is not None:
+            comp_group.add(
+                gfx.Mesh(
+                    gfx.geometry_from_trimesh(comp.solid),
+                    gfx.MeshStandardMaterial(
+                        color=color,
+                        opacity=0.5,
+                        alpha_mode="blend",
+                        side="both",
+                        roughness=0.8,
+                    ),
+                )
+            )
+        group.add(comp_group)
+        group.component_objects[name] = comp_group
+        group.component_is_arm[name] = comp.is_arm
+    return group
+
+
 def generate_group(
     input_file,
     clip,
@@ -220,8 +285,9 @@ def generate_group(
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
     force_pygen=False,
+    param_values=None,
 ):
-    render_meshes, geometry_is_vacuum, meshes, dependencies = compute_mesh_data(
+    render_meshes, geometry_is_vacuum, meshes, dependencies, _ = compute_mesh_data(
         input_file,
         clip,
         meshes=meshes,
@@ -233,6 +299,7 @@ def generate_group(
         group_by_material=group_by_material,
         deflection=deflection,
         force_pygen=force_pygen,
+        param_values=param_values,
     )
     group = build_gfx_group(render_meshes, geometry_is_vacuum, colors)
     return (group, meshes, dependencies)
@@ -350,7 +417,7 @@ class MeshBuildWorker(QtCore.QObject):
     thread.
     """
 
-    finished = QtCore.Signal(object, object, object)
+    finished = QtCore.Signal(object, object, object, object)
     failed = QtCore.Signal(str)
 
     def __init__(
@@ -367,6 +434,7 @@ class MeshBuildWorker(QtCore.QObject):
         group_by_material,
         deflection,
         force_pygen,
+        param_values,
     ):
         super().__init__()
         self.process_pool = process_pool
@@ -381,6 +449,7 @@ class MeshBuildWorker(QtCore.QObject):
         self.group_by_material = group_by_material
         self.deflection = deflection
         self.force_pygen = force_pygen
+        self.param_values = param_values
 
     def run(self):
         try:
@@ -396,13 +465,115 @@ class MeshBuildWorker(QtCore.QObject):
                 group_by_material=self.group_by_material,
                 deflection=self.deflection,
                 force_pygen=self.force_pygen,
+                param_values=self.param_values,
             )
-            render_meshes, geometry_is_vacuum, meshes, dependencies = future.result()
+            render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info = (
+                future.result()
+            )
             group = build_gfx_group(render_meshes, geometry_is_vacuum, self.colors)
         except Exception:
             self.failed.emit(traceback.format_exc())
             return
-        self.finished.emit(group, meshes, dependencies)
+        self.finished.emit(group, meshes, dependencies, instrument_info)
+
+
+class TraceWorker(QtCore.QObject):
+    """Runs the instrument through mcrun --trace off the GUI thread. Parsing
+    the trace is pure Python, so like MeshBuildWorker it runs in a worker
+    process rather than only on this QThread."""
+
+    finished = QtCore.Signal(object, float)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, process_pool, input_file, force_pygen, params, colors):
+        super().__init__()
+        self.process_pool = process_pool
+        self.input_file = input_file
+        self.force_pygen = force_pygen
+        self.params = params
+        self.colors = colors
+
+    def run(self):
+        start = time.time()
+        try:
+            components = self.process_pool.submit(
+                compute_trace_data, self.input_file, self.force_pygen, self.params
+            ).result()
+            group = build_component_group(components, self.colors)
+        except Exception as e:
+            traceback.print_exc()
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        self.finished.emit(group, time.time() - start)
+
+
+class CollapsibleTitleBar(QtWidgets.QWidget):
+    """Dock title bar whose arrow (or a double-click on the title)
+    collapses the dock to just this bar, so the other docks get the room.
+    A dock starts as collapsed_by_default until the user toggles it; after
+    that, their choice is remembered in settings."""
+
+    def __init__(self, dock, settings, on_toggled=None, collapsed_by_default=True):
+        super().__init__(dock)
+        self.dock = dock
+        self.settings = settings
+        self.on_toggled = on_toggled
+
+        # Hiding the dock's own widget would also cap the dock's width at
+        # this title bar's, so the content is hidden inside a wrapper that
+        # stays visible instead.
+        self.content = dock.widget()
+        wrapper = QtWidgets.QWidget()
+        wrapper_layout = QtWidgets.QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.addWidget(self.content)
+        dock.setWidget(wrapper)
+        self.settings_key = f"panel_collapsed/{dock.windowTitle()}"
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        self.toggle_button = QtWidgets.QToolButton()
+        self.toggle_button.setAutoRaise(True)
+        self.toggle_button.setToolTip("Collapse or expand this panel")
+        self.toggle_button.clicked.connect(lambda: self.set_collapsed(not self.collapsed))
+        layout.addWidget(self.toggle_button)
+
+        title = QtWidgets.QLabel(dock.windowTitle())
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        layout.addWidget(title, 1)
+
+        float_button = QtWidgets.QToolButton()
+        float_button.setAutoRaise(True)
+        float_button.setIcon(
+            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_TitleBarNormalButton)
+        )
+        float_button.setToolTip("Undock or re-dock this panel")
+        float_button.clicked.connect(lambda: dock.setFloating(not dock.isFloating()))
+        layout.addWidget(float_button)
+
+        self.collapsed = False
+        self.set_collapsed(
+            settings.value(self.settings_key, collapsed_by_default, type=bool), notify=False
+        )
+
+    def set_collapsed(self, collapsed, notify=True):
+        self.collapsed = collapsed
+        self.content.setVisible(not collapsed)
+        self.dock.setMaximumHeight(
+            self.sizeHint().height() if collapsed else QtWidgets.QWIDGETSIZE_MAX
+        )
+        self.toggle_button.setArrowType(
+            QtCore.Qt.ArrowType.RightArrow if collapsed else QtCore.Qt.ArrowType.DownArrow
+        )
+        if notify:
+            self.settings.setValue(self.settings_key, collapsed)
+            if self.on_toggled is not None:
+                self.on_toggled()
+
+    def mouseDoubleClickEvent(self, event):
+        self.set_collapsed(not self.collapsed)
 
 
 # ============================================================
@@ -411,8 +582,9 @@ class MeshBuildWorker(QtCore.QObject):
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self, input_file=None):
+    def __init__(self, input_file=None, settings=None):
         super().__init__()
+        self.settings = settings or QtCore.QSettings("unviz", "union_viewer")
         self.setWindowTitle("Union Viewer")
         self.resize(1400, 900)
         self.colors = {}
@@ -437,6 +609,15 @@ class Viewer(QtWidgets.QMainWindow):
         self._reload_thread = None
         self._reload_worker = None
         self._pending_fit_camera = False
+
+        # A separate pool, so a slow mcrun compile never delays the meshes
+        # and a mesher/clip change never reruns McStas.
+        self._trace_process_pool = ProcessPoolExecutor(max_workers=1)
+        self._trace_busy = False
+        self._trace_pending = False
+        self._trace_thread = None
+        self._trace_worker = None
+        self.trace_group = None
 
         # ----------------------------------------------------
         # Render widget
@@ -567,7 +748,9 @@ class Viewer(QtWidgets.QMainWindow):
             "axis": self.clip_axis,
             "mode": self.clip_mode,
             "position": self.clip_position,
+            "frame": None,
         }
+        self.world_matrices = {}
 
         # Docks are added in this order (Settings, Mesher options, Clipping,
         # Visible geometries) so they stack top-to-bottom in the left panel.
@@ -576,7 +759,7 @@ class Viewer(QtWidgets.QMainWindow):
         # Settings dock
         # ----------------------------------------------------
 
-        settings_dock, settings_layout = self._add_dock("Settings")
+        settings_dock, settings_layout = self._add_dock("Settings", collapsed=False)
 
         self.open_file_button = QtWidgets.QPushButton("Open File...")
         self.open_file_button.setToolTip("Open a McStas instrument (shortcut: Ctrl+O)")
@@ -612,6 +795,25 @@ class Viewer(QtWidgets.QMainWindow):
         )
         settings_layout.addWidget(self.pygen_checkbox)
 
+        self.components_checkbox = QtWidgets.QCheckBox("Show McStas components")
+        self.components_checkbox.setChecked(True)
+        self.components_checkbox.setToolTip(
+            "Draw every non-Union component the way McStas's own MCDISPLAY "
+            "draws it (no priority cutting). Compiles and runs the "
+            "instrument with mcrun --trace, so it needs a working McStas "
+            "install and compiler."
+        )
+        settings_layout.addWidget(self.components_checkbox)
+
+        self.arms_checkbox = QtWidgets.QCheckBox("Show Arms")
+        self.arms_checkbox.setChecked(False)
+        self.arms_checkbox.setToolTip("Arms only mark coordinate frames.")
+        settings_layout.addWidget(self.arms_checkbox)
+
+        self.trace_status_label = QtWidgets.QLabel("")
+        self.trace_status_label.setWordWrap(True)
+        settings_layout.addWidget(self.trace_status_label)
+
         self.reset_view_button = QtWidgets.QPushButton("Reset view")
         self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
         self.reset_view_button.clicked.connect(self.reset_view)
@@ -619,15 +821,43 @@ class Viewer(QtWidgets.QMainWindow):
         self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
         self.reset_view_shortcut.activated.connect(self.reset_view)
 
+        self.fit_instrument_button = QtWidgets.QPushButton("Fit whole instrument")
+        self.fit_instrument_button.setToolTip(
+            "Fit the camera to every McStas component, not just the Union geometry."
+        )
+        self.fit_instrument_button.clicked.connect(self.fit_whole_instrument)
+        settings_layout.addWidget(self.fit_instrument_button)
+
         self.export_stl_button = QtWidgets.QPushButton("Export STL...")
         self.export_stl_button.setToolTip(
-            "Export the currently visible meshes as a single .stl file."
+            "Export the visible Union meshes and McStas components as a "
+            "single .stl file, cut by the clipping plane if enabled. "
+            "McStas lines are exported as thin tubes."
         )
         self.export_stl_button.clicked.connect(self.export_stl)
         settings_layout.addWidget(self.export_stl_button)
 
         settings_layout.addStretch()
         settings_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
+        # Instrument parameters dock
+        # ----------------------------------------------------
+
+        params_dock, params_layout = self._add_dock("Instrument Parameters")
+        self.param_values = {}
+        self.param_edits = {}
+        self.param_names = None
+        self.params_form = QtWidgets.QFormLayout()
+        params_layout.addLayout(self.params_form)
+        self.params_empty_label = QtWidgets.QLabel("No instrument loaded.")
+        self.params_empty_label.setStyleSheet("color: gray;")
+        params_layout.addWidget(self.params_empty_label)
+        params_layout.addStretch()
+        params_dock.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Preferred,
             QtWidgets.QSizePolicy.Policy.Maximum,
         )
@@ -697,6 +927,25 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip_checkbox = QtWidgets.QCheckBox("Enable clipping")
         clipping_layout.addWidget(self.clip_checkbox)
 
+        frame_layout = QtWidgets.QHBoxLayout()
+        frame_layout.addWidget(QtWidgets.QLabel("Coordinate system"))
+        self.clip_frame_combo = QtWidgets.QComboBox()
+        # A long component name would otherwise widen the combo box (and
+        # with it the whole left-hand column) to fit it - cap the box at a
+        # fixed width instead and let Qt elide text that doesn't fit; the
+        # full name is still available as each item's tooltip.
+        self.clip_frame_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.clip_frame_combo.setMinimumContentsLength(12)
+        self.clip_frame_combo.addItem("World", None)
+        self.clip_frame_combo.setToolTip(
+            "Axis and position are taken in this component's own coordinate "
+            "system (its AT/ROTATED frame), e.g. the sample's Arm."
+        )
+        frame_layout.addWidget(self.clip_frame_combo)
+        clipping_layout.addLayout(frame_layout)
+
         axis_layout = QtWidgets.QHBoxLayout()
         axis_layout.addWidget(QtWidgets.QLabel("Axis"))
         self.axis_combo = QtWidgets.QComboBox()
@@ -758,9 +1007,20 @@ class Viewer(QtWidgets.QMainWindow):
         show_hide_layout.addWidget(self.hide_all_button)
         geometry_dock_layout.addLayout(show_hide_layout)
 
+        self.component_checkboxes = {}
+        self.component_color_buttons = {}
+        self.component_visibility = {}
+
         self.geometry_widget = QtWidgets.QWidget()
-        self.geometry_layout = QtWidgets.QVBoxLayout(self.geometry_widget)
-        self.geometry_layout.addStretch()
+        panel_layout = QtWidgets.QVBoxLayout(self.geometry_widget)
+        self.geometry_layout = QtWidgets.QVBoxLayout()
+        panel_layout.addLayout(self.geometry_layout)
+        self.component_header = QtWidgets.QLabel("<b>McStas components</b>")
+        self.component_header.hide()
+        panel_layout.addWidget(self.component_header)
+        self.component_layout = QtWidgets.QVBoxLayout()
+        panel_layout.addLayout(self.component_layout)
+        panel_layout.addStretch()
 
         geometry_scroll = QtWidgets.QScrollArea()
         geometry_scroll.setWidgetResizable(True)
@@ -777,6 +1037,10 @@ class Viewer(QtWidgets.QMainWindow):
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
             self.geometry_dock,
         )
+        self.geometry_dock.setTitleBarWidget(
+            CollapsibleTitleBar(self.geometry_dock, self.settings, self.rebalance_docks)
+        )
+        QtCore.QTimer.singleShot(0, self.rebalance_docks)
 
         # ----------------------------------------------------
         # Signals
@@ -787,7 +1051,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
         self.mesher_box.currentIndexChanged.connect(self.on_mesher_changed)
         self.pygen_checkbox.stateChanged.connect(self.on_pygen_changed)
+        self.components_checkbox.stateChanged.connect(self.on_components_changed)
+        self.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         self.axis_combo.currentTextChanged.connect(self.on_clip_changed)
+        self.clip_frame_combo.currentIndexChanged.connect(self.on_clip_changed)
         self.mode_combo.currentTextChanged.connect(self.on_clip_changed)
         self.slice_val.valueChanged.connect(self.on_clip_changed)
         self.res_val.currentIndexChanged.connect(self.on_res_changed)
@@ -795,8 +1062,9 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.update_mesher_capability_ui()
 
-    def _add_dock(self, title):
-        """Create a left-docked QDockWidget titled `title` and return
+    def _add_dock(self, title, collapsed=True):
+        """Create a collapsible, left-docked QDockWidget titled `title`
+        (collapsed at first unless collapsed=False) and return
         (dock, layout) for the caller to populate."""
         dock = QtWidgets.QDockWidget(title, self)
         dock.setAllowedAreas(
@@ -806,8 +1074,32 @@ class Viewer(QtWidgets.QMainWindow):
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
         dock.setWidget(widget)
+        dock.setTitleBarWidget(
+            CollapsibleTitleBar(dock, self.settings, self.rebalance_docks, collapsed)
+        )
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         return dock, layout
+
+    def rebalance_docks(self):
+        """Hand the height collapsed docks free up to the expanded ones:
+        each expanded dock gets its natural height and the Visible
+        Geometries dock takes whatever is left."""
+        docks = [
+            d for d in self.findChildren(QtWidgets.QDockWidget)
+            if d.isVisibleTo(self)
+            and not d.isFloating()
+            and self.dockWidgetArea(d) == QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
+        ]
+        if not docks:
+            return
+        sizes = [
+            d.titleBarWidget().sizeHint().height() if d.titleBarWidget().collapsed
+            else d.sizeHint().height()
+            for d in docks
+        ]
+        if self.geometry_dock in docks and not self.geometry_dock.titleBarWidget().collapsed:
+            sizes[docks.index(self.geometry_dock)] = self.height()
+        self.resizeDocks(docks, sizes, QtCore.Qt.Orientation.Vertical)
 
     # ========================================================
     # Open file dialog
@@ -826,6 +1118,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.last_mtime = Path(filename).stat().st_mtime
         self._pending_fit_camera = True
         self.reload_meshes()
+        self.reload_trace()
 
     def apply_geometry_visibility(self):
         """Recompute mesh.visible for every row from the per-row checkbox
@@ -855,8 +1148,27 @@ class Viewer(QtWidgets.QMainWindow):
             while row.count():
                 self._clear_geometry_layout_item(row.takeAt(0))
 
+    def _add_panel_row(self, layout, name, visible, on_toggled, on_color, color):
+        row = QtWidgets.QHBoxLayout()
+
+        cb = QtWidgets.QCheckBox(wrap_label(name))
+        cb.setToolTip(name)
+        cb.setChecked(visible)
+        cb.toggled.connect(on_toggled)
+        row.addWidget(cb, 1)
+
+        color_button = QtWidgets.QPushButton()
+        color_button.setFixedSize(20, 20)
+        color_button.setToolTip(f"Change colour for '{name}'")
+        color_button.clicked.connect(lambda checked=False: on_color())
+        self._set_swatch_color(color_button, color)
+        row.addWidget(color_button)
+
+        layout.addLayout(row)
+        return cb, color_button
+
     def rebuild_geometry_panel(self):
-        while self.geometry_layout.count() > 1:
+        while self.geometry_layout.count():
             self._clear_geometry_layout_item(self.geometry_layout.takeAt(0))
 
         self.geometry_checkboxes.clear()
@@ -866,50 +1178,103 @@ class Viewer(QtWidgets.QMainWindow):
             return
 
         for name, mesh in self.current_group.geometry_meshes.items():
-            visible = self.geometry_visibility.get(name, True)
-
-            row = QtWidgets.QHBoxLayout()
-
-            cb = QtWidgets.QCheckBox(name)
-            cb.setChecked(visible)
-            cb.toggled.connect(
+            cb, color_button = self._add_panel_row(
+                self.geometry_layout,
+                name,
+                self.geometry_visibility.get(name, True),
                 lambda checked, n=name, m=mesh: self.on_geometry_visibility_changed(
                     n, m, checked
-                )
+                ),
+                lambda n=name: self.pick_color(n),
+                self.colors.get(name, "#b6b6b6"),
             )
-            row.addWidget(cb, 1)
-
-            color_button = QtWidgets.QPushButton()
-            color_button.setFixedSize(20, 20)
-            color_button.setToolTip(f"Change colour for '{name}'")
-            color_button.clicked.connect(
-                lambda checked=False, n=name: self.pick_color(n)
-            )
-            self._set_swatch_color(color_button, self.colors.get(name, "#b6b6b6"))
-            row.addWidget(color_button)
-
-            self.geometry_layout.insertLayout(
-                self.geometry_layout.count() - 1,
-                row,
-            )
-
             self.geometry_checkboxes[name] = cb
             self.geometry_color_buttons[name] = color_button
 
         self.on_geometry_filter_changed(self.geometry_filter.text())
 
+    def rebuild_component_panel(self):
+        while self.component_layout.count():
+            self._clear_geometry_layout_item(self.component_layout.takeAt(0))
+
+        self.component_checkboxes.clear()
+        self.component_color_buttons.clear()
+
+        names = [] if self.trace_group is None else list(self.trace_group.component_objects)
+        self.component_header.setVisible(bool(names) and self.components_checkbox.isChecked())
+        for name in names:
+            cb, color_button = self._add_panel_row(
+                self.component_layout,
+                name,
+                self.component_visibility.get(name, True),
+                lambda checked, n=name: self.on_component_visibility_changed(n, checked),
+                lambda n=name: self.pick_component_color(n),
+                self.colors.get(component_color_key(name), "#b6b6b6"),
+            )
+            self.component_checkboxes[name] = cb
+            self.component_color_buttons[name] = color_button
+
+        self.on_geometry_filter_changed(self.geometry_filter.text())
+
     def on_geometry_filter_changed(self, text):
         text = text.strip().lower()
-        for name, cb in self.geometry_checkboxes.items():
-            match = text in name.lower()
-            cb.setVisible(match)
-            button = self.geometry_color_buttons.get(name)
-            if button is not None:
-                button.setVisible(match)
+        show_components = self.components_checkbox.isChecked()
+        for checkboxes, buttons, section_visible in (
+            (self.geometry_checkboxes, self.geometry_color_buttons, True),
+            (self.component_checkboxes, self.component_color_buttons, show_components),
+        ):
+            for name, cb in checkboxes.items():
+                match = section_visible and text in name.lower()
+                cb.setVisible(match)
+                button = buttons.get(name)
+                if button is not None:
+                    button.setVisible(match)
 
     def set_all_geometry_visibility(self, visible):
         for cb in self.geometry_checkboxes.values():
             cb.setChecked(visible)
+        for cb in self.component_checkboxes.values():
+            cb.setChecked(visible)
+
+    def on_component_visibility_changed(self, name, checked):
+        self.component_visibility[name] = checked
+        self.apply_component_visibility()
+
+    def apply_component_visibility(self):
+        if self.trace_group is None:
+            return
+        self.trace_group.visible = self.components_checkbox.isChecked()
+        show_arms = self.arms_checkbox.isChecked()
+        for name, obj in self.trace_group.component_objects.items():
+            visible = self.component_visibility.get(name, True)
+            if self.trace_group.component_is_arm[name] and not show_arms:
+                visible = False
+            obj.visible = visible
+
+    def apply_clipping(self):
+        planes = clip_planes(self.resolved_clip())
+        for group in (self.current_group, self.trace_group):
+            if group is None:
+                continue
+            for obj in group.iter():
+                if getattr(obj, "material", None) is not None:
+                    obj.material.clipping_planes = planes
+
+    def pick_component_color(self, name):
+        if self.trace_group is None or name not in self.trace_group.component_objects:
+            return
+        key = component_color_key(name)
+        current = QtGui.QColor(self.colors.get(key, "#b6b6b6"))
+        color = QtWidgets.QColorDialog.getColor(current, self, f"Colour for '{name}'")
+        if not color.isValid():
+            return
+        hex_color = color.name()
+        self.colors[key] = hex_color
+        for obj in self.trace_group.component_objects[name].children:
+            obj.material.color = hex_color
+        button = self.component_color_buttons.get(name)
+        if button is not None:
+            self._set_swatch_color(button, hex_color)
 
     def _set_swatch_color(self, button, hex_color):
         button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
@@ -932,19 +1297,111 @@ class Viewer(QtWidgets.QMainWindow):
     # Export STL
     # ========================================================
 
+    def rebuild_params_form(self, parameters):
+        """One labelled field per instrument parameter, showing its default
+        as the placeholder. Values typed earlier are kept by name."""
+        names = [name for name, _, _ in parameters]
+        if names == self.param_names:
+            return
+        self.param_names = names
+        while self.params_form.rowCount():
+            self.params_form.removeRow(0)
+        self.param_edits = {}
+        self.param_values = {n: v for n, v in self.param_values.items() if n in names}
+        for name, param_type, default in parameters:
+            edit = QtWidgets.QLineEdit(self.param_values.get(name, ""))
+            edit.setPlaceholderText(default if default is not None else "required")
+            edit.setToolTip(
+                f"{param_type} {name}"
+                + (f" (default {default})" if default is not None else " (no default)")
+                + ". Leave empty to use the default."
+            )
+            edit.editingFinished.connect(
+                lambda n=name, e=edit: self.on_param_edited(n, e.text())
+            )
+            self.params_form.addRow(name, edit)
+            self.param_edits[name] = edit
+        self.params_empty_label.setText("This instrument has no parameters.")
+        self.params_empty_label.setVisible(not names)
+
+    def rebuild_clip_frame_combo(self):
+        names = list(self.world_matrices)
+        current = self.clip_frame_combo.currentData()
+        if names == [self.clip_frame_combo.itemData(i) for i in range(1, self.clip_frame_combo.count())]:
+            return
+        self.clip_frame_combo.blockSignals(True)
+        self.clip_frame_combo.clear()
+        self.clip_frame_combo.addItem("World", None)
+        for name in names:
+            self.clip_frame_combo.addItem(name, name)
+            self.clip_frame_combo.setItemData(
+                self.clip_frame_combo.count() - 1, name, QtCore.Qt.ItemDataRole.ToolTipRole
+            )
+        self.clip_frame_combo.setCurrentIndex(max(self.clip_frame_combo.findData(current), 0))
+        self.clip_frame_combo.blockSignals(False)
+        if self.clip_frame_combo.currentData() != current:
+            self.on_clip_changed()
+
+    def resolved_clip(self):
+        return resolve_clip_frame(self.clip, self.world_matrices)
+
+    def on_param_edited(self, name, text):
+        if self.param_values.get(name, "").strip() == text.strip():
+            return
+        self.param_values[name] = text.strip()
+        self.reload_meshes()
+        self.reload_trace()
+
+    def _export_parts(self):
+        """(Union meshes, McStas component meshes, names that failed) for
+        what is currently visible, each cut by the clip plane as shown."""
+        clip = self.resolved_clip()
+        failed = []
+
+        def clipped(name, mesh):
+            try:
+                return clip_mesh(mesh, clip)
+            except Exception:
+                traceback.print_exc()
+                failed.append(name)
+                return None
+
+        union_parts = []
+        if self.current_group is not None:
+            trimeshes = self.current_group.geometry_trimeshes
+            for key, obj in self.current_group.geometry_meshes.items():
+                if obj.visible and trimeshes.get(key) is not None:
+                    mesh = clipped(key, trimeshes[key])
+                    if mesh is not None:
+                        union_parts.append(mesh)
+        component_parts = []
+        if self.trace_group is not None and self.trace_group.visible:
+            for name, obj in self.trace_group.component_objects.items():
+                if not obj.visible:
+                    continue
+                mesh = self.trace_group.components[name].export_mesh()
+                if mesh is not None:
+                    mesh = clipped(name, mesh)
+                if mesh is not None:
+                    component_parts.append(mesh)
+        return union_parts, component_parts, failed
+
     def export_stl(self):
-        if self.current_group is None or not self.current_group.geometry_meshes:
+        if self.current_group is None and self.trace_group is None:
             QtWidgets.QMessageBox.warning(
                 self, "Export STL", "No geometry loaded to export."
             )
             return
 
-        trimeshes = self.current_group.geometry_trimeshes
-        parts = [
-            trimeshes[key]
-            for key, mesh in self.current_group.geometry_meshes.items()
-            if mesh.visible and trimeshes.get(key) is not None
-        ]
+        try:
+            union_parts, component_parts, failed = self._export_parts()
+        except Exception as e:
+            traceback.print_exc()
+            QtWidgets.QMessageBox.critical(
+                self, "Export STL", f"Failed to prepare the export:\n{e}"
+            )
+            return
+        parts = union_parts + component_parts
         if not parts:
             QtWidgets.QMessageBox.warning(
                 self, "Export STL", "No visible geometry to export."
@@ -970,7 +1427,11 @@ class Viewer(QtWidgets.QMainWindow):
             return
 
         QtWidgets.QMessageBox.information(
-            self, "Export STL", f"Exported {len(parts)} mesh(es) to:\n{filename}"
+            self,
+            "Export STL",
+            f"Exported {len(union_parts)} Union mesh(es) and "
+            f"{len(component_parts)} McStas component(s) to:\n{filename}"
+            + (f"\n\nLeft out (could not be clipped): {', '.join(failed)}" if failed else ""),
         )
 
     # ========================================================
@@ -1000,7 +1461,7 @@ class Viewer(QtWidgets.QMainWindow):
         worker = MeshBuildWorker(
             self._mesh_process_pool,
             self.input_file,
-            dict(self.clip),
+            NO_CLIP,
             self.colors,
             self.meshes,
             self.dependencies,
@@ -1010,6 +1471,7 @@ class Viewer(QtWidgets.QMainWindow):
             self.material_group_checkbox.isChecked(),
             self.deflection_val.value(),
             self.pygen_checkbox.isChecked(),
+            dict(self.param_values),
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1026,7 +1488,12 @@ class Viewer(QtWidgets.QMainWindow):
         self._reload_worker = worker
         thread.start()
 
-    def _on_reload_finished(self, new_group, meshes, dependencies):
+    def _on_reload_finished(self, new_group, meshes, dependencies, instrument_info):
+        self.rebuild_params_form(instrument_info["parameters"])
+        self.world_matrices = {
+            name: np.array(M) for name, M in instrument_info["world_matrices"].items()
+        }
+        self.rebuild_clip_frame_combo()
         if self.current_group is not None:
             self.scene.remove(self.current_group)
         self.dependencies = dependencies
@@ -1035,6 +1502,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.current_group = new_group
 
         self.scene.add(self.current_group)
+        self.apply_clipping()
 
         self.rebuild_geometry_panel()
         self.apply_geometry_visibility()
@@ -1064,6 +1532,97 @@ class Viewer(QtWidgets.QMainWindow):
             self._reload_pending = False
             self._reload_pending_force = False
             self.reload_meshes(force_reload=pending_force)
+
+    # ========================================================
+    # McStas trace (components)
+    # ========================================================
+
+    def trace_enabled(self):
+        return self.components_checkbox.isChecked()
+
+    def reload_trace(self):
+        if self.input_file is None or not self.trace_enabled():
+            return
+        if self._trace_busy:
+            self._trace_pending = True
+            return
+        params = instrument_param_args(self.param_values)
+
+        self._trace_busy = True
+        self._trace_pending = False
+        self._set_trace_status("Running mcrun --trace...")
+
+        thread = QtCore.QThread(self)
+        worker = TraceWorker(
+            self._trace_process_pool,
+            self.input_file,
+            self.pygen_checkbox.isChecked(),
+            params,
+            self.colors,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_trace_finished)
+        worker.failed.connect(self._on_trace_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_trace_thread_finished)
+
+        self._trace_thread = thread
+        self._trace_worker = worker
+        thread.start()
+
+    def _on_trace_finished(self, group, elapsed):
+        if self.trace_group is not None:
+            self.scene.remove(self.trace_group)
+        self.trace_group = group
+        self.scene.add(group)
+        self.rebuild_component_panel()
+        self.apply_component_visibility()
+        self.apply_clipping()
+        self._set_trace_status(
+            f"{len(group.component_objects)} McStas components ({elapsed:.1f} s)"
+        )
+
+    def _on_trace_failed(self, error_text):
+        print("McStas trace failed:")
+        print(error_text)
+        self._set_trace_status(error_text, error=True)
+
+    def _on_trace_thread_finished(self):
+        self._trace_thread = None
+        self._trace_worker = None
+        self._trace_busy = False
+        if self._trace_pending:
+            self._trace_pending = False
+            self.reload_trace()
+
+    def _set_trace_status(self, text, error=False):
+        if error:
+            text = "\n".join(text.strip().splitlines()[-6:])
+        self.trace_status_label.setStyleSheet(
+            "color: #c0392b;" if error else "color: gray;"
+        )
+        self.trace_status_label.setText(text)
+
+    def on_components_changed(self):
+        self.component_header.setVisible(
+            self.components_checkbox.isChecked() and bool(self.component_checkboxes)
+        )
+        self.on_geometry_filter_changed(self.geometry_filter.text())
+        if self.trace_group is None:
+            self.reload_trace()
+        else:
+            self.apply_component_visibility()
+
+    def fit_whole_instrument(self):
+        if self.trace_group is None or not self.trace_group.visible:
+            self.reset_view()
+            return
+        fit_camera_to_scene(self.camera, self.controller, self.trace_group)
 
     # ========================================================
     # Loading indicator
@@ -1118,6 +1677,7 @@ class Viewer(QtWidgets.QMainWindow):
                     self._pending_fit_camera = True
                     self.start_input = False
                 self.reload_meshes()
+                self.reload_trace()
 
         except Exception as e:
             print(e)
@@ -1131,8 +1691,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip["axis"] = self.axis_combo.currentText()
         self.clip["mode"] = self.mode_combo.currentText()
         self.clip["position"] = self.slice_val.value()
-        # Global cut, not part of any component's dependency signature.
-        self.reload_meshes(force_reload=True)
+        self.clip["frame"] = self.clip_frame_combo.currentData()
+        self.apply_clipping()
 
     def on_mesher_changed(self):
         self.mesher = self.mesher_box.currentData()
@@ -1149,6 +1709,7 @@ class Viewer(QtWidgets.QMainWindow):
         # Switches which parser builds the McStas_instr entirely, so
         # nothing from a previous load can be trusted as unchanged.
         self.reload_meshes(force_reload=True)
+        self.reload_trace()
 
     def on_vacuum_changed(self):
         self.apply_geometry_visibility()
@@ -1209,6 +1770,7 @@ class Viewer(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self._mesh_process_pool.shutdown(wait=False, cancel_futures=True)
+        self._trace_process_pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
 

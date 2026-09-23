@@ -14,6 +14,14 @@ The second is to use the union_viewer.py script to launch an interactive interfa
 
 And see your union environment become a CAD model!
 
+#### The rest of the instrument
+
+With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file.
+
+The Instrument Parameters panel has one field per instrument parameter, showing its default. Values you type there are used both for the Union geometry and for the McStas run; parameters without a default must be filled in there.
+
+The clipping plane can be placed in any component's coordinate system (e.g. the sample's Arm) with the Clipping panel's "Coordinate system" choice. "Export STL..." writes the visible Union meshes and McStas components as one file, cut by the clipping plane; McStas lines are exported as thin tubes.
+
 
 ---
 ### Dependencies:
@@ -29,6 +37,8 @@ And see your union environment become a CAD model!
 - pygfx (For the renderer inside union_viewer)
 
 - pythonocc-core (For the boundary representation math exposed by the Open Cascade Kernel)
+
+- shapely and mapbox_earcut (Optional: close the cut faces when exporting a clipped instrument; without them the cut is left open)
 
 
 ### Installation
