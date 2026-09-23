@@ -28,6 +28,7 @@ from gui_helpers import (
     ray_segment_indices,
     ray_color_values,
     colormap,
+    wrap_label,
 )
 from mcstas_trace import trace_instrument, parse_rays, SCATTER, ABSORB
 import argparse
@@ -1314,7 +1315,8 @@ class Viewer(QtWidgets.QMainWindow):
     def _add_panel_row(self, layout, name, visible, on_toggled, on_color, color):
         row = QtWidgets.QHBoxLayout()
 
-        cb = QtWidgets.QCheckBox(name)
+        cb = QtWidgets.QCheckBox(wrap_label(name))
+        cb.setToolTip(name)
         cb.setChecked(visible)
         cb.toggled.connect(on_toggled)
         row.addWidget(cb, 1)

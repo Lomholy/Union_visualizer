@@ -108,6 +108,25 @@ def assign_default_color(colors, key):
     return colors[key]
 
 
+LABEL_WRAP_WIDTH = 18
+
+
+def wrap_label(text, width=LABEL_WRAP_WIDTH):
+    """text broken onto lines of at most width characters, for panel rows.
+    McStas names rarely contain spaces, so a line preferably ends just
+    after a separator (_ - . / or space) and is cut mid-word only when it
+    has none."""
+    lines = []
+    while len(text) > width:
+        cut = max(text.rfind(sep, 1, width) for sep in " _-./") + 1
+        if cut <= 1:
+            cut = width
+        lines.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    lines.append(text)
+    return "\n".join(lines)
+
+
 def component_color_key(name):
     """Key into the shared colours dict for a McStas component, kept apart
     from Union component and material keys."""

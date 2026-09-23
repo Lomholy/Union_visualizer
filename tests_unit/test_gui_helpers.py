@@ -256,6 +256,27 @@ class TestMesherCapabilities(unittest.TestCase):
                 self.assertTrue(MESHER_CAPABILITIES[mesher]["clip"])
 
 
+class WrapLabelTest(unittest.TestCase):
+    def test_short_names_are_unchanged(self):
+        self.assertEqual(gui_helpers.wrap_label("sample"), "sample")
+        self.assertEqual(gui_helpers.wrap_label("x" * 18), "x" * 18)
+
+    def test_breaks_after_a_separator(self):
+        self.assertEqual(
+            gui_helpers.wrap_label("sample_holder_aluminium_can"),
+            "sample_holder_\naluminium_can",
+        )
+
+    def test_cuts_mid_word_without_separators(self):
+        self.assertEqual(gui_helpers.wrap_label("a" * 40), "\n".join(["a" * 18, "a" * 18, "a" * 4]))
+
+    def test_every_line_fits_and_no_text_is_lost(self):
+        name = "Guide_gravity_segment-12.upper wall_left"
+        wrapped = gui_helpers.wrap_label(name)
+        self.assertTrue(all(len(line) <= 18 for line in wrapped.split("\n")))
+        self.assertEqual(wrapped.replace("\n", "").replace(" ", ""), name.replace(" ", ""))
+
+
 class TraceHelpersTest(unittest.TestCase):
     def test_component_color_key_does_not_collide_with_union_names(self):
         self.assertNotEqual(gui_helpers.component_color_key("box"), "box")
