@@ -32,6 +32,9 @@ SKIPPED_COMPONENT_TYPES = {"Union_master"}
 
 CIRCLE_SEGMENTS = 48
 
+# Radius of the tubes MCDISPLAY lines become when exported as meshes.
+LINE_EXPORT_RADIUS = 1e-3
+
 # Ray point kinds.
 STATE, SCATTER, PASS, ABSORB = 0, 1, 2, 3
 
@@ -47,6 +50,16 @@ class TraceComponent:
     @property
     def is_arm(self):
         return self.comp_type == "Arm"
+
+    def export_mesh(self):
+        """The component as one closed trimesh: its solids plus a thin
+        tube for every line."""
+        parts = [] if self.solid is None else [self.solid]
+        if len(self.segments):
+            parts.append(segments_to_tubes(self.segments))
+        if not parts:
+            return None
+        return parts[0] if len(parts) == 1 else trimesh.util.concatenate(parts)
 
 
 @dataclass
@@ -105,24 +118,33 @@ def instr_file_for(input_file):
 def run_trace(instr_file, ncount=0, seed=None, params=(), cwd=None, timeout=300):
     """Run instr_file with mcrun --trace=2 and return its stdout. cwd
     defaults to the instrument's own directory, like mcrun/mcdisplay, so
-    instrument-local .comp and data files resolve."""
+    instrument-local .comp and data files resolve. params are name=value
+    strings; any parameter left out uses its default."""
     cmd = [
         find_mcrun(), instr_file, "--trace=2", "--no-output-files",
-        f"--ncount={int(ncount)}", "-y", *params,
+        f"--ncount={int(ncount)}", *params,
     ]
+    # -y means "use every default" and makes mcrun ignore name=value
+    # arguments, so it is only for when none are given. Without it a
+    # parameter with no default makes mcrun prompt, hence stdin=DEVNULL.
+    if not params:
+        cmd.append("-y")
     if seed:
         cmd.append(f"--seed={int(seed)}")
     if cwd is None:
         cwd = os.path.dirname(instr_file) or "."
     try:
         result = subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout
+            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         raise TraceError(f"mcrun did not finish within {timeout} s")
     if result.returncode != 0 or "INSTRUMENT END:" not in result.stdout:
-        tail = "\n".join((result.stderr or result.stdout).strip().splitlines()[-15:])
-        if "symbol(s) not found" in tail:
+        output = f"{result.stdout}\n{result.stderr}"
+        errors = [line for line in output.splitlines() if line.startswith("Error")]
+        tail = "\n".join(errors or output.strip().splitlines()[-15:])
+        if "symbol(s) not found" in output:
             tail += (
                 "\n\nLinking failed - on macOS this usually means SDKROOT is "
                 "not set; launch from an activated 'unviz' environment."
@@ -253,6 +275,52 @@ _PLANE_NORMALS = {
     "xz": (0, 1, 0), "zx": (0, 1, 0),
     "yz": (1, 0, 0), "zy": (1, 0, 0),
 }
+
+
+def segments_to_tubes(segments, radius=LINE_EXPORT_RADIUS, sections=8):
+    """One closed, capped tube of the given radius around every
+    (start, end) pair in segments, as a single trimesh."""
+    segments = np.asarray(segments, dtype=float)
+    direction = segments[:, 1] - segments[:, 0]
+    keep = np.linalg.norm(direction, axis=1) > 0
+    segments, direction = segments[keep], direction[keep]
+    if len(segments) == 0:
+        return trimesh.Trimesh()
+    direction /= np.linalg.norm(direction, axis=1)[:, None]
+    helper = np.where(
+        (np.abs(direction[:, 1]) < 0.9)[:, None], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]
+    )
+    u = np.cross(direction, helper)
+    u /= np.linalg.norm(u, axis=1)[:, None]
+    v = np.cross(direction, u)
+    theta = np.linspace(0, 2 * np.pi, sections, endpoint=False)
+    ring = radius * (
+        np.cos(theta)[None, :, None] * u[:, None, :]
+        + np.sin(theta)[None, :, None] * v[:, None, :]
+    )
+    n = len(segments)
+    # Per tube: `sections` vertices around each end, then the two end centres.
+    vertices = np.concatenate([
+        segments[:, 0, None, :] + ring,
+        segments[:, 1, None, :] + ring,
+        segments[:, :, :],
+    ], axis=1)
+    per_tube = 2 * sections + 2
+    i = np.arange(sections)
+    j = (i + 1) % sections
+    start, end = 2 * sections, 2 * sections + 1
+    faces = np.concatenate([
+        np.stack([i, j, j + sections], axis=1),
+        np.stack([i, j + sections, i + sections], axis=1),
+        np.stack([np.full(sections, start), j, i], axis=1),
+        np.stack([np.full(sections, end), i + sections, j + sections], axis=1),
+    ])
+    faces = faces[None, :, :] + (np.arange(n) * per_tube)[:, None, None]
+    mesh = trimesh.Trimesh(
+        vertices=vertices.reshape(-1, 3), faces=faces.reshape(-1, 3), process=False
+    )
+    mesh.fix_normals(multibody=True)
+    return mesh
 
 
 def _place(mesh, center, axis, mesh_axis):

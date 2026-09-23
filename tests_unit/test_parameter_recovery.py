@@ -66,5 +66,45 @@ class ParameterRecoveryTest(unittest.TestCase):
         self.assertEqual(var_map["filename"], "myfile.txt")
 
 
+    def test_create_var_map_uses_given_parameter_values(self):
+        class Param:
+            def __init__(self, name, type, value):
+                self.name, self.type, self.value = name, type, value
+
+        class FakeInstr:
+            declare_list = []
+            user_var_list = []
+            parameters = [
+                Param("width", "double", 0.1),
+                Param("depth", "double", 0.2),
+                Param("filename", "string", '"a.dat"'),
+            ]
+            initialize_section = "area = width * depth;"
+
+        var_map = pp.create_var_map(
+            FakeInstr(),
+            {"width": "2*0.25", "depth": " ", "filename": "b.dat", "unknown": "1"},
+        )
+        self.assertEqual(var_map["width"], 0.5)
+        self.assertEqual(var_map["depth"], 0.2)
+        self.assertEqual(var_map["filename"], "b.dat")
+        self.assertNotIn("unknown", var_map)
+        # INITIALIZE runs after the override, so derived values follow it.
+        self.assertAlmostEqual(var_map["area"], 0.1)
+
+    def test_instrument_parameters_lists_defaults(self):
+        class Param:
+            def __init__(self, name, type, value):
+                self.name, self.type, self.value = name, type, value
+
+        class FakeInstr:
+            parameters = [Param("a", "double", 1.5), Param("b", "int", None), "raw x=1"]
+
+        self.assertEqual(
+            pp.instrument_parameters(FakeInstr()),
+            [("a", "double", "1.5"), ("b", "int", None)],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
