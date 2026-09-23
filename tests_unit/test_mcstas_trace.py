@@ -147,6 +147,23 @@ class DrawcallTest(unittest.TestCase):
         segs, _ = _drawcall_geometry("mcdiscircle('yz',0,0,0,1)")
         np.testing.assert_allclose(segs[:, :, 0], 0.0, atol=1e-12)
 
+    def test_export_mesh_turns_lines_into_tubes(self):
+        comp = mcstas_trace.TraceComponent(
+            "slit", "Slit", np.eye(4),
+            segments=_drawcall_geometry("mcdisrectangle('xy',0,0,0,0.2,0.1)")[0],
+        )
+        mesh = comp.export_mesh()
+        self.assertTrue(mesh.is_watertight)
+        np.testing.assert_allclose(
+            mesh.bounds, [[-0.101, -0.051, -0.001], [0.101, 0.051, 0.001]], atol=1e-9
+        )
+        self.assertIsNone(mcstas_trace.TraceComponent("arm", "Arm", np.eye(4)).export_mesh())
+
+    def test_segments_to_tubes_volume(self):
+        tube = mcstas_trace.segments_to_tubes(np.array([[[0, 0, 0], [0, 0, 2.0]]]), radius=0.1)
+        octagon_area = 0.5 * 8 * 0.1**2 * np.sin(2 * np.pi / 8)
+        self.assertAlmostEqual(tube.volume, 2 * octagon_area)
+
     def test_degenerate_and_unknown_calls_draw_nothing(self):
         self.assertEqual(_drawcall_geometry("mcdissphere(0,0,0,0)"), (None, None))
         self.assertEqual(_drawcall_geometry("not_a_drawcall(1,2)"), (None, None))
@@ -164,6 +181,27 @@ class EndToEndTest(unittest.TestCase):
                 self.skipTest(f"mcrun could not compile here: {e}")
         self.assertIn("src", components)
         self.assertNotIn("master", components)
+
+    def test_parameter_values_reach_mcrun(self):
+        text = (ROOT / "tests" / "simple_test.instr").read_text()
+        text = text.replace(
+            "DEFINE INSTRUMENT ODIN (", "DEFINE INSTRUMENT ODIN (psd_w = 0.2, double nodef", 1
+        ).replace("xwidth = 1,", "xwidth = psd_w,", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            instr = os.path.join(tmp, "param_test.instr")
+            Path(instr).write_text(text)
+            try:
+                components = mcstas_trace.trace_instrument(
+                    instr, params=["psd_w=0.5", "nodef=1"]
+                )
+            except mcstas_trace.TraceError as e:
+                self.skipTest(f"mcrun could not compile here: {e}")
+            width = np.ptp(components["psd_det"].segments[:, :, 0])
+            self.assertAlmostEqual(width, 0.5)
+            # A parameter without a default must fail with McStas's own
+            # message, not wait for input.
+            with self.assertRaisesRegex(mcstas_trace.TraceError, "nodef left unset"):
+                mcstas_trace.trace_instrument(instr, params=["psd_w=0.5"])
 
 
 if __name__ == "__main__":

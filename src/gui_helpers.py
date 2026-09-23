@@ -1,7 +1,10 @@
 """Display-independent helpers for the union_viewer GUI: material name
 normalisation/grouping, vacuum detection, and default colour assignment."""
 
+import numpy as np
 import trimesh
+
+from clipping import clip_plane
 
 
 def normalize_material_string(material_string):
@@ -109,23 +112,33 @@ def component_color_key(name):
 
 
 def clip_planes(clip):
-    """The viewer's clip settings as pygfx clipping planes. "Above" keeps
-    the side where the axis coordinate is greater than the position, like
-    brep.clip_component."""
+    """The viewer's clip settings as pygfx clipping planes (pygfx keeps
+    a*x + b*y + c*z + d >= 0), cutting the same side as the meshers."""
     if not clip["enable"]:
         return []
-    normal = [0.0, 0.0, 0.0]
-    normal["XYZ".index(clip["axis"].upper())] = 1.0
-    position = float(clip["position"])
-    if clip["mode"] == "Above":
-        return [(*normal, -position)]
-    return [(*(-n for n in normal), position)]
+    normal, point = clip_plane(clip)
+    return [(*(float(n) for n in normal), -float(normal @ point))]
 
 
-def parse_instrument_params(text):
-    """Split the "Instrument parameters" field into mcrun name=value args."""
-    params = text.replace(",", " ").split()
-    bad = [p for p in params if "=" not in p]
-    if bad:
-        raise ValueError(f"Expected name=value, got: {' '.join(bad)}")
-    return params
+def instrument_param_args(param_values):
+    """mcrun name=value args for the parameters given a value; the rest
+    keep the instrument's defaults."""
+    return [f"{name}={text.strip()}" for name, text in param_values.items() if text.strip()]
+
+
+def clip_mesh(mesh, clip):
+    """mesh cut by the viewer's clip plane, keeping the same side as the
+    meshers and capping the cut when mesh is closed. None if nothing is
+    left."""
+    if not clip["enable"]:
+        return mesh
+    normal, origin = clip_plane(clip)
+    try:
+        clipped = trimesh.intersections.slice_mesh_plane(
+            mesh, normal, origin, cap=mesh.is_watertight
+        )
+    except Exception:
+        clipped = trimesh.intersections.slice_mesh_plane(mesh, normal, origin)
+    if clipped is None or len(clipped.faces) == 0:
+        return None
+    return clipped

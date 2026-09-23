@@ -9,7 +9,8 @@ import pygfx as gfx
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
-from preprocess import preprocess
+from preprocess import preprocess, instrument_parameters
+from clipping import resolve_clip_frame, clip_plane
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
 from brep import build_many_brep_meshes
@@ -20,7 +21,8 @@ from gui_helpers import (
     assign_default_color,
     component_color_key,
     clip_planes,
-    parse_instrument_params,
+    instrument_param_args,
+    clip_mesh,
 )
 from mcstas_trace import trace_instrument
 import argparse
@@ -89,6 +91,7 @@ def compute_mesh_data(
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
     force_pygen=False,
+    param_values=None,
 ):
     """Everything generate_group() needs to do that doesn't touch pygfx/Qt:
     preprocessing, SDF/BREP mesh building (with dependency-based incremental
@@ -101,7 +104,9 @@ def compute_mesh_data(
         input_file,
         verbose=False,
         force_pygen=force_pygen,
+        param_values=param_values,
     )
+    clip = resolve_clip_frame(clip, world_matrices)
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     # The "brep" mesher never touches sdfs/final_sdfs, so skip building them.
     if mesher == "brep":
@@ -113,8 +118,16 @@ def compute_mesh_data(
         )
     print("Building meshes")
 
+    # The clip frame can move when the file changes, which changes every
+    # clipped mesh.
+    clip_key = (
+        tuple(np.round(np.concatenate(clip_plane(clip)), 12)) if clip["enable"] else None
+    )
     new_dependencies = {
-        name: component_dependency_signature(name, union_geometries, world_bboxes)
+        name: (
+            component_dependency_signature(name, union_geometries, world_bboxes),
+            clip_key,
+        )
         for name in union_geometries
     }
 
@@ -184,7 +197,11 @@ def compute_mesh_data(
             for name in render_meshes
         }
 
-    return (render_meshes, geometry_is_vacuum, meshes, dependencies)
+    instrument_info = {
+        "parameters": instrument_parameters(instr),
+        "world_matrices": {name: M.tolist() for name, M in world_matrices.items()},
+    }
+    return (render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info)
 
 
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
@@ -225,6 +242,7 @@ def build_component_group(components, colors):
     """pygfx objects for every McStas component: one Line for all of its
     MCDISPLAY lines and one translucent Mesh for all of its solids."""
     group = gfx.Group()
+    group.components = components
     group.component_objects = {}
     group.component_is_arm = {}
     for name, comp in components.items():
@@ -269,8 +287,9 @@ def generate_group(
     group_by_material=False,
     deflection=DEFAULT_BREP_DEFLECTION,
     force_pygen=False,
+    param_values=None,
 ):
-    render_meshes, geometry_is_vacuum, meshes, dependencies = compute_mesh_data(
+    render_meshes, geometry_is_vacuum, meshes, dependencies, _ = compute_mesh_data(
         input_file,
         clip,
         meshes=meshes,
@@ -282,6 +301,7 @@ def generate_group(
         group_by_material=group_by_material,
         deflection=deflection,
         force_pygen=force_pygen,
+        param_values=param_values,
     )
     group = build_gfx_group(render_meshes, geometry_is_vacuum, colors)
     return (group, meshes, dependencies)
@@ -399,7 +419,7 @@ class MeshBuildWorker(QtCore.QObject):
     thread.
     """
 
-    finished = QtCore.Signal(object, object, object)
+    finished = QtCore.Signal(object, object, object, object)
     failed = QtCore.Signal(str)
 
     def __init__(
@@ -416,6 +436,7 @@ class MeshBuildWorker(QtCore.QObject):
         group_by_material,
         deflection,
         force_pygen,
+        param_values,
     ):
         super().__init__()
         self.process_pool = process_pool
@@ -430,6 +451,7 @@ class MeshBuildWorker(QtCore.QObject):
         self.group_by_material = group_by_material
         self.deflection = deflection
         self.force_pygen = force_pygen
+        self.param_values = param_values
 
     def run(self):
         try:
@@ -445,13 +467,16 @@ class MeshBuildWorker(QtCore.QObject):
                 group_by_material=self.group_by_material,
                 deflection=self.deflection,
                 force_pygen=self.force_pygen,
+                param_values=self.param_values,
             )
-            render_meshes, geometry_is_vacuum, meshes, dependencies = future.result()
+            render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info = (
+                future.result()
+            )
             group = build_gfx_group(render_meshes, geometry_is_vacuum, self.colors)
         except Exception:
             self.failed.emit(traceback.format_exc())
             return
-        self.finished.emit(group, meshes, dependencies)
+        self.finished.emit(group, meshes, dependencies, instrument_info)
 
 
 class TraceWorker(QtCore.QObject):
@@ -655,7 +680,9 @@ class Viewer(QtWidgets.QMainWindow):
             "axis": self.clip_axis,
             "mode": self.clip_mode,
             "position": self.clip_position,
+            "frame": None,
         }
+        self.world_matrices = {}
 
         # Docks are added in this order (Settings, Mesher options, Clipping,
         # Visible geometries) so they stack top-to-bottom in the left panel.
@@ -715,14 +742,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.arms_checkbox.setToolTip("Arms only mark coordinate frames.")
         settings_layout.addWidget(self.arms_checkbox)
 
-        self.params_edit = QtWidgets.QLineEdit()
-        self.params_edit.setPlaceholderText("Instrument parameters, e.g. l_min=1 l_max=5")
-        self.params_edit.setToolTip(
-            "name=value pairs passed to mcrun. Parameters left out use the "
-            "instrument's defaults."
-        )
-        settings_layout.addWidget(self.params_edit)
-
         self.trace_status_label = QtWidgets.QLabel("")
         self.trace_status_label.setWordWrap(True)
         settings_layout.addWidget(self.trace_status_label)
@@ -743,13 +762,34 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.export_stl_button = QtWidgets.QPushButton("Export STL...")
         self.export_stl_button.setToolTip(
-            "Export the currently visible meshes as a single .stl file."
+            "Export the visible Union meshes and McStas components as a "
+            "single .stl file, cut by the clipping plane if enabled. "
+            "McStas lines are exported as thin tubes."
         )
         self.export_stl_button.clicked.connect(self.export_stl)
         settings_layout.addWidget(self.export_stl_button)
 
         settings_layout.addStretch()
         settings_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
+        # Instrument parameters dock
+        # ----------------------------------------------------
+
+        params_dock, params_layout = self._add_dock("Instrument Parameters")
+        self.param_values = {}
+        self.param_edits = {}
+        self.param_names = None
+        self.params_form = QtWidgets.QFormLayout()
+        params_layout.addLayout(self.params_form)
+        self.params_empty_label = QtWidgets.QLabel("No instrument loaded.")
+        self.params_empty_label.setStyleSheet("color: gray;")
+        params_layout.addWidget(self.params_empty_label)
+        params_layout.addStretch()
+        params_dock.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Preferred,
             QtWidgets.QSizePolicy.Policy.Maximum,
         )
@@ -818,6 +858,17 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.clip_checkbox = QtWidgets.QCheckBox("Enable clipping")
         clipping_layout.addWidget(self.clip_checkbox)
+
+        frame_layout = QtWidgets.QHBoxLayout()
+        frame_layout.addWidget(QtWidgets.QLabel("Coordinate system"))
+        self.clip_frame_combo = QtWidgets.QComboBox()
+        self.clip_frame_combo.addItem("World", None)
+        self.clip_frame_combo.setToolTip(
+            "Axis and position are taken in this component's own coordinate "
+            "system (its AT/ROTATED frame), e.g. the sample's Arm."
+        )
+        frame_layout.addWidget(self.clip_frame_combo)
+        clipping_layout.addLayout(frame_layout)
 
         axis_layout = QtWidgets.QHBoxLayout()
         axis_layout.addWidget(QtWidgets.QLabel("Axis"))
@@ -922,8 +973,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.pygen_checkbox.stateChanged.connect(self.on_pygen_changed)
         self.components_checkbox.stateChanged.connect(self.on_components_changed)
         self.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
-        self.params_edit.editingFinished.connect(self.reload_trace)
         self.axis_combo.currentTextChanged.connect(self.on_clip_changed)
+        self.clip_frame_combo.currentIndexChanged.connect(self.on_clip_changed)
         self.mode_combo.currentTextChanged.connect(self.on_clip_changed)
         self.slice_val.valueChanged.connect(self.on_clip_changed)
         self.res_val.currentIndexChanged.connect(self.on_res_changed)
@@ -1097,7 +1148,7 @@ class Viewer(QtWidgets.QMainWindow):
     def apply_trace_clipping(self):
         if self.trace_group is None:
             return
-        planes = clip_planes(self.clip)
+        planes = clip_planes(self.resolved_clip())
         for obj in self.trace_group.iter():
             if getattr(obj, "material", None) is not None:
                 obj.material.clipping_planes = planes
@@ -1139,19 +1190,91 @@ class Viewer(QtWidgets.QMainWindow):
     # Export STL
     # ========================================================
 
+    def rebuild_params_form(self, parameters):
+        """One labelled field per instrument parameter, showing its default
+        as the placeholder. Values typed earlier are kept by name."""
+        names = [name for name, _, _ in parameters]
+        if names == self.param_names:
+            return
+        self.param_names = names
+        while self.params_form.rowCount():
+            self.params_form.removeRow(0)
+        self.param_edits = {}
+        self.param_values = {n: v for n, v in self.param_values.items() if n in names}
+        for name, param_type, default in parameters:
+            edit = QtWidgets.QLineEdit(self.param_values.get(name, ""))
+            edit.setPlaceholderText(default if default is not None else "required")
+            edit.setToolTip(
+                f"{param_type} {name}"
+                + (f" (default {default})" if default is not None else " (no default)")
+                + ". Leave empty to use the default."
+            )
+            edit.editingFinished.connect(
+                lambda n=name, e=edit: self.on_param_edited(n, e.text())
+            )
+            self.params_form.addRow(name, edit)
+            self.param_edits[name] = edit
+        self.params_empty_label.setText("This instrument has no parameters.")
+        self.params_empty_label.setVisible(not names)
+
+    def rebuild_clip_frame_combo(self):
+        names = list(self.world_matrices)
+        current = self.clip_frame_combo.currentData()
+        if names == [self.clip_frame_combo.itemData(i) for i in range(1, self.clip_frame_combo.count())]:
+            return
+        self.clip_frame_combo.blockSignals(True)
+        self.clip_frame_combo.clear()
+        self.clip_frame_combo.addItem("World", None)
+        for name in names:
+            self.clip_frame_combo.addItem(name, name)
+        self.clip_frame_combo.setCurrentIndex(max(self.clip_frame_combo.findData(current), 0))
+        self.clip_frame_combo.blockSignals(False)
+        if self.clip_frame_combo.currentData() != current:
+            self.on_clip_changed()
+
+    def resolved_clip(self):
+        return resolve_clip_frame(self.clip, self.world_matrices)
+
+    def on_param_edited(self, name, text):
+        if self.param_values.get(name, "").strip() == text.strip():
+            return
+        self.param_values[name] = text.strip()
+        self.reload_meshes()
+        self.reload_trace()
+
+    def _export_parts(self):
+        """(Union meshes, McStas component meshes) currently visible, the
+        components cut by the clip plane the same way the meshers cut the
+        Union geometry."""
+        union_parts = []
+        if self.current_group is not None:
+            trimeshes = self.current_group.geometry_trimeshes
+            union_parts = [
+                trimeshes[key]
+                for key, mesh in self.current_group.geometry_meshes.items()
+                if mesh.visible and trimeshes.get(key) is not None
+            ]
+        component_parts = []
+        if self.trace_group is not None and self.trace_group.visible:
+            for name, obj in self.trace_group.component_objects.items():
+                if not obj.visible:
+                    continue
+                mesh = self.trace_group.components[name].export_mesh()
+                if mesh is not None:
+                    mesh = clip_mesh(mesh, self.resolved_clip())
+                if mesh is not None:
+                    component_parts.append(mesh)
+        return union_parts, component_parts
+
     def export_stl(self):
-        if self.current_group is None or not self.current_group.geometry_meshes:
+        if self.current_group is None and self.trace_group is None:
             QtWidgets.QMessageBox.warning(
                 self, "Export STL", "No geometry loaded to export."
             )
             return
 
-        trimeshes = self.current_group.geometry_trimeshes
-        parts = [
-            trimeshes[key]
-            for key, mesh in self.current_group.geometry_meshes.items()
-            if mesh.visible and trimeshes.get(key) is not None
-        ]
+        union_parts, component_parts = self._export_parts()
+        parts = union_parts + component_parts
         if not parts:
             QtWidgets.QMessageBox.warning(
                 self, "Export STL", "No visible geometry to export."
@@ -1177,7 +1300,10 @@ class Viewer(QtWidgets.QMainWindow):
             return
 
         QtWidgets.QMessageBox.information(
-            self, "Export STL", f"Exported {len(parts)} mesh(es) to:\n{filename}"
+            self,
+            "Export STL",
+            f"Exported {len(union_parts)} Union mesh(es) and "
+            f"{len(component_parts)} McStas component(s) to:\n{filename}",
         )
 
     # ========================================================
@@ -1217,6 +1343,7 @@ class Viewer(QtWidgets.QMainWindow):
             self.material_group_checkbox.isChecked(),
             self.deflection_val.value(),
             self.pygen_checkbox.isChecked(),
+            dict(self.param_values),
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1233,7 +1360,13 @@ class Viewer(QtWidgets.QMainWindow):
         self._reload_worker = worker
         thread.start()
 
-    def _on_reload_finished(self, new_group, meshes, dependencies):
+    def _on_reload_finished(self, new_group, meshes, dependencies, instrument_info):
+        self.rebuild_params_form(instrument_info["parameters"])
+        self.world_matrices = {
+            name: np.array(M) for name, M in instrument_info["world_matrices"].items()
+        }
+        self.rebuild_clip_frame_combo()
+        self.apply_trace_clipping()
         if self.current_group is not None:
             self.scene.remove(self.current_group)
         self.dependencies = dependencies
@@ -1285,11 +1418,7 @@ class Viewer(QtWidgets.QMainWindow):
         if self._trace_busy:
             self._trace_pending = True
             return
-        try:
-            params = parse_instrument_params(self.params_edit.text())
-        except ValueError as e:
-            self._set_trace_status(str(e), error=True)
-            return
+        params = instrument_param_args(self.param_values)
 
         self._trace_busy = True
         self._trace_pending = False
@@ -1434,6 +1563,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip["axis"] = self.axis_combo.currentText()
         self.clip["mode"] = self.mode_combo.currentText()
         self.clip["position"] = self.slice_val.value()
+        self.clip["frame"] = self.clip_frame_combo.currentData()
         self.apply_trace_clipping()
         # Global cut, not part of any component's dependency signature.
         self.reload_meshes(force_reload=True)

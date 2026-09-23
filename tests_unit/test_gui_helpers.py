@@ -15,6 +15,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import gui_helpers  # noqa: E402
 from meshing import MESHER_CAPABILITIES  # noqa: E402
@@ -273,15 +275,40 @@ class TraceHelpersTest(unittest.TestCase):
         clip = {"enable": False, "axis": "X", "mode": "Above", "position": 0}
         self.assertEqual(gui_helpers.clip_planes(clip), [])
 
-    def test_parse_instrument_params(self):
+    def test_instrument_param_args(self):
         self.assertEqual(
-            gui_helpers.parse_instrument_params(" l_min=1, l_max=5 "),
-            ["l_min=1", "l_max=5"],
+            gui_helpers.instrument_param_args({"l_min": " 1 ", "l_max": "", "n": "3"}),
+            ["l_min=1", "n=3"],
         )
-        self.assertEqual(gui_helpers.parse_instrument_params(""), [])
-        with self.assertRaises(ValueError):
-            gui_helpers.parse_instrument_params("l_min")
 
+    def test_clip_mesh_matches_clip_planes(self):
+        import trimesh
+        from clipping import resolve_clip_frame
+
+        box = trimesh.creation.box(extents=(2, 2, 2))
+        # A frame at x=0.5 rotated 90 degrees about z: its local x is world y.
+        frame = np.eye(4)
+        frame[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+        frame[:3, 3] = (0.5, 0, 0)
+        clip = resolve_clip_frame(
+            {"enable": True, "axis": "X", "mode": "Above", "position": 0.25, "frame": "arm"},
+            {"arm": frame},
+        )
+        clipped = gui_helpers.clip_mesh(box, clip)
+        np.testing.assert_allclose(clipped.bounds, [[-1, 0.25, -1], [1, 1, 1]], atol=1e-9)
+        self.assertTrue(clipped.is_watertight)
+        (a, b, c, d), = gui_helpers.clip_planes(clip)
+        self.assertGreater(b * 0.5 + d, 0)
+        self.assertLess(b * 0.0 + d, 0)
+
+    def test_clip_mesh_can_remove_everything(self):
+        import trimesh
+
+        box = trimesh.creation.box(extents=(1, 1, 1))
+        clip = {"enable": True, "axis": "Z", "mode": "Above", "position": 5}
+        self.assertIsNone(gui_helpers.clip_mesh(box, clip))
+        clip["enable"] = False
+        self.assertIs(gui_helpers.clip_mesh(box, clip), box)
 
 if __name__ == "__main__":
     unittest.main()

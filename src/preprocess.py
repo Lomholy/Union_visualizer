@@ -667,11 +667,37 @@ def _apply_conditional_statement(cond, name, expr, else_name, else_expr, var_map
         _assign_or_warn(var_map, else_name, else_expr, display)
 
 
-def create_var_map(instr: ms.McStas_instr):
+def instrument_parameters(instr: ms.McStas_instr):
+    """[(name, type, default or None)] for every instrument parameter."""
+    params = []
+    for param in instr.parameters:
+        if isinstance(param, str):
+            continue
+        default = param.value
+        params.append((param.name, param.type or "double", None if default in (None, "") else str(default)))
+    return params
+
+
+def _override_parameter(name, text, param_type, var_map):
+    """Use a user-given value (e.g. from the viewer's parameter form) for
+    instrument parameter name instead of its default."""
+    text = text.strip()
+    quoted = _QUOTED_STRING_RE.match(text)
+    if param_type == "string" or quoted:
+        var_map[name] = quoted.group(1) if quoted else text
+        return
+    try:
+        var_map[name] = eval_expr("".join(text.split()), var_map)
+    except Exception as e:
+        print(f"Warning: Failed to evaluate parameter value {name}={text}: {e}")
+
+
+def create_var_map(instr: ms.McStas_instr, param_values=None):
     var_map = {}
     _populate_declare_vars(list(instr.declare_list), var_map)
     _populate_declare_vars(list(instr.user_var_list), var_map)
 
+    param_types = {}
     for param in instr.parameters:
         # Parameters come from mcstasscript's DEFINE INSTRUMENT(...) parser,
         # a different code path from the freeform DECLARE/USERVARS
@@ -681,6 +707,11 @@ def create_var_map(instr: ms.McStas_instr):
             _recover_raw_parameter(param, var_map)
             continue
         var_map[param.name] = _resolved_value(param)
+        param_types[param.name] = param.type
+
+    for name, text in (param_values or {}).items():
+        if name in param_types and text.strip():
+            _override_parameter(name, text, param_types[name], var_map)
 
     lines = instr.initialize_section.splitlines()
 
@@ -1023,7 +1054,9 @@ def resolve_mesh_filenames(union_geometries, input_file):
             comp.filename = _resolve_relative_path(filename, base_dir)
 
 
-def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
+def preprocess(
+    input_file: str, verbose: bool, force_pygen: bool = False, param_values=None
+):
     """
     Function to preprocess the input file.
 
@@ -1031,6 +1064,8 @@ def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
         instead of mcstasscript's lightweight .instr reader (that reader is
         still used as an automatic fallback on parse failure regardless of
         this flag - see load_McStas_file).
+    param_values: {parameter name: value text} used instead of the
+        instrument's defaults.
 
     Returns:
         McStas_instr containing the processed instrument
@@ -1038,7 +1073,7 @@ def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
         list: Each union geometry in the instrument.
     """
     instr = load_McStas_file(input_file, force_pygen=force_pygen, verbose=verbose)
-    var_map = create_var_map(instr)
+    var_map = create_var_map(instr, param_values)
     for comp in instr.component_list:
         comp = attempt_conversion(comp, instr, var_map)
 

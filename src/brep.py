@@ -31,6 +31,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from preprocess import box_dimensions
+from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
 
 
@@ -267,36 +268,8 @@ def clip_component(shape, clip):
     if not clip["enable"]:
         return shape
 
-    axis_name = clip["axis"].upper()
-    position = float(clip["position"])
-    mode = clip["mode"]
-
-    if axis_name == "X":
-        normal = np.array([1.0, 0.0, 0.0])
-    elif axis_name == "Y":
-        normal = np.array([0.0, 1.0, 0.0])
-    elif axis_name == "Z":
-        normal = np.array([0.0, 0.0, 1.0])
-    else:
-        raise ValueError(f"Unknown clip axis: {axis_name}")
-
-    # plane point
-    plane_point = np.zeros(3)
-
-    if axis_name == "X":
-        plane_point[0] = position
-    elif axis_name == "Y":
-        plane_point[1] = position
-    elif axis_name == "Z":
-        plane_point[2] = position
-
-    # select side to keep
-    if mode == "Above":
-        keep_point = plane_point + normal
-    elif mode == "Below":
-        keep_point = plane_point - normal
-    else:
-        raise ValueError(f"Unknown clip mode: {mode}")
+    normal, plane_point = clip_plane(clip)
+    keep_point = plane_point + normal
 
     plane = gp_Pln(
         gp_Pnt(*plane_point),
