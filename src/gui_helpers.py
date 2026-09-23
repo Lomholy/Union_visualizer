@@ -1,6 +1,8 @@
 """Display-independent helpers for the union_viewer GUI: material name
-normalisation/grouping, vacuum detection, and default colour assignment."""
+normalisation/grouping, vacuum detection, default colour assignment, and
+neutron ray selection/colouring."""
 
+import numpy as np
 import trimesh
 
 
@@ -129,3 +131,79 @@ def parse_instrument_params(text):
     if bad:
         raise ValueError(f"Expected name=value, got: {' '.join(bad)}")
     return params
+
+
+# ---------------------------------------------------------------------------
+# Neutron rays
+# ---------------------------------------------------------------------------
+
+# {mode: (label, unit)}; "Uniform" draws every ray in one colour.
+RAY_COLOR_MODES = {
+    "Uniform": ("", ""),
+    "Speed": ("Speed", "m/s"),
+    "Weight": ("log10 weight", ""),
+    "Time": ("Time", "ms"),
+}
+
+_VIRIDIS = np.array([
+    [0.267, 0.005, 0.329],
+    [0.230, 0.322, 0.546],
+    [0.128, 0.567, 0.551],
+    [0.369, 0.789, 0.383],
+    [0.993, 0.906, 0.144],
+])
+
+
+def rays_reaching(rays, component_name=None):
+    """Indices of the rays with at least one point in component_name's
+    frame, or of every ray when component_name is None."""
+    if component_name is None:
+        return np.arange(rays.n_rays)
+    if component_name not in rays.component_names:
+        return np.arange(0)
+    index = rays.component_names.index(component_name)
+    hits = rays.component == index
+    return np.array([
+        i for i in range(rays.n_rays)
+        if hits[rays.ray_offsets[i]:rays.ray_offsets[i + 1]].any()
+    ], dtype=int)
+
+
+def ray_segment_indices(rays, ray_indices):
+    """(k, 2) indices into rays.points of every consecutive point pair
+    within the chosen rays, never joining the end of one ray to the start
+    of the next."""
+    starts = [
+        np.arange(rays.ray_offsets[i], rays.ray_offsets[i + 1] - 1)
+        for i in ray_indices
+    ]
+    if not starts:
+        return np.zeros((0, 2), dtype=int)
+    first = np.concatenate(starts)
+    return np.stack([first, first + 1], axis=1)
+
+
+def ray_color_values(rays, mode):
+    """Per-point value to colour by for a RAY_COLOR_MODES mode, or None for
+    "Uniform"."""
+    if mode == "Speed":
+        return rays.speed
+    if mode == "Weight":
+        positive = rays.weight[rays.weight > 0]
+        floor = positive.min() if len(positive) else 1e-300
+        return np.log10(np.maximum(rays.weight, floor))
+    if mode == "Time":
+        return rays.time * 1e3
+    return None
+
+
+def colormap(values, vmin=None, vmax=None):
+    """(n, 4) float32 viridis RGBA for values, scaled to [vmin, vmax]."""
+    values = np.asarray(values, dtype=float)
+    vmin = values.min() if vmin is None else vmin
+    vmax = values.max() if vmax is None else vmax
+    t = np.zeros_like(values) if vmax <= vmin else (values - vmin) / (vmax - vmin)
+    t = np.clip(t, 0, 1) * (len(_VIRIDIS) - 1)
+    stops = np.arange(len(_VIRIDIS))
+    rgb = np.stack([np.interp(t, stops, _VIRIDIS[:, c]) for c in range(3)], axis=1)
+    return np.concatenate([rgb, np.ones((len(values), 1))], axis=1).astype(np.float32)

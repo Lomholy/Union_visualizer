@@ -15,6 +15,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import gui_helpers  # noqa: E402
 from meshing import MESHER_CAPABILITIES  # noqa: E402
@@ -281,6 +283,49 @@ class TraceHelpersTest(unittest.TestCase):
         self.assertEqual(gui_helpers.parse_instrument_params(""), [])
         with self.assertRaises(ValueError):
             gui_helpers.parse_instrument_params("l_min")
+
+
+class RayHelpersTest(unittest.TestCase):
+    def setUp(self):
+        from mcstas_trace import TraceRays
+
+        # Ray 0: a -> b (3 points). Ray 1: a only (2 points).
+        self.rays = TraceRays(
+            points=np.arange(15, dtype=float).reshape(5, 3),
+            ray_offsets=np.array([0, 3, 5]),
+            speed=np.array([1.0, 2.0, 3.0, 4.0, 5.0]),
+            time=np.array([0.0, 0.001, 0.002, 0.0, 0.001]),
+            weight=np.array([1.0, 0.1, 0.0, 1.0, 1.0]),
+            component=np.array([0, 0, 1, 0, 0]),
+            kind=np.zeros(5, dtype=int),
+            component_names=["a", "b"],
+        )
+
+    def test_rays_reaching(self):
+        self.assertEqual(list(gui_helpers.rays_reaching(self.rays)), [0, 1])
+        self.assertEqual(list(gui_helpers.rays_reaching(self.rays, "b")), [0])
+        self.assertEqual(list(gui_helpers.rays_reaching(self.rays, "missing")), [])
+
+    def test_segments_never_join_two_rays(self):
+        pairs = gui_helpers.ray_segment_indices(self.rays, [0, 1])
+        self.assertEqual(pairs.tolist(), [[0, 1], [1, 2], [3, 4]])
+        self.assertEqual(gui_helpers.ray_segment_indices(self.rays, []).shape, (0, 2))
+
+    def test_color_values(self):
+        self.assertIsNone(gui_helpers.ray_color_values(self.rays, "Uniform"))
+        np.testing.assert_allclose(
+            gui_helpers.ray_color_values(self.rays, "Time"), [0, 1, 2, 0, 1]
+        )
+        weight = gui_helpers.ray_color_values(self.rays, "Weight")
+        self.assertTrue(np.all(np.isfinite(weight)))
+        self.assertAlmostEqual(weight[1], -1.0)
+
+    def test_colormap(self):
+        colors = gui_helpers.colormap([0.0, 0.5, 1.0])
+        self.assertEqual(colors.shape, (3, 4))
+        self.assertTrue(np.all((colors >= 0) & (colors <= 1)))
+        self.assertFalse(np.allclose(colors[0], colors[2]))
+        np.testing.assert_allclose(gui_helpers.colormap([2.0, 2.0])[0], gui_helpers.colormap([2.0, 2.0])[1])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
-"""Run a McStas instrument in trace mode (mcrun --trace) and turn every
-component's MCDISPLAY drawing into world-space geometry. Everything returned
-is plain numpy/trimesh data, so it can be built in a worker process and sent
-back to the GUI."""
+"""Run a McStas instrument in trace mode (mcrun --trace) and turn its output
+into world-space data: every component's MCDISPLAY drawing, and the neutron
+rays. Everything returned is plain numpy/trimesh data, so it can be built in
+a worker process and sent back to the GUI."""
 
 import hashlib
 import json
@@ -32,6 +32,9 @@ SKIPPED_COMPONENT_TYPES = {"Union_master"}
 
 CIRCLE_SEGMENTS = 48
 
+# Ray point kinds.
+STATE, SCATTER, PASS, ABSORB = 0, 1, 2, 3
+
 
 @dataclass
 class TraceComponent:
@@ -44,6 +47,22 @@ class TraceComponent:
     @property
     def is_arm(self):
         return self.comp_type == "Arm"
+
+
+@dataclass
+class TraceRays:
+    points: np.ndarray       # (m, 3) world positions of every ray, concatenated
+    ray_offsets: np.ndarray  # (n_rays + 1,) start of each ray in points
+    speed: np.ndarray        # (m,) |v| in m/s
+    time: np.ndarray         # (m,)
+    weight: np.ndarray       # (m,) p
+    component: np.ndarray    # (m,) index into component_names
+    kind: np.ndarray         # (m,) STATE / SCATTER / PASS / ABSORB
+    component_names: list
+
+    @property
+    def n_rays(self):
+        return len(self.ray_offsets) - 1
 
 
 # ==============================================================================
@@ -122,13 +141,18 @@ def component_types(input_file, force_pygen=False):
     return {comp.name: comp.component_name for comp in instr.component_list}
 
 
-def trace_instrument(input_file, params=(), force_pygen=False):
-    """Entry point: run input_file in trace mode and return its drawn
-    components as {name: TraceComponent}."""
+def trace_instrument(
+    input_file, params=(), force_pygen=False, ncount=0, seed=None, max_rays=1000
+):
+    """Entry point: run input_file in trace mode with ncount neutrons and
+    return (components, rays): its drawn components as
+    {name: TraceComponent}, and TraceRays, or None when ncount is 0."""
     instr_file = instr_file_for(input_file)
     cwd = os.path.dirname(os.path.abspath(input_file))
-    trace_text = run_trace(instr_file, params=params, cwd=cwd)
-    return parse_trace(trace_text, component_types(input_file, force_pygen))
+    trace_text = run_trace(instr_file, ncount, seed, params, cwd=cwd)
+    components = parse_trace(trace_text, component_types(input_file, force_pygen))
+    rays = parse_rays(trace_text, max_rays) if ncount else None
+    return components, rays
 
 
 # ==============================================================================
@@ -154,22 +178,30 @@ def _pos_to_matrix(values):
     return M
 
 
-def parse_trace(text, comp_types=None):
-    comp_types = comp_types or {}
+def read_positions(text):
+    """{component name: 4x4 world matrix}, in instrument order, from the
+    COMPONENT:/POS: lines at the top of a trace."""
     matrices = {}
-    order = []
-    drawcalls = {}
     current = None
-    drawing = None
-
     for line in text.splitlines():
         if line.startswith("COMPONENT:"):
             current = _QUOTED_NAME_RE.search(line).group(1)
         elif line.startswith("POS:") and current is not None:
             matrices[current] = _pos_to_matrix(_floats(line[4:]))
-            order.append(current)
             current = None
-        elif line.startswith("MCDISPLAY: component "):
+        elif line.startswith("MCDISPLAY: start"):
+            break
+    return matrices
+
+
+def parse_trace(text, comp_types=None):
+    comp_types = comp_types or {}
+    matrices = read_positions(text)
+    drawcalls = {}
+    drawing = None
+
+    for line in text.splitlines():
+        if line.startswith("MCDISPLAY: component "):
             drawing = line[len("MCDISPLAY: component "):].strip()
             drawcalls.setdefault(drawing, [])
         elif line.startswith("MCDISPLAY: ") and drawing is not None:
@@ -178,7 +210,7 @@ def parse_trace(text, comp_types=None):
             break
 
     components = {}
-    for name in order:
+    for name in matrices:
         comp_type = comp_types.get(name, "")
         if comp_type in SKIPPED_COMPONENT_TYPES:
             continue
@@ -375,3 +407,111 @@ def _build_component_geometry(calls, comp_name):
     if solids:
         solid = solids[0] if len(solids) == 1 else trimesh.util.concatenate(solids)
     return segments, solid
+
+
+# -------------------------------- Rays ----------------------------------------
+
+
+def parse_rays(text, max_rays=1000):
+    """World-space rays from the ENTER:...LEAVE: blocks of a trace. STATE and
+    SCATTER lines are in the frame of the most recent COMP:. A SCATTER whose
+    velocity is unchanged (e.g. Union_master crossing a volume boundary) is
+    tagged PASS rather than SCATTER. The STATE printed after LEAVE: is the
+    ray's exit point, except for an absorbed ray, where McStas prints a
+    restored earlier state instead, so it is skipped."""
+    matrices = read_positions(text)
+    component_names = list(matrices)
+    comp_index = {name: i for i, name in enumerate(component_names)}
+    points, speeds, times, weights, comps, kinds = [], [], [], [], [], []
+    offsets = [0]
+    M = np.eye(4)
+    comp = -1
+    last_v = None
+    in_ray = False
+    after_leave = False
+    absorbed = False
+
+    def add(values, kind):
+        nonlocal last_v
+        r = M[:3, :3] @ values[0:3] + M[:3, 3]
+        v = M[:3, :3] @ values[3:6]
+        if kind == SCATTER and last_v is not None and np.allclose(v, last_v, rtol=1e-6, atol=1e-9):
+            kind = PASS
+        last_v = v
+        if len(points) > offsets[-1] and np.allclose(points[-1], r, atol=1e-9):
+            # The same point printed again (e.g. once per component frame):
+            # keep the latest, outgoing state.
+            if kind != STATE:
+                kinds[-1] = kind
+            speeds[-1] = float(np.linalg.norm(v))
+            times[-1] = values[6]
+            weights[-1] = values[10]
+            return
+        points.append(r)
+        speeds.append(float(np.linalg.norm(v)))
+        times.append(values[6])
+        weights.append(values[10])
+        comps.append(comp)
+        kinds.append(kind)
+
+    def finish():
+        nonlocal in_ray, after_leave
+        # McStas starts every ray from a placeholder state (r=0, v=(0,0,1))
+        # until a source sets it; |v| = 1 m/s holds in any frame.
+        start = offsets[-1]
+        end = start
+        while end < len(points) and abs(speeds[end] - 1.0) < 1e-9:
+            end += 1
+        del points[start:end], speeds[start:end], times[start:end]
+        del weights[start:end], comps[start:end], kinds[start:end]
+        if len(points) - offsets[-1] >= 2:
+            offsets.append(len(points))
+        else:
+            del points[offsets[-1]:], speeds[offsets[-1]:], times[offsets[-1]:]
+            del weights[offsets[-1]:], comps[offsets[-1]:], kinds[offsets[-1]:]
+        in_ray = after_leave = False
+
+    for line in text.splitlines():
+        if line.startswith("ENTER:"):
+            if in_ray or after_leave:
+                finish()
+            if len(offsets) - 1 >= max_rays:
+                break
+            in_ray = True
+            absorbed = False
+            M = np.eye(4)
+            comp = -1
+            last_v = None
+        elif not (in_ray or after_leave):
+            continue
+        elif line.startswith("COMP:"):
+            name = _QUOTED_NAME_RE.search(line).group(1)
+            M = matrices.get(name, np.eye(4))
+            comp = comp_index.get(name, -1)
+        elif line.startswith("STATE:"):
+            if not (after_leave and absorbed):
+                add(_floats(line[6:]), STATE)
+            if after_leave:
+                finish()
+        elif line.startswith("SCATTER:"):
+            add(_floats(line[8:]), SCATTER)
+        elif line.startswith("ABSORB:"):
+            absorbed = True
+            if len(points) > offsets[-1]:
+                kinds[-1] = ABSORB
+        elif line.startswith("LEAVE:"):
+            in_ray = False
+            after_leave = True
+    if in_ray or after_leave:
+        finish()
+
+    return TraceRays(
+        points=np.array(points, dtype=float).reshape(-1, 3),
+        ray_offsets=np.array(offsets, dtype=int),
+        speed=np.array(speeds, dtype=float),
+        time=np.array(times, dtype=float),
+        weight=np.array(weights, dtype=float),
+        component=np.array(comps, dtype=int),
+        kind=np.array(kinds, dtype=int),
+        component_names=list(component_names),
+    )

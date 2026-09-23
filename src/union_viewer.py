@@ -21,8 +21,13 @@ from gui_helpers import (
     component_color_key,
     clip_planes,
     parse_instrument_params,
+    RAY_COLOR_MODES,
+    rays_reaching,
+    ray_segment_indices,
+    ray_color_values,
+    colormap,
 )
-from mcstas_trace import trace_instrument
+from mcstas_trace import trace_instrument, parse_rays, SCATTER, ABSORB
 import argparse
 
 # The meshers offered in the dock, in display order.
@@ -215,10 +220,12 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     return group
 
 
-def compute_trace_data(input_file, force_pygen, params):
+def compute_trace_data(input_file, force_pygen, params, ncount, seed):
     """Run input_file through mcrun --trace. Worker-process side of
     TraceWorker, like compute_mesh_data for MeshBuildWorker."""
-    return trace_instrument(input_file, params=params, force_pygen=force_pygen)
+    return trace_instrument(
+        input_file, params=params, force_pygen=force_pygen, ncount=ncount, seed=seed
+    )
 
 
 def build_component_group(components, colors):
@@ -254,6 +261,54 @@ def build_component_group(components, colors):
         group.component_objects[name] = comp_group
         group.component_is_arm[name] = comp.is_arm
     return group
+
+
+UNIFORM_RAY_COLOR = "#1f6fd1"
+
+
+def build_ray_group(rays, ray_indices, color_mode):
+    """One Line for every chosen ray (vertex-coloured unless color_mode is
+    "Uniform") plus Points marking scatterings and absorptions. Returns
+    (group, (vmin, vmax) or None)."""
+    group = gfx.Group()
+    pairs = ray_segment_indices(rays, ray_indices)
+    positions = rays.points[pairs].reshape(-1, 3).astype(np.float32)
+    values = ray_color_values(rays, color_mode)
+    value_range = None
+    if len(positions) == 0:
+        group.ray_line = None
+    elif values is None:
+        group.ray_line = gfx.Line(
+            gfx.Geometry(positions=positions),
+            gfx.LineSegmentMaterial(thickness=1.5, color=UNIFORM_RAY_COLOR),
+        )
+    else:
+        used = values[pairs.ravel()]
+        value_range = (float(used.min()), float(used.max()))
+        group.ray_line = gfx.Line(
+            gfx.Geometry(positions=positions, colors=colormap(used, *value_range)),
+            gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex"),
+        )
+    if group.ray_line is not None:
+        group.add(group.ray_line)
+
+    in_chosen = np.zeros(len(rays.points), dtype=bool)
+    for i in ray_indices:
+        in_chosen[rays.ray_offsets[i]:rays.ray_offsets[i + 1]] = True
+    group.scatter_points = group.absorb_points = None
+    for attr, kind, color, size in (
+        ("scatter_points", SCATTER, "#e67e22", 6),
+        ("absorb_points", ABSORB, "#c0392b", 8),
+    ):
+        points = rays.points[in_chosen & (rays.kind == kind)]
+        if len(points):
+            obj = gfx.Points(
+                gfx.Geometry(positions=points.astype(np.float32)),
+                gfx.PointsMaterial(size=size, color=color),
+            )
+            group.add(obj)
+            setattr(group, attr, obj)
+    return group, value_range
 
 
 def generate_group(
@@ -459,29 +514,38 @@ class TraceWorker(QtCore.QObject):
     the trace is pure Python, so like MeshBuildWorker it runs in a worker
     process rather than only on this QThread."""
 
-    finished = QtCore.Signal(object, float)
+    finished = QtCore.Signal(object, object, float)
     failed = QtCore.Signal(str)
 
-    def __init__(self, process_pool, input_file, force_pygen, params, colors):
+    def __init__(
+        self, process_pool, input_file, force_pygen, params, ncount, seed, colors
+    ):
         super().__init__()
         self.process_pool = process_pool
         self.input_file = input_file
         self.force_pygen = force_pygen
         self.params = params
+        self.ncount = ncount
+        self.seed = seed
         self.colors = colors
 
     def run(self):
         start = time.time()
         try:
-            components = self.process_pool.submit(
-                compute_trace_data, self.input_file, self.force_pygen, self.params
+            components, rays = self.process_pool.submit(
+                compute_trace_data,
+                self.input_file,
+                self.force_pygen,
+                self.params,
+                self.ncount,
+                self.seed,
             ).result()
             group = build_component_group(components, self.colors)
         except Exception as e:
             traceback.print_exc()
             self.failed.emit(f"{type(e).__name__}: {e}")
             return
-        self.finished.emit(group, time.time() - start)
+        self.finished.emit(group, rays, time.time() - start)
 
 
 # ============================================================
@@ -525,6 +589,9 @@ class Viewer(QtWidgets.QMainWindow):
         self._trace_thread = None
         self._trace_worker = None
         self.trace_group = None
+        self.trace_rays = None
+        self.ray_group = None
+        self.ray_file = None
 
         # ----------------------------------------------------
         # Render widget
@@ -715,6 +782,14 @@ class Viewer(QtWidgets.QMainWindow):
         self.arms_checkbox.setToolTip("Arms only mark coordinate frames.")
         settings_layout.addWidget(self.arms_checkbox)
 
+        self.rays_checkbox = QtWidgets.QCheckBox("Show neutron rays")
+        self.rays_checkbox.setChecked(True)
+        self.rays_checkbox.setToolTip(
+            "Trace neutrons through the instrument with mcrun --trace and "
+            "draw their paths. Options are in the Neutron Rays panel."
+        )
+        settings_layout.addWidget(self.rays_checkbox)
+
         self.params_edit = QtWidgets.QLineEdit()
         self.params_edit.setPlaceholderText("Instrument parameters, e.g. l_min=1 l_max=5")
         self.params_edit.setToolTip(
@@ -850,6 +925,96 @@ class Viewer(QtWidgets.QMainWindow):
         )
 
         # ----------------------------------------------------
+        # Neutron rays dock
+        # ----------------------------------------------------
+
+        rays_dock, rays_layout = self._add_dock("Neutron Rays")
+        self.rays_options = QtWidgets.QWidget()
+        options_layout = QtWidgets.QVBoxLayout(self.rays_options)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        rays_layout.addWidget(self.rays_options)
+
+        count_layout = QtWidgets.QHBoxLayout()
+        count_layout.addWidget(QtWidgets.QLabel("Number of rays"))
+        self.ray_count_val = QtWidgets.QSpinBox()
+        self.ray_count_val.setRange(1, 1000)
+        self.ray_count_val.setValue(50)
+        self.ray_count_val.setToolTip(
+            "Trace mode is single-threaded and verbose - keep this small."
+        )
+        count_layout.addWidget(self.ray_count_val)
+        options_layout.addLayout(count_layout)
+
+        seed_layout = QtWidgets.QHBoxLayout()
+        seed_layout.addWidget(QtWidgets.QLabel("Seed"))
+        self.ray_seed_val = QtWidgets.QSpinBox()
+        self.ray_seed_val.setRange(0, 2**31 - 1)
+        self.ray_seed_val.setSpecialValueText("random")
+        self.ray_seed_val.setToolTip("0 picks a new random seed on every run.")
+        seed_layout.addWidget(self.ray_seed_val)
+        options_layout.addLayout(seed_layout)
+
+        rerun_layout = QtWidgets.QHBoxLayout()
+        self.rerun_rays_button = QtWidgets.QPushButton("Re-run")
+        self.rerun_rays_button.setToolTip("Trace a new set of rays.")
+        self.rerun_rays_button.clicked.connect(self.rerun_rays)
+        rerun_layout.addWidget(self.rerun_rays_button)
+        self.load_trace_button = QtWidgets.QPushButton("Load trace file...")
+        self.load_trace_button.setToolTip(
+            "Show rays from saved output of 'mcrun <instr> --trace -n N > file.txt'."
+        )
+        self.load_trace_button.clicked.connect(self.load_trace_file)
+        rerun_layout.addWidget(self.load_trace_button)
+        options_layout.addLayout(rerun_layout)
+
+        self.use_live_rays_button = QtWidgets.QPushButton("Use live run")
+        self.use_live_rays_button.setToolTip("Go back to tracing the loaded instrument.")
+        self.use_live_rays_button.clicked.connect(self.use_live_rays)
+        self.use_live_rays_button.hide()
+        options_layout.addWidget(self.use_live_rays_button)
+
+        color_layout = QtWidgets.QHBoxLayout()
+        color_layout.addWidget(QtWidgets.QLabel("Colour by"))
+        self.ray_color_combo = QtWidgets.QComboBox()
+        self.ray_color_combo.addItems(list(RAY_COLOR_MODES))
+        color_layout.addWidget(self.ray_color_combo)
+        options_layout.addLayout(color_layout)
+
+        reaching_layout = QtWidgets.QHBoxLayout()
+        reaching_layout.addWidget(QtWidgets.QLabel("Only rays reaching"))
+        self.ray_reaching_combo = QtWidgets.QComboBox()
+        self.ray_reaching_combo.addItem("any component", None)
+        reaching_layout.addWidget(self.ray_reaching_combo)
+        options_layout.addLayout(reaching_layout)
+
+        self.scatter_points_checkbox = QtWidgets.QCheckBox("Mark scatterings")
+        self.scatter_points_checkbox.setChecked(True)
+        self.scatter_points_checkbox.setToolTip(
+            "Points where a ray changed direction. Union volume boundary "
+            "crossings are not marked."
+        )
+        options_layout.addWidget(self.scatter_points_checkbox)
+        self.absorb_points_checkbox = QtWidgets.QCheckBox("Mark absorptions")
+        self.absorb_points_checkbox.setChecked(True)
+        options_layout.addWidget(self.absorb_points_checkbox)
+
+        self.ray_info_label = QtWidgets.QLabel("")
+        self.ray_info_label.setWordWrap(True)
+        self.ray_info_label.setStyleSheet("color: gray;")
+        options_layout.addWidget(self.ray_info_label)
+
+        rays_layout.addStretch()
+        rays_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        self.ray_rerun_timer = QtCore.QTimer(self)
+        self.ray_rerun_timer.setSingleShot(True)
+        self.ray_rerun_timer.setInterval(700)
+        self.ray_rerun_timer.timeout.connect(self.rerun_rays)
+
+        # ----------------------------------------------------
         # Geometry visibility dock
         # ----------------------------------------------------
 
@@ -923,6 +1088,13 @@ class Viewer(QtWidgets.QMainWindow):
         self.components_checkbox.stateChanged.connect(self.on_components_changed)
         self.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         self.params_edit.editingFinished.connect(self.reload_trace)
+        self.rays_checkbox.stateChanged.connect(self.on_rays_changed)
+        self.ray_count_val.valueChanged.connect(self.ray_rerun_timer.start)
+        self.ray_seed_val.valueChanged.connect(self.ray_rerun_timer.start)
+        self.ray_color_combo.currentIndexChanged.connect(self.rebuild_ray_group)
+        self.ray_reaching_combo.currentIndexChanged.connect(self.rebuild_ray_group)
+        self.scatter_points_checkbox.stateChanged.connect(self.apply_ray_visibility)
+        self.absorb_points_checkbox.stateChanged.connect(self.apply_ray_visibility)
         self.axis_combo.currentTextChanged.connect(self.on_clip_changed)
         self.mode_combo.currentTextChanged.connect(self.on_clip_changed)
         self.slice_val.valueChanged.connect(self.on_clip_changed)
@@ -1095,12 +1267,13 @@ class Viewer(QtWidgets.QMainWindow):
             obj.visible = visible
 
     def apply_trace_clipping(self):
-        if self.trace_group is None:
-            return
         planes = clip_planes(self.clip)
-        for obj in self.trace_group.iter():
-            if getattr(obj, "material", None) is not None:
-                obj.material.clipping_planes = planes
+        for group in (self.trace_group, self.ray_group):
+            if group is None:
+                continue
+            for obj in group.iter():
+                if getattr(obj, "material", None) is not None:
+                    obj.material.clipping_planes = planes
 
     def pick_component_color(self, name):
         if self.trace_group is None or name not in self.trace_group.component_objects:
@@ -1273,11 +1446,14 @@ class Viewer(QtWidgets.QMainWindow):
             self.reload_meshes(force_reload=pending_force)
 
     # ========================================================
-    # McStas trace (components)
+    # McStas trace (components and rays)
     # ========================================================
 
+    def live_rays_enabled(self):
+        return self.rays_checkbox.isChecked() and self.ray_file is None
+
     def trace_enabled(self):
-        return self.components_checkbox.isChecked()
+        return self.components_checkbox.isChecked() or self.live_rays_enabled()
 
     def reload_trace(self):
         if self.input_file is None or not self.trace_enabled():
@@ -1301,6 +1477,8 @@ class Viewer(QtWidgets.QMainWindow):
             self.input_file,
             self.pygen_checkbox.isChecked(),
             params,
+            self.ray_count_val.value() if self.live_rays_enabled() else 0,
+            self.ray_seed_val.value() or None,
             self.colors,
         )
         worker.moveToThread(thread)
@@ -1318,17 +1496,20 @@ class Viewer(QtWidgets.QMainWindow):
         self._trace_worker = worker
         thread.start()
 
-    def _on_trace_finished(self, group, elapsed):
+    def _on_trace_finished(self, group, rays, elapsed):
         if self.trace_group is not None:
             self.scene.remove(self.trace_group)
         self.trace_group = group
         self.scene.add(group)
         self.rebuild_component_panel()
         self.apply_component_visibility()
+        status = f"{len(group.component_objects)} McStas components"
+        if self.ray_file is None:
+            self.set_trace_rays(rays)
+            if rays is not None:
+                status += f", {rays.n_rays} rays"
         self.apply_trace_clipping()
-        self._set_trace_status(
-            f"{len(group.component_objects)} McStas components ({elapsed:.1f} s)"
-        )
+        self._set_trace_status(f"{status} ({elapsed:.1f} s)")
 
     def _on_trace_failed(self, error_text):
         print("McStas trace failed:")
@@ -1360,6 +1541,100 @@ class Viewer(QtWidgets.QMainWindow):
             self.reload_trace()
         else:
             self.apply_component_visibility()
+
+    def on_rays_changed(self):
+        self.rays_options.setEnabled(self.rays_checkbox.isChecked())
+        if not self.rays_checkbox.isChecked():
+            self.apply_ray_visibility()
+        elif self.trace_rays is None:
+            self.reload_trace()
+        else:
+            self.rebuild_ray_group()
+
+    def rerun_rays(self):
+        self.ray_rerun_timer.stop()
+        if self.live_rays_enabled():
+            self.reload_trace()
+
+    def load_trace_file(self):
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load McStas trace", "", "Trace output (*.txt *.log *.out);;All Files (*)"
+        )
+        if not filename:
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            rays = parse_rays(Path(filename).read_text(errors="replace"))
+        except Exception as e:
+            traceback.print_exc()
+            self._set_trace_status(f"Could not read '{filename}': {e}", error=True)
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if rays.n_rays == 0:
+            self._set_trace_status(f"No neutron rays found in '{filename}'.", error=True)
+            return
+        self.ray_file = filename
+        self.use_live_rays_button.show()
+        self.rerun_rays_button.setEnabled(False)
+        self.rays_checkbox.setChecked(True)
+        self.set_trace_rays(rays)
+        self.apply_trace_clipping()
+        self._set_trace_status(f"{rays.n_rays} rays from {Path(filename).name}")
+
+    def use_live_rays(self):
+        self.ray_file = None
+        self.use_live_rays_button.hide()
+        self.rerun_rays_button.setEnabled(True)
+        self.reload_trace()
+
+    def set_trace_rays(self, rays):
+        self.trace_rays = rays
+        current = self.ray_reaching_combo.currentData()
+        self.ray_reaching_combo.blockSignals(True)
+        self.ray_reaching_combo.clear()
+        self.ray_reaching_combo.addItem("any component", None)
+        for name in [] if rays is None else rays.component_names:
+            self.ray_reaching_combo.addItem(name, name)
+        index = self.ray_reaching_combo.findData(current)
+        self.ray_reaching_combo.setCurrentIndex(max(index, 0))
+        self.ray_reaching_combo.blockSignals(False)
+        self.rebuild_ray_group()
+
+    def rebuild_ray_group(self):
+        if self.ray_group is not None:
+            self.scene.remove(self.ray_group)
+            self.ray_group = None
+        rays = self.trace_rays
+        if rays is None:
+            self.ray_info_label.setText("")
+            return
+        chosen = rays_reaching(rays, self.ray_reaching_combo.currentData())
+        mode = self.ray_color_combo.currentText()
+        self.ray_group, value_range = build_ray_group(rays, chosen, mode)
+        self.scene.add(self.ray_group)
+        self.apply_ray_visibility()
+        self.apply_trace_clipping()
+
+        info = f"Showing {len(chosen)} of {rays.n_rays} rays."
+        if value_range is not None:
+            label, unit = RAY_COLOR_MODES[mode]
+            info += (
+                f"\n{label}: {value_range[0]:.4g} (purple) to "
+                f"{value_range[1]:.4g} (yellow) {unit}"
+            )
+        self.ray_info_label.setText(info)
+
+    def apply_ray_visibility(self):
+        if self.ray_group is None:
+            return
+        self.ray_group.visible = self.rays_checkbox.isChecked()
+        for obj, checkbox in (
+            (self.ray_group.scatter_points, self.scatter_points_checkbox),
+            (self.ray_group.absorb_points, self.absorb_points_checkbox),
+        ):
+            if obj is not None:
+                obj.visible = checkbox.isChecked()
 
     def fit_whole_instrument(self):
         if self.trace_group is None or not self.trace_group.visible:

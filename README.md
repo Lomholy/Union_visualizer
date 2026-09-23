@@ -18,6 +18,10 @@ And see your union environment become a CAD model!
 
 With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file. Parameters without a default can be given in the "Instrument parameters" field as `name=value` pairs.
 
+#### Neutron rays
+
+With "Show neutron rays" ticked (the default), the same `mcrun --trace` run also traces a small number of neutrons (50 by default, set in the Neutron Rays panel) and draws their paths through the instrument and your Union sample. Rays can be coloured by speed, weight or time, limited to those reaching a chosen component, and marked where they scatter or are absorbed. Trace mode is single-threaded and verbose, so this is meant for small instruments and a few hundred rays at most. "Load trace file..." shows rays from saved `mcrun <instrument> --trace -n N > trace.txt` output instead.
+
 
 ---
 ### Dependencies:
