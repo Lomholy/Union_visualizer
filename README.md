@@ -38,7 +38,7 @@ The clipping plane can be placed in any component's coordinate system (e.g. the 
 
 - pythonocc-core (For the boundary representation math exposed by the Open Cascade Kernel)
 
-- shapely and mapbox_earcut (For cutting and capping meshes at the clipping plane on export)
+- shapely and mapbox_earcut (Optional: close the cut faces when exporting a clipped instrument; without them the cut is left open)
 
 
 ### Installation
