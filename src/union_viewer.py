@@ -930,6 +930,14 @@ class Viewer(QtWidgets.QMainWindow):
         frame_layout = QtWidgets.QHBoxLayout()
         frame_layout.addWidget(QtWidgets.QLabel("Coordinate system"))
         self.clip_frame_combo = QtWidgets.QComboBox()
+        # A long component name would otherwise widen the combo box (and
+        # with it the whole left-hand column) to fit it - cap the box at a
+        # fixed width instead and let Qt elide text that doesn't fit; the
+        # full name is still available as each item's tooltip.
+        self.clip_frame_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.clip_frame_combo.setMinimumContentsLength(12)
         self.clip_frame_combo.addItem("World", None)
         self.clip_frame_combo.setToolTip(
             "Axis and position are taken in this component's own coordinate "
@@ -1326,6 +1334,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip_frame_combo.addItem("World", None)
         for name in names:
             self.clip_frame_combo.addItem(name, name)
+            self.clip_frame_combo.setItemData(
+                self.clip_frame_combo.count() - 1, name, QtCore.Qt.ItemDataRole.ToolTipRole
+            )
         self.clip_frame_combo.setCurrentIndex(max(self.clip_frame_combo.findData(current), 0))
         self.clip_frame_combo.blockSignals(False)
         if self.clip_frame_combo.currentData() != current:
