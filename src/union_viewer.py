@@ -509,9 +509,10 @@ class TraceWorker(QtCore.QObject):
 class CollapsibleTitleBar(QtWidgets.QWidget):
     """Dock title bar whose arrow (or a double-click on the title)
     collapses the dock to just this bar, so the other docks get the room.
-    The collapsed state is remembered in settings."""
+    A dock starts as collapsed_by_default until the user toggles it; after
+    that, their choice is remembered in settings."""
 
-    def __init__(self, dock, settings, on_toggled=None):
+    def __init__(self, dock, settings, on_toggled=None, collapsed_by_default=True):
         super().__init__(dock)
         self.dock = dock
         self.settings = settings
@@ -526,7 +527,7 @@ class CollapsibleTitleBar(QtWidgets.QWidget):
         wrapper_layout.setContentsMargins(0, 0, 0, 0)
         wrapper_layout.addWidget(self.content)
         dock.setWidget(wrapper)
-        self.settings_key = f"collapsed/{dock.windowTitle()}"
+        self.settings_key = f"panel_collapsed/{dock.windowTitle()}"
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
@@ -552,7 +553,9 @@ class CollapsibleTitleBar(QtWidgets.QWidget):
         layout.addWidget(float_button)
 
         self.collapsed = False
-        self.set_collapsed(settings.value(self.settings_key, False, type=bool), notify=False)
+        self.set_collapsed(
+            settings.value(self.settings_key, collapsed_by_default, type=bool), notify=False
+        )
 
     def set_collapsed(self, collapsed, notify=True):
         self.collapsed = collapsed
@@ -563,9 +566,10 @@ class CollapsibleTitleBar(QtWidgets.QWidget):
         self.toggle_button.setArrowType(
             QtCore.Qt.ArrowType.RightArrow if collapsed else QtCore.Qt.ArrowType.DownArrow
         )
-        self.settings.setValue(self.settings_key, collapsed)
-        if notify and self.on_toggled is not None:
-            self.on_toggled()
+        if notify:
+            self.settings.setValue(self.settings_key, collapsed)
+            if self.on_toggled is not None:
+                self.on_toggled()
 
     def mouseDoubleClickEvent(self, event):
         self.set_collapsed(not self.collapsed)
@@ -754,7 +758,7 @@ class Viewer(QtWidgets.QMainWindow):
         # Settings dock
         # ----------------------------------------------------
 
-        settings_dock, settings_layout = self._add_dock("Settings")
+        settings_dock, settings_layout = self._add_dock("Settings", collapsed=False)
 
         self.open_file_button = QtWidgets.QPushButton("Open File...")
         self.open_file_button.setToolTip("Open a McStas instrument (shortcut: Ctrl+O)")
@@ -1049,9 +1053,10 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.update_mesher_capability_ui()
 
-    def _add_dock(self, title):
-        """Create a collapsible, left-docked QDockWidget titled `title` and
-        return (dock, layout) for the caller to populate."""
+    def _add_dock(self, title, collapsed=True):
+        """Create a collapsible, left-docked QDockWidget titled `title`
+        (collapsed at first unless collapsed=False) and return
+        (dock, layout) for the caller to populate."""
         dock = QtWidgets.QDockWidget(title, self)
         dock.setAllowedAreas(
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
@@ -1060,7 +1065,9 @@ class Viewer(QtWidgets.QMainWindow):
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
         dock.setWidget(widget)
-        dock.setTitleBarWidget(CollapsibleTitleBar(dock, self.settings, self.rebalance_docks))
+        dock.setTitleBarWidget(
+            CollapsibleTitleBar(dock, self.settings, self.rebalance_docks, collapsed)
+        )
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         return dock, layout
 
