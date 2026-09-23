@@ -2,6 +2,8 @@
 normalisation/grouping, vacuum detection, default colour assignment, and
 neutron ray selection/colouring."""
 
+import importlib.util
+
 import numpy as np
 import trimesh
 
@@ -127,22 +129,34 @@ def instrument_param_args(param_values):
     return [f"{name}={text.strip()}" for name, text in param_values.items() if text.strip()]
 
 
+def _can_cap_slices():
+    """trimesh can only cap a cut mesh with shapely and mapbox_earcut."""
+    try:
+        return all(importlib.util.find_spec(m) for m in ("shapely", "mapbox_earcut"))
+    except (ImportError, ValueError):
+        return False
+
+
 def clip_mesh(mesh, clip):
     """mesh cut by the viewer's clip plane, keeping the same side as the
-    meshers and capping the cut when mesh is closed. None if nothing is
-    left."""
+    view. The cut is capped when mesh is closed and trimesh's capping
+    dependencies are installed, and left open otherwise. None if nothing
+    is left."""
     if not clip["enable"]:
         return mesh
     normal, origin = clip_plane(clip)
-    try:
-        clipped = trimesh.intersections.slice_mesh_plane(
-            mesh, normal, origin, cap=mesh.is_watertight
-        )
-    except Exception:
-        clipped = trimesh.intersections.slice_mesh_plane(mesh, normal, origin)
-    if clipped is None or len(clipped.faces) == 0:
+    if mesh.is_watertight and _can_cap_slices():
+        try:
+            clipped = trimesh.intersections.slice_mesh_plane(mesh, normal, origin, cap=True)
+            return clipped if clipped is not None and len(clipped.faces) else None
+        except Exception as e:
+            print(f"Warning: could not cap the clipped mesh ({e}); exporting it open.")
+    vertices, faces = trimesh.intersections.slice_faces_plane(
+        mesh.vertices, mesh.faces, normal, origin
+    )[:2]
+    if len(faces) == 0:
         return None
-    return clipped
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
 
 # ---------------------------------------------------------------------------

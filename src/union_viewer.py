@@ -10,7 +10,7 @@ from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
 from preprocess import preprocess, instrument_parameters
-from clipping import resolve_clip_frame, clip_plane
+from clipping import resolve_clip_frame
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
 from brep import build_many_brep_meshes
@@ -123,16 +123,8 @@ def compute_mesh_data(
         )
     print("Building meshes")
 
-    # The clip frame can move when the file changes, which changes every
-    # clipped mesh.
-    clip_key = (
-        tuple(np.round(np.concatenate(clip_plane(clip)), 12)) if clip["enable"] else None
-    )
     new_dependencies = {
-        name: (
-            component_dependency_signature(name, union_geometries, world_bboxes),
-            clip_key,
-        )
+        name: component_dependency_signature(name, union_geometries, world_bboxes)
         for name in union_geometries
     }
 
@@ -235,6 +227,11 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
         group.geometry_meshes[key] = gfx_mesh
 
     return group
+
+
+# The viewer clips Union meshes with pygfx clipping planes like everything
+# else, so its meshers never cut and a clip change never remeshes.
+NO_CLIP = {"enable": False, "axis": "X", "mode": "Above", "position": 0.0}
 
 
 def compute_trace_data(input_file, force_pygen, params, ncount, seed):
@@ -1317,9 +1314,9 @@ class Viewer(QtWidgets.QMainWindow):
                 visible = False
             obj.visible = visible
 
-    def apply_trace_clipping(self):
+    def apply_clipping(self):
         planes = clip_planes(self.resolved_clip())
-        for group in (self.trace_group, self.ray_group):
+        for group in (self.current_group, self.trace_group, self.ray_group):
             if group is None:
                 continue
             for obj in group.iter():
@@ -1416,17 +1413,27 @@ class Viewer(QtWidgets.QMainWindow):
         self.reload_trace()
 
     def _export_parts(self):
-        """(Union meshes, McStas component meshes) currently visible, the
-        components cut by the clip plane the same way the meshers cut the
-        Union geometry."""
+        """(Union meshes, McStas component meshes, names that failed) for
+        what is currently visible, each cut by the clip plane as shown."""
+        clip = self.resolved_clip()
+        failed = []
+
+        def clipped(name, mesh):
+            try:
+                return clip_mesh(mesh, clip)
+            except Exception:
+                traceback.print_exc()
+                failed.append(name)
+                return None
+
         union_parts = []
         if self.current_group is not None:
             trimeshes = self.current_group.geometry_trimeshes
-            union_parts = [
-                trimeshes[key]
-                for key, mesh in self.current_group.geometry_meshes.items()
-                if mesh.visible and trimeshes.get(key) is not None
-            ]
+            for key, obj in self.current_group.geometry_meshes.items():
+                if obj.visible and trimeshes.get(key) is not None:
+                    mesh = clipped(key, trimeshes[key])
+                    if mesh is not None:
+                        union_parts.append(mesh)
         component_parts = []
         if self.trace_group is not None and self.trace_group.visible:
             for name, obj in self.trace_group.component_objects.items():
@@ -1434,10 +1441,10 @@ class Viewer(QtWidgets.QMainWindow):
                     continue
                 mesh = self.trace_group.components[name].export_mesh()
                 if mesh is not None:
-                    mesh = clip_mesh(mesh, self.resolved_clip())
+                    mesh = clipped(name, mesh)
                 if mesh is not None:
                     component_parts.append(mesh)
-        return union_parts, component_parts
+        return union_parts, component_parts, failed
 
     def export_stl(self):
         if self.current_group is None and self.trace_group is None:
@@ -1446,7 +1453,14 @@ class Viewer(QtWidgets.QMainWindow):
             )
             return
 
-        union_parts, component_parts = self._export_parts()
+        try:
+            union_parts, component_parts, failed = self._export_parts()
+        except Exception as e:
+            traceback.print_exc()
+            QtWidgets.QMessageBox.critical(
+                self, "Export STL", f"Failed to prepare the export:\n{e}"
+            )
+            return
         parts = union_parts + component_parts
         if not parts:
             QtWidgets.QMessageBox.warning(
@@ -1476,7 +1490,8 @@ class Viewer(QtWidgets.QMainWindow):
             self,
             "Export STL",
             f"Exported {len(union_parts)} Union mesh(es) and "
-            f"{len(component_parts)} McStas component(s) to:\n{filename}",
+            f"{len(component_parts)} McStas component(s) to:\n{filename}"
+            + (f"\n\nLeft out (could not be clipped): {', '.join(failed)}" if failed else ""),
         )
 
     # ========================================================
@@ -1506,7 +1521,7 @@ class Viewer(QtWidgets.QMainWindow):
         worker = MeshBuildWorker(
             self._mesh_process_pool,
             self.input_file,
-            dict(self.clip),
+            NO_CLIP,
             self.colors,
             self.meshes,
             self.dependencies,
@@ -1539,7 +1554,6 @@ class Viewer(QtWidgets.QMainWindow):
             name: np.array(M) for name, M in instrument_info["world_matrices"].items()
         }
         self.rebuild_clip_frame_combo()
-        self.apply_trace_clipping()
         if self.current_group is not None:
             self.scene.remove(self.current_group)
         self.dependencies = dependencies
@@ -1548,6 +1562,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.current_group = new_group
 
         self.scene.add(self.current_group)
+        self.apply_clipping()
 
         self.rebuild_geometry_panel()
         self.apply_geometry_visibility()
@@ -1637,7 +1652,7 @@ class Viewer(QtWidgets.QMainWindow):
             self.set_trace_rays(rays)
             if rays is not None:
                 status += f", {rays.n_rays} rays"
-        self.apply_trace_clipping()
+        self.apply_clipping()
         self._set_trace_status(f"{status} ({elapsed:.1f} s)")
 
     def _on_trace_failed(self, error_text):
@@ -1708,7 +1723,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.rerun_rays_button.setEnabled(False)
         self.rays_checkbox.setChecked(True)
         self.set_trace_rays(rays)
-        self.apply_trace_clipping()
+        self.apply_clipping()
         self._set_trace_status(f"{rays.n_rays} rays from {Path(filename).name}")
 
     def use_live_rays(self):
@@ -1743,7 +1758,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_group, value_range = build_ray_group(rays, chosen, mode)
         self.scene.add(self.ray_group)
         self.apply_ray_visibility()
-        self.apply_trace_clipping()
+        self.apply_clipping()
 
         info = f"Showing {len(chosen)} of {rays.n_rays} rays."
         if value_range is not None:
@@ -1839,9 +1854,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.clip["mode"] = self.mode_combo.currentText()
         self.clip["position"] = self.slice_val.value()
         self.clip["frame"] = self.clip_frame_combo.currentData()
-        self.apply_trace_clipping()
-        # Global cut, not part of any component's dependency signature.
-        self.reload_meshes(force_reload=True)
+        self.apply_clipping()
 
     def on_mesher_changed(self):
         self.mesher = self.mesher_box.currentData()
