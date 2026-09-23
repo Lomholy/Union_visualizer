@@ -190,7 +190,8 @@ RAY_COLOR_MODES = {
     "Time": ("Time", "ms"),
 }
 
-_VIRIDIS = np.array([
+# Public so a colorbar widget can build the same gradient stops as colormap().
+VIRIDIS_STOPS = np.array([
     [0.267, 0.005, 0.329],
     [0.230, 0.322, 0.546],
     [0.128, 0.567, 0.551],
@@ -248,7 +249,7 @@ def colormap(values, vmin=None, vmax=None):
     vmin = values.min() if vmin is None else vmin
     vmax = values.max() if vmax is None else vmax
     t = np.zeros_like(values) if vmax <= vmin else (values - vmin) / (vmax - vmin)
-    t = np.clip(t, 0, 1) * (len(_VIRIDIS) - 1)
-    stops = np.arange(len(_VIRIDIS))
-    rgb = np.stack([np.interp(t, stops, _VIRIDIS[:, c]) for c in range(3)], axis=1)
+    t = np.clip(t, 0, 1) * (len(VIRIDIS_STOPS) - 1)
+    stops = np.arange(len(VIRIDIS_STOPS))
+    rgb = np.stack([np.interp(t, stops, VIRIDIS_STOPS[:, c]) for c in range(3)], axis=1)
     return np.concatenate([rgb, np.ones((len(values), 1))], axis=1).astype(np.float32)

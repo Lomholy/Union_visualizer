@@ -486,11 +486,15 @@ def parse_rays(text, max_rays=1000):
     velocity is unchanged (e.g. Union_master crossing a volume boundary) is
     tagged PASS rather than SCATTER. The STATE printed after LEAVE: is the
     ray's exit point, except for an absorbed ray, where McStas prints a
-    restored earlier state instead, so it is skipped."""
+    restored earlier state instead, so it is skipped. A monitor with
+    restore_neutron=1 (e.g. PSD_monitor) does the same thing mid-trace: it
+    detects the ray at its plane, then restores the neutron's
+    pre-detection state so later code sees it unperturbed - that restored
+    STATE is dropped too (see add())."""
     matrices = read_positions(text)
     component_names = list(matrices)
     comp_index = {name: i for i, name in enumerate(component_names)}
-    points, speeds, times, weights, comps, kinds = [], [], [], [], [], []
+    points, velocities, speeds, times, weights, comps, kinds = [], [], [], [], [], [], []
     offsets = [0]
     M = np.eye(4)
     comp = -1
@@ -505,6 +509,19 @@ def parse_rays(text, max_rays=1000):
         v = M[:3, :3] @ values[3:6]
         if kind == SCATTER and last_v is not None and np.allclose(v, last_v, rtol=1e-6, atol=1e-9):
             kind = PASS
+        if (
+            kind == STATE
+            and len(points) - offsets[-1] >= 2
+            and kinds[-1] != STATE
+            and np.allclose(points[-2], r, atol=1e-9)
+            and np.allclose(velocities[-2], v, rtol=1e-6, atol=1e-9)
+        ):
+            # restore_neutron: this STATE is an exact duplicate of the
+            # point two steps back. Drawing a segment to it would make the
+            # path shoot past the detector and snap back, so it's dropped
+            # and the ray is left ending at the detection point instead.
+            last_v = v
+            return
         last_v = v
         if len(points) > offsets[-1] and np.allclose(points[-1], r, atol=1e-9):
             # The same point printed again (e.g. once per component frame):
@@ -516,6 +533,7 @@ def parse_rays(text, max_rays=1000):
             weights[-1] = values[10]
             return
         points.append(r)
+        velocities.append(v)
         speeds.append(float(np.linalg.norm(v)))
         times.append(values[6])
         weights.append(values[10])
@@ -530,13 +548,13 @@ def parse_rays(text, max_rays=1000):
         end = start
         while end < len(points) and abs(speeds[end] - 1.0) < 1e-9:
             end += 1
-        del points[start:end], speeds[start:end], times[start:end]
+        del points[start:end], velocities[start:end], speeds[start:end], times[start:end]
         del weights[start:end], comps[start:end], kinds[start:end]
         if len(points) - offsets[-1] >= 2:
             offsets.append(len(points))
         else:
-            del points[offsets[-1]:], speeds[offsets[-1]:], times[offsets[-1]:]
-            del weights[offsets[-1]:], comps[offsets[-1]:], kinds[offsets[-1]:]
+            del points[offsets[-1]:], velocities[offsets[-1]:], speeds[offsets[-1]:]
+            del times[offsets[-1]:], weights[offsets[-1]:], comps[offsets[-1]:], kinds[offsets[-1]:]
         in_ray = after_leave = False
 
     for line in text.splitlines():

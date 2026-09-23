@@ -24,7 +24,7 @@ The clipping plane can be placed in any component's coordinate system (e.g. the 
 
 #### Neutron rays
 
-With "Show neutron rays" ticked (the default), the same `mcrun --trace` run also traces a small number of neutrons (50 by default, set in the Neutron Rays panel) and draws their paths through the instrument and your Union sample. Rays can be coloured by speed, weight or time, limited to those reaching a chosen component, and marked where they scatter or are absorbed. Trace mode is single-threaded and verbose, so this is meant for small instruments and a few hundred rays at most. "Load trace file..." shows rays from saved `mcrun <instrument> --trace -n N > trace.txt` output instead.
+With "Show neutron rays" ticked (the default), the same `mcrun --trace` run also traces a number of neutrons (50 by default, set in the Neutron Rays panel) and draws their paths through the instrument and your Union sample. Rays can be coloured by speed, weight or time (a colourbar appears under "Colour by" whenever a mode other than Uniform is chosen), limited to those reaching a chosen component, and marked where they scatter or are absorbed. Trace mode is single-threaded and verbose, so keep the ray count modest for interactive use even though the spinner itself allows up to 1e8.
 
 
 ---

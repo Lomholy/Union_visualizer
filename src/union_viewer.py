@@ -29,9 +29,17 @@ from gui_helpers import (
     ray_color_values,
     colormap,
     wrap_label,
+    VIRIDIS_STOPS,
 )
-from mcstas_trace import trace_instrument, parse_rays, SCATTER, ABSORB
+from mcstas_trace import trace_instrument, SCATTER, ABSORB
 import argparse
+
+# A hard ceiling on how wide the left-hand dock column can grow, no matter
+# what a widget inside one of its panels asks for (a long combo box entry, a
+# wide colourbar, ...). Individual widgets already cap themselves where that
+# is practical (wrap_label, the clip frame combo's AdjustToMinimumContentsLength),
+# but this is the backstop that keeps the column from eating half the window.
+MAX_LEFT_DOCK_WIDTH = 420
 
 # The meshers offered in the dock, in display order.
 MESHER_KEYS = ("mc", "dc", "brep")
@@ -640,6 +648,50 @@ class CollapsibleTitleBar(QtWidgets.QWidget):
         self.set_collapsed(not self.collapsed)
 
 
+class ColorBarWidget(QtWidgets.QWidget):
+    """A horizontal viridis gradient with its low/high value labelled at
+    each end, for the ray colouring modes. Paints the same VIRIDIS_STOPS
+    gui_helpers.colormap() interpolates, so the bar always matches the
+    colours actually drawn on the rays."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(28)
+        self.low_text = ""
+        self.high_text = ""
+
+    def set_range(self, low_text, high_text):
+        self.low_text = low_text
+        self.high_text = high_text
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        bar_rect = self.rect().adjusted(0, 14, 0, 0)
+
+        gradient = QtGui.QLinearGradient(bar_rect.left(), 0, bar_rect.right(), 0)
+        for i, rgb in enumerate(VIRIDIS_STOPS):
+            gradient.setColorAt(
+                i / (len(VIRIDIS_STOPS) - 1),
+                QtGui.QColor.fromRgbF(*(float(c) for c in rgb)),
+            )
+        painter.fillRect(bar_rect, gradient)
+        painter.setPen(QtGui.QColor("#888"))
+        painter.drawRect(bar_rect.adjusted(0, 0, -1, -1))
+
+        painter.setPen(self.palette().color(QtGui.QPalette.ColorRole.WindowText))
+        painter.drawText(
+            self.rect().adjusted(0, 0, 0, -bar_rect.height()),
+            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop,
+            self.low_text,
+        )
+        painter.drawText(
+            self.rect().adjusted(0, 0, 0, -bar_rect.height()),
+            QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop,
+            self.high_text,
+        )
+
+
 # ============================================================
 # Main window
 # ============================================================
@@ -684,7 +736,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.trace_group = None
         self.trace_rays = None
         self.ray_group = None
-        self.ray_file = None
 
         # ----------------------------------------------------
         # Render widget
@@ -1064,10 +1115,11 @@ class Viewer(QtWidgets.QMainWindow):
         count_layout = QtWidgets.QHBoxLayout()
         count_layout.addWidget(QtWidgets.QLabel("Number of rays"))
         self.ray_count_val = QtWidgets.QSpinBox()
-        self.ray_count_val.setRange(1, 1000)
+        self.ray_count_val.setRange(1, 100_000_000)
         self.ray_count_val.setValue(50)
         self.ray_count_val.setToolTip(
-            "Trace mode is single-threaded and verbose - keep this small."
+            "Trace mode is single-threaded and verbose - keep this small; "
+            "McStas itself has no lower limit worth mentioning."
         )
         count_layout.addWidget(self.ray_count_val)
         options_layout.addLayout(count_layout)
@@ -1086,19 +1138,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.rerun_rays_button.setToolTip("Trace a new set of rays.")
         self.rerun_rays_button.clicked.connect(self.rerun_rays)
         rerun_layout.addWidget(self.rerun_rays_button)
-        self.load_trace_button = QtWidgets.QPushButton("Load trace file...")
-        self.load_trace_button.setToolTip(
-            "Show rays from saved output of 'mcrun <instr> --trace -n N > file.txt'."
-        )
-        self.load_trace_button.clicked.connect(self.load_trace_file)
-        rerun_layout.addWidget(self.load_trace_button)
         options_layout.addLayout(rerun_layout)
-
-        self.use_live_rays_button = QtWidgets.QPushButton("Use live run")
-        self.use_live_rays_button.setToolTip("Go back to tracing the loaded instrument.")
-        self.use_live_rays_button.clicked.connect(self.use_live_rays)
-        self.use_live_rays_button.hide()
-        options_layout.addWidget(self.use_live_rays_button)
 
         color_layout = QtWidgets.QHBoxLayout()
         color_layout.addWidget(QtWidgets.QLabel("Colour by"))
@@ -1106,6 +1146,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_color_combo.addItems(list(RAY_COLOR_MODES))
         color_layout.addWidget(self.ray_color_combo)
         options_layout.addLayout(color_layout)
+
+        self.ray_colorbar = ColorBarWidget()
+        self.ray_colorbar.hide()
+        options_layout.addWidget(self.ray_colorbar)
 
         reaching_layout = QtWidgets.QHBoxLayout()
         reaching_layout.addWidget(QtWidgets.QLabel("Only rays reaching"))
@@ -1150,6 +1194,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.geometry_visibility = {}
 
         self.geometry_dock = QtWidgets.QDockWidget("Visible Geometries", self)
+        self.geometry_dock.setMaximumWidth(MAX_LEFT_DOCK_WIDTH)
         geometry_dock_widget = QtWidgets.QWidget()
         geometry_dock_layout = QtWidgets.QVBoxLayout(geometry_dock_widget)
 
@@ -1178,6 +1223,9 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.geometry_widget = QtWidgets.QWidget()
         panel_layout = QtWidgets.QVBoxLayout(self.geometry_widget)
+        self.union_header = QtWidgets.QLabel("<b>Union components</b>")
+        self.union_header.hide()
+        panel_layout.addWidget(self.union_header)
         self.geometry_layout = QtWidgets.QVBoxLayout()
         panel_layout.addLayout(self.geometry_layout)
         self.component_header = QtWidgets.QLabel("<b>McStas components</b>")
@@ -1243,6 +1291,7 @@ class Viewer(QtWidgets.QMainWindow):
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
             | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
         )
+        dock.setMaximumWidth(MAX_LEFT_DOCK_WIDTH)
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
         dock.setWidget(widget)
@@ -1347,8 +1396,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.geometry_color_buttons.clear()
 
         if self.current_group is None:
+            self.union_header.hide()
             return
 
+        self.union_header.setVisible(bool(self.current_group.geometry_meshes))
         for name, mesh in self.current_group.geometry_meshes.items():
             cb, color_button = self._add_panel_row(
                 self.geometry_layout,
@@ -1709,11 +1760,11 @@ class Viewer(QtWidgets.QMainWindow):
     # McStas trace (components and rays)
     # ========================================================
 
-    def live_rays_enabled(self):
-        return self.rays_checkbox.isChecked() and self.ray_file is None
+    def rays_enabled(self):
+        return self.rays_checkbox.isChecked()
 
     def trace_enabled(self):
-        return self.components_checkbox.isChecked() or self.live_rays_enabled()
+        return self.components_checkbox.isChecked() or self.rays_enabled()
 
     def reload_trace(self):
         if self.input_file is None or not self.trace_enabled():
@@ -1733,7 +1784,7 @@ class Viewer(QtWidgets.QMainWindow):
             self.input_file,
             self.pygen_checkbox.isChecked(),
             params,
-            self.ray_count_val.value() if self.live_rays_enabled() else 0,
+            self.ray_count_val.value() if self.rays_enabled() else 0,
             self.ray_seed_val.value() or None,
             self.colors,
         )
@@ -1760,10 +1811,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.rebuild_component_panel()
         self.apply_component_visibility()
         status = f"{len(group.component_objects)} McStas components"
-        if self.ray_file is None:
-            self.set_trace_rays(rays)
-            if rays is not None:
-                status += f", {rays.n_rays} rays"
+        self.set_trace_rays(rays)
+        if rays is not None:
+            status += f", {rays.n_rays} rays"
         self.apply_clipping()
         self._set_trace_status(f"{status} ({elapsed:.1f} s)")
 
@@ -1809,40 +1859,8 @@ class Viewer(QtWidgets.QMainWindow):
 
     def rerun_rays(self):
         self.ray_rerun_timer.stop()
-        if self.live_rays_enabled():
+        if self.rays_enabled():
             self.reload_trace()
-
-    def load_trace_file(self):
-        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load McStas trace", "", "Trace output (*.txt *.log *.out);;All Files (*)"
-        )
-        if not filename:
-            return
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        try:
-            rays = parse_rays(Path(filename).read_text(errors="replace"))
-        except Exception as e:
-            traceback.print_exc()
-            self._set_trace_status(f"Could not read '{filename}': {e}", error=True)
-            return
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
-        if rays.n_rays == 0:
-            self._set_trace_status(f"No neutron rays found in '{filename}'.", error=True)
-            return
-        self.ray_file = filename
-        self.use_live_rays_button.show()
-        self.rerun_rays_button.setEnabled(False)
-        self.rays_checkbox.setChecked(True)
-        self.set_trace_rays(rays)
-        self.apply_clipping()
-        self._set_trace_status(f"{rays.n_rays} rays from {Path(filename).name}")
-
-    def use_live_rays(self):
-        self.ray_file = None
-        self.use_live_rays_button.hide()
-        self.rerun_rays_button.setEnabled(True)
-        self.reload_trace()
 
     def set_trace_rays(self, rays):
         self.trace_rays = rays
@@ -1864,6 +1882,8 @@ class Viewer(QtWidgets.QMainWindow):
         rays = self.trace_rays
         if rays is None:
             self.ray_info_label.setText("")
+            self.ray_colorbar.hide()
+            self.rebalance_docks()
             return
         chosen = rays_reaching(rays, self.ray_reaching_combo.currentData())
         mode = self.ray_color_combo.currentText()
@@ -1872,14 +1892,20 @@ class Viewer(QtWidgets.QMainWindow):
         self.apply_ray_visibility()
         self.apply_clipping()
 
-        info = f"Showing {len(chosen)} of {rays.n_rays} rays."
+        self.ray_info_label.setText(f"Showing {len(chosen)} of {rays.n_rays} rays.")
         if value_range is not None:
             label, unit = RAY_COLOR_MODES[mode]
-            info += (
-                f"\n{label}: {value_range[0]:.4g} (purple) to "
-                f"{value_range[1]:.4g} (yellow) {unit}"
+            suffix = f" {unit}" if unit else ""
+            self.ray_colorbar.set_range(
+                f"{label} {value_range[0]:.4g}{suffix}",
+                f"{value_range[1]:.4g}{suffix}",
             )
-        self.ray_info_label.setText(info)
+            self.ray_colorbar.show()
+        else:
+            self.ray_colorbar.hide()
+        # The colorbar appearing/disappearing changes this panel's natural
+        # height - give the docks a chance to reclaim or yield that space.
+        self.rebalance_docks()
 
     def apply_ray_visibility(self):
         if self.ray_group is None:

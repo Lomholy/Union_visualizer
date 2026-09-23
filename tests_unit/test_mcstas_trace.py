@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 import mcstas_trace  # noqa: E402
 from mcstas_trace import (  # noqa: E402
-    ABSORB, PASS, SCATTER, _drawcall_geometry, parse_rays, parse_trace,
+    ABSORB, PASS, SCATTER, STATE, _drawcall_geometry, parse_rays, parse_trace,
 )
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -176,6 +176,8 @@ COMPONENT: "a"
 POS: 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1
 COMPONENT: "b"
 POS: 0, 0, 5, 0, 1, 0, -1, 0, 0, 0, 0, 1
+COMPONENT: "c"
+POS: 0, 0, 20, 1, 0, 0, 0, 1, 0, 0, 0, 1
 MCDISPLAY: start
 MCDISPLAY: end
 INSTRUMENT END:
@@ -198,13 +200,24 @@ STATE: 0, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1
 STATE: 0, 0, 2, 0, 0, 1000, 0.002, 0, 0, 0, 1
 LEAVE:
 STATE: 0, 0, 3, 0, 0, 1000, 0.003, 0, 0, 0, 1
+ENTER:
+STATE: 0, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1
+COMP: "a"
+STATE: 0, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1
+STATE: 0, 0, 1, 0, 0, 1000, 0.001, 0, 0, 0, 1
+COMP: "c"
+STATE: 0, 0, -1, 0, 0, 1000, 0.02, 0, 0, 0, 1
+SCATTER: 0, 0, 0, 0, 0, 1000, 0.021, 0, 0, 0, 1
+STATE: 0, 0, -1, 0, 0, 1000, 0.02, 0, 0, 0, 1
+LEAVE:
+STATE: 5, 5, 5, 0, 0, 1000, 0, 0, 0, 0, 1
 """
 
 
 class RayParsingTest(unittest.TestCase):
     def test_hand_written_rays(self):
         rays = parse_rays(HAND_WRITTEN_TRACE)
-        self.assertEqual(rays.n_rays, 2)
+        self.assertEqual(rays.n_rays, 3)
         first = slice(rays.ray_offsets[0], rays.ray_offsets[1])
         # b is at z=5, rotated 90 degrees about z: local x is world y.
         np.testing.assert_allclose(
@@ -221,6 +234,26 @@ class RayParsingTest(unittest.TestCase):
 
     def test_max_rays(self):
         self.assertEqual(parse_rays(HAND_WRITTEN_TRACE, max_rays=1).n_rays, 1)
+
+    def test_restore_neutron_duplicate_is_dropped(self):
+        # A monitor with restore_neutron=1 (e.g. PSD_monitor) prints:
+        # approach STATE, a SCATTER/PASS at its detection plane, then a
+        # STATE identical to the approach point (the neutron's state is
+        # restored so later code sees it unperturbed). Drawing that
+        # restored point would make the path jump forward to the plane
+        # and then snap back - it must be dropped, leaving the path
+        # ending at the detection point and the final LEAVE STATE.
+        rays = parse_rays(HAND_WRITTEN_TRACE)
+        third = rays.points[rays.ray_offsets[2]:rays.ray_offsets[3]]
+        third_kinds = rays.kind[rays.ray_offsets[2]:rays.ray_offsets[3]]
+        np.testing.assert_allclose(
+            third, [(0, 0, 0), (0, 0, 1), (0, 0, 19), (0, 0, 20), (5, 5, 25)], atol=1e-12
+        )
+        self.assertEqual(list(third_kinds), [STATE, STATE, STATE, PASS, STATE])
+        # The path never moves backward along its own direction.
+        d = third[-1] - third[0]
+        d = d / np.linalg.norm(d)
+        self.assertTrue(np.all(np.diff((third - third[0]) @ d) >= -1e-9))
 
     def test_captured_rays_are_in_world_space(self):
         rays = parse_rays(read("simple_test_ray_trace.txt"))
