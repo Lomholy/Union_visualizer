@@ -23,6 +23,7 @@ from gui_helpers import (
     clip_planes,
     instrument_param_args,
     clip_mesh,
+    wrap_label,
 )
 from mcstas_trace import trace_instrument
 import argparse
@@ -1142,7 +1143,8 @@ class Viewer(QtWidgets.QMainWindow):
     def _add_panel_row(self, layout, name, visible, on_toggled, on_color, color):
         row = QtWidgets.QHBoxLayout()
 
-        cb = QtWidgets.QCheckBox(name)
+        cb = QtWidgets.QCheckBox(wrap_label(name))
+        cb.setToolTip(name)
         cb.setChecked(visible)
         cb.toggled.connect(on_toggled)
         row.addWidget(cb, 1)
