@@ -18,13 +18,13 @@ And see your union environment become a CAD model!
 
 With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file.
 
-The Instrument Parameters panel has one field per instrument parameter, showing its default. Values you type there are used both for the Union geometry and for the McStas run; parameters without a default must be filled in there.
+The Instrument Parameters panel (a scrollable list, since an instrument can have many) has one field per instrument parameter, showing its default. Values you type there are used both for the Union geometry and for the McStas run; parameters without a default must be filled in there.
 
 The clipping plane can be placed in any component's coordinate system (e.g. the sample's Arm) with the Clipping panel's "Coordinate system" choice. "Export STL..." writes the visible Union meshes and McStas components as one file, cut by the clipping plane; McStas lines are exported as thin tubes.
 
 #### Neutron rays
 
-With "Show neutron rays" ticked (the default), the same `mcrun --trace` run also traces a number of neutrons (50 by default, set in the Neutron Rays panel) and draws their paths through the instrument and your Union sample. Rays can be coloured by speed, weight or time (a colourbar appears under "Colour by" whenever a mode other than Uniform is chosen), limited to those reaching a chosen component, and marked where they scatter or are absorbed. Trace mode is single-threaded and verbose, so keep the ray count modest for interactive use even though the spinner itself allows up to 1e8.
+Tick "Show neutron rays" (off by default) to also trace a number of neutrons (50 by default, set in the Neutron Rays panel) with the same `mcrun --trace` run and draw their paths through the instrument and your Union sample. Rays can be coloured by speed, weight or time (a colourbar appears under "Colour by" whenever a mode other than Uniform is chosen), limited to those reaching a chosen component, and marked where they scatter or are absorbed (each with a colour swatch next to its checkbox). A monitor with `restore_neutron=1` makes McStas report the neutron's state jumping back to where it entered that component; that jump is real, and is drawn too, but in dark grey so it reads as a jump rather than a normal continuation of the path. Trace mode is single-threaded and verbose, so keep the ray count modest for interactive use even though the spinner itself allows up to 1e8.
 
 
 ---

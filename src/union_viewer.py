@@ -30,8 +30,13 @@ from gui_helpers import (
     colormap,
     wrap_label,
     VIRIDIS_STOPS,
+    hex_to_rgba,
+    UNIFORM_RAY_COLOR,
+    SCATTER_MARKER_COLOR,
+    ABSORB_MARKER_COLOR,
+    TELEPORT_COLOR,
 )
-from mcstas_trace import trace_instrument, SCATTER, ABSORB
+from mcstas_trace import trace_instrument, SCATTER, ABSORB, TELEPORT
 import argparse
 
 # The meshers offered in the dock, in display order.
@@ -52,6 +57,12 @@ MESHER_DESCRIPTIONS = {
         "complex boolean operations."
     ),
 }
+
+DEFLECTION_TOOLTIP = (
+    "How closely the brep mesher's triangles must follow the exact curved "
+    "surface, in metres. Smaller values hug curves more closely (more "
+    "triangles, slower to build); larger values are coarser but faster."
+)
 
 # ============================================================
 # Geometry generation
@@ -289,13 +300,11 @@ def build_component_group(components, colors):
     return group
 
 
-UNIFORM_RAY_COLOR = "#1f6fd1"
-
-
 def build_ray_group(rays, ray_indices, color_mode):
-    """One Line for every chosen ray (vertex-coloured unless color_mode is
-    "Uniform") plus Points marking scatterings and absorptions. Returns
-    (group, (vmin, vmax) or None)."""
+    """One Line for every chosen ray (vertex-coloured; a segment whose end
+    point is a restore_neutron TELEPORT is always drawn in TELEPORT_COLOR,
+    regardless of color_mode) plus Points marking scatterings and
+    absorptions. Returns (group, (vmin, vmax) or None)."""
     group = gfx.Group()
     pairs = ray_segment_indices(rays, ray_indices)
     positions = rays.points[pairs].reshape(-1, 3).astype(np.float32)
@@ -303,16 +312,20 @@ def build_ray_group(rays, ray_indices, color_mode):
     value_range = None
     if len(positions) == 0:
         group.ray_line = None
-    elif values is None:
-        group.ray_line = gfx.Line(
-            gfx.Geometry(positions=positions),
-            gfx.LineSegmentMaterial(thickness=1.5, color=UNIFORM_RAY_COLOR),
-        )
     else:
-        used = values[pairs.ravel()]
-        value_range = (float(used.min()), float(used.max()))
+        if values is None:
+            colors = np.tile(hex_to_rgba(UNIFORM_RAY_COLOR), (len(positions), 1))
+        else:
+            used = values[pairs.ravel()]
+            value_range = (float(used.min()), float(used.max()))
+            colors = colormap(used, *value_range)
+        # A segment "teleports" if the point it ends on is a restore_neutron
+        # duplicate - colour both its vertices dark grey so the whole
+        # segment reads as a jump, not a gradient into/out of one.
+        teleport_pair = rays.kind[pairs[:, 1]] == TELEPORT
+        colors[np.repeat(teleport_pair, 2)] = hex_to_rgba(TELEPORT_COLOR)
         group.ray_line = gfx.Line(
-            gfx.Geometry(positions=positions, colors=colormap(used, *value_range)),
+            gfx.Geometry(positions=positions, colors=colors),
             gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex"),
         )
     if group.ray_line is not None:
@@ -323,8 +336,8 @@ def build_ray_group(rays, ray_indices, color_mode):
         in_chosen[rays.ray_offsets[i]:rays.ray_offsets[i + 1]] = True
     group.scatter_points = group.absorb_points = None
     for attr, kind, color, size in (
-        ("scatter_points", SCATTER, "#e67e22", 6),
-        ("absorb_points", ABSORB, "#c0392b", 8),
+        ("scatter_points", SCATTER, SCATTER_MARKER_COLOR, 6),
+        ("absorb_points", ABSORB, ABSORB_MARKER_COLOR, 8),
     ):
         points = rays.points[in_chosen & (rays.kind == kind)]
         if len(points):
@@ -931,7 +944,7 @@ class Viewer(QtWidgets.QMainWindow):
         settings_layout.addWidget(self.arms_checkbox)
 
         self.rays_checkbox = QtWidgets.QCheckBox("Show neutron rays")
-        self.rays_checkbox.setChecked(True)
+        self.rays_checkbox.setChecked(False)
         self.rays_checkbox.setToolTip(
             "Trace neutrons through the instrument with mcrun --trace and "
             "draw their paths. Options are in the Neutron Rays panel."
@@ -979,12 +992,21 @@ class Viewer(QtWidgets.QMainWindow):
         self.param_values = {}
         self.param_edits = {}
         self.param_names = None
-        self.params_form = QtWidgets.QFormLayout()
-        params_layout.addLayout(self.params_form)
+
+        params_widget = QtWidgets.QWidget()
+        self.params_form = QtWidgets.QFormLayout(params_widget)
         self.params_empty_label = QtWidgets.QLabel("No instrument loaded.")
         self.params_empty_label.setStyleSheet("color: gray;")
         params_layout.addWidget(self.params_empty_label)
-        params_layout.addStretch()
+
+        # Scrollable, and capped at a fixed height rather than growing with
+        # the parameter count - an instrument can have many parameters, and
+        # this keeps the rest of the panels from being pushed off-screen.
+        params_scroll = QtWidgets.QScrollArea()
+        params_scroll.setWidgetResizable(True)
+        params_scroll.setWidget(params_widget)
+        params_scroll.setMaximumHeight(220)
+        params_layout.addWidget(params_scroll)
         params_dock.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Preferred,
             QtWidgets.QSizePolicy.Policy.Maximum,
@@ -1036,6 +1058,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.deflection_val.setRange(0.0001, 10.0)
         self.deflection_val.setSingleStep(0.001)
         self.deflection_val.setValue(0.01)
+        self.deflection_val.setToolTip(DEFLECTION_TOOLTIP)
+        self.deflection_label.setToolTip(DEFLECTION_TOOLTIP)
         deflection_layout.addWidget(self.deflection_label)
         deflection_layout.addWidget(self.deflection_val)
         mesher_options_layout.addLayout(deflection_layout)
@@ -1153,8 +1177,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_colorbar.hide()
         options_layout.addWidget(self.ray_colorbar)
 
-        reaching_layout = QtWidgets.QHBoxLayout()
-        reaching_layout.addWidget(QtWidgets.QLabel("Only rays reaching"))
+        # Label above the combo, not beside it, so a long selected/eliding
+        # entry doesn't push the row (and the panel) wider.
+        options_layout.addWidget(QtWidgets.QLabel("Only rays reaching"))
         self.ray_reaching_combo = QtWidgets.QComboBox()
         # A long component name would otherwise widen the combo box (and
         # with it the whole left-hand column) to fit it - cap the box at a
@@ -1165,19 +1190,27 @@ class Viewer(QtWidgets.QMainWindow):
         )
         self.ray_reaching_combo.setMinimumContentsLength(12)
         self.ray_reaching_combo.addItem("any component", None)
-        reaching_layout.addWidget(self.ray_reaching_combo)
-        options_layout.addLayout(reaching_layout)
+        options_layout.addWidget(self.ray_reaching_combo)
 
+        scatter_layout = QtWidgets.QHBoxLayout()
         self.scatter_points_checkbox = QtWidgets.QCheckBox("Mark scatterings")
         self.scatter_points_checkbox.setChecked(True)
         self.scatter_points_checkbox.setToolTip(
             "Points where a ray changed direction. Union volume boundary "
             "crossings are not marked."
         )
-        options_layout.addWidget(self.scatter_points_checkbox)
+        scatter_layout.addWidget(self.scatter_points_checkbox)
+        scatter_layout.addWidget(self._color_swatch(SCATTER_MARKER_COLOR))
+        scatter_layout.addStretch()
+        options_layout.addLayout(scatter_layout)
+
+        absorb_layout = QtWidgets.QHBoxLayout()
         self.absorb_points_checkbox = QtWidgets.QCheckBox("Mark absorptions")
         self.absorb_points_checkbox.setChecked(True)
-        options_layout.addWidget(self.absorb_points_checkbox)
+        absorb_layout.addWidget(self.absorb_points_checkbox)
+        absorb_layout.addWidget(self._color_swatch(ABSORB_MARKER_COLOR))
+        absorb_layout.addStretch()
+        options_layout.addLayout(absorb_layout)
 
         self.ray_info_label = QtWidgets.QLabel("")
         self.ray_info_label.setWordWrap(True)
@@ -1290,6 +1323,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.deflection_val.valueChanged.connect(self.on_deflection_changed)
 
         self.update_mesher_capability_ui()
+        self.rays_options.setEnabled(self.rays_checkbox.isChecked())
 
     def _add_dock(self, title, collapsed=True):
         """Create a collapsible, left-docked QDockWidget titled `title`
@@ -1509,6 +1543,15 @@ class Viewer(QtWidgets.QMainWindow):
 
     def _set_swatch_color(self, button, hex_color):
         button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
+
+    def _color_swatch(self, hex_color):
+        """A small, fixed, non-interactive colour square - for a marker
+        colour that isn't user-editable (unlike _set_swatch_color's
+        buttons)."""
+        label = QtWidgets.QLabel()
+        label.setFixedSize(14, 14)
+        label.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
+        return label
 
     def pick_color(self, key):
         if self.current_group is None or key not in self.current_group.geometry_meshes:
@@ -2049,7 +2092,7 @@ class Viewer(QtWidgets.QMainWindow):
         deflection_used = caps["deflection"]
         self.deflection_val.setEnabled(deflection_used)
         self.deflection_label.setEnabled(deflection_used)
-        tip = "" if deflection_used else f"Not used by the '{self.mesher}' mesher."
+        tip = DEFLECTION_TOOLTIP if deflection_used else f"Not used by the '{self.mesher}' mesher."
         self.deflection_val.setToolTip(tip)
         self.deflection_label.setToolTip(tip)
 

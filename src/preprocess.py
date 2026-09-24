@@ -667,11 +667,33 @@ def _apply_conditional_statement(cond, name, expr, else_name, else_expr, var_map
         _assign_or_warn(var_map, else_name, else_expr, display)
 
 
+def _parameter_info_from_raw(raw_text):
+    """(name, type, default_text) for a raw-string instr.parameters entry -
+    see _recover_raw_parameter for why mcstasscript's parser sometimes
+    falls back to plain text instead of a typed Parameter object. Used only
+    for display (the viewer's parameter form), so a best-effort type ("double"
+    unless the default is visibly a quoted string) is enough."""
+    statement = _strip_c_type_prefix(raw_text.strip(), _PARAM_TYPE_KEYWORDS)
+    match = _RAW_ASSIGNMENT_RE.match(statement)
+    if not match:
+        # A bare parameter name with no default value.
+        return statement.strip(), "double", None
+    name, expr = match.groups()
+    expr = expr.strip()
+    quoted = _QUOTED_STRING_RE.match(expr)
+    if quoted:
+        return name, "string", quoted.group(1)
+    return name, "double", expr
+
+
 def instrument_parameters(instr: ms.McStas_instr):
-    """[(name, type, default or None)] for every instrument parameter."""
+    """[(name, type, default or None)] for every instrument parameter,
+    including ones mcstasscript's parser only reports as raw text (a bare
+    name still appears, with no default)."""
     params = []
     for param in instr.parameters:
         if isinstance(param, str):
+            params.append(_parameter_info_from_raw(param))
             continue
         default = param.value
         params.append((param.name, param.type or "double", None if default in (None, "") else str(default)))

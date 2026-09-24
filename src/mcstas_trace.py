@@ -36,7 +36,7 @@ CIRCLE_SEGMENTS = 48
 LINE_EXPORT_RADIUS = 1e-3
 
 # Ray point kinds.
-STATE, SCATTER, PASS, ABSORB = 0, 1, 2, 3
+STATE, SCATTER, PASS, ABSORB, TELEPORT = 0, 1, 2, 3, 4
 
 
 @dataclass
@@ -490,7 +490,9 @@ def parse_rays(text, max_rays=1000):
     restore_neutron=1 (e.g. PSD_monitor) does the same thing mid-trace: it
     detects the ray at its plane, then restores the neutron's state to
     exactly what it was on entering that component, so later code sees it
-    unperturbed - that restored STATE is dropped too (see add())."""
+    unperturbed. That restored STATE is kept (unlike the post-ABSORB one),
+    tagged TELEPORT rather than STATE so callers can draw the segment
+    leading to it differently (see add())."""
     matrices = read_positions(text)
     component_names = list(matrices)
     comp_index = {name: i for i, name in enumerate(component_names)}
@@ -531,11 +533,10 @@ def parse_rays(text, max_rays=1000):
             and np.allclose(entry_v, v, atol=1e-9, rtol=0)
         ):
             # restore_neutron: this STATE exactly repeats this component's
-            # own entry state. Drawing a segment back to it would make the
-            # path jump to a place it's already visited, so it's dropped
-            # and the ray is left ending at its most recent real point.
-            last_v = v
-            return
+            # own entry state. Kept (not dropped) so the jump is visible,
+            # but tagged TELEPORT rather than STATE so it can be drawn
+            # differently instead of looking like a normal continuation.
+            kind = TELEPORT
         last_v = v
         if entry_r is None:
             entry_r, entry_v = r, v

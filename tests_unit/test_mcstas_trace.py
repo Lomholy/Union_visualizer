@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 import mcstas_trace  # noqa: E402
 from mcstas_trace import (  # noqa: E402
-    ABSORB, PASS, SCATTER, STATE, _drawcall_geometry, parse_rays, parse_trace,
+    ABSORB, PASS, SCATTER, STATE, TELEPORT, _drawcall_geometry, parse_rays, parse_trace,
 )
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -248,25 +248,28 @@ class RayParsingTest(unittest.TestCase):
     def test_max_rays(self):
         self.assertEqual(parse_rays(HAND_WRITTEN_TRACE, max_rays=1).n_rays, 1)
 
-    def test_restore_neutron_duplicate_is_dropped(self):
+    def test_restore_neutron_duplicate_is_kept_and_tagged_teleport(self):
         # A monitor with restore_neutron=1 (e.g. PSD_monitor) prints:
         # approach STATE, a SCATTER/PASS at its detection plane, then a
         # STATE identical to the approach point (the neutron's state is
-        # restored so later code sees it unperturbed). Drawing that
-        # restored point would make the path jump forward to the plane
-        # and then snap back - it must be dropped, leaving the path
-        # ending at the detection point and the final LEAVE STATE.
+        # restored so later code sees it unperturbed). That jump is real
+        # McStas behaviour and worth being able to see, so it's kept
+        # rather than dropped - just tagged TELEPORT instead of STATE, so
+        # a caller can draw the segment leading to it differently (e.g. a
+        # different colour) instead of it looking like an ordinary
+        # continuation of the path.
         rays = parse_rays(HAND_WRITTEN_TRACE)
         third = rays.points[rays.ray_offsets[2]:rays.ray_offsets[3]]
         third_kinds = rays.kind[rays.ray_offsets[2]:rays.ray_offsets[3]]
         np.testing.assert_allclose(
-            third, [(0, 0, 0), (0, 0, 1), (0, 0, 19), (0, 0, 20), (5, 5, 25)], atol=1e-12
+            third,
+            [(0, 0, 0), (0, 0, 1), (0, 0, 19), (0, 0, 20), (0, 0, 19), (5, 5, 25)],
+            atol=1e-12,
         )
-        self.assertEqual(list(third_kinds), [STATE, STATE, STATE, PASS, STATE])
-        # The path never moves backward along its own direction.
-        d = third[-1] - third[0]
-        d = d / np.linalg.norm(d)
-        self.assertTrue(np.all(np.diff((third - third[0]) @ d) >= -1e-9))
+        self.assertEqual(list(third_kinds), [STATE, STATE, STATE, PASS, TELEPORT, STATE])
+        # The teleport point exactly repeats "c"'s own entry point, the
+        # place a restore_neutron call in "c" would restore back to.
+        np.testing.assert_allclose(third[4], third[2], atol=1e-12)
 
     def test_near_duplicate_points_across_frames_stay_distinct(self):
         # Two points computed through DIFFERENT components' matrices can
@@ -283,16 +286,13 @@ class RayParsingTest(unittest.TestCase):
         fourth_kinds = rays.kind[rays.ray_offsets[3]:rays.ray_offsets[4]]
         np.testing.assert_allclose(
             fourth,
-            [(0, 0, 0), (0, 0, 49.9999996), (0, 0, 49.9999997), (0, 0, 55)],
+            [(0, 0, 0), (0, 0, 49.9999996), (0, 0, 49.9999997), (0, 0, 55), (0, 0, 49.9999997)],
             atol=1e-7,
         )
         # The near-duplicate a/i points are distinct, not merged away, and
-        # the exact restore (matching i's own entry point) is dropped -
-        # the ray ends at the real scattering, not snapping back to 50.
-        self.assertEqual(list(fourth_kinds), [STATE, STATE, STATE, SCATTER])
-        d = fourth[-1] - fourth[0]
-        d = d / np.linalg.norm(d)
-        self.assertTrue(np.all(np.diff((fourth - fourth[0]) @ d) >= -1e-9))
+        # the exact restore (matching i's own entry point) is kept and
+        # tagged TELEPORT rather than dropped.
+        self.assertEqual(list(fourth_kinds), [STATE, STATE, STATE, SCATTER, TELEPORT])
 
     def test_captured_rays_are_in_world_space(self):
         rays = parse_rays(read("simple_test_ray_trace.txt"))
