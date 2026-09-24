@@ -488,9 +488,9 @@ def parse_rays(text, max_rays=1000):
     ray's exit point, except for an absorbed ray, where McStas prints a
     restored earlier state instead, so it is skipped. A monitor with
     restore_neutron=1 (e.g. PSD_monitor) does the same thing mid-trace: it
-    detects the ray at its plane, then restores the neutron's
-    pre-detection state so later code sees it unperturbed - that restored
-    STATE is dropped too (see add())."""
+    detects the ray at its plane, then restores the neutron's state to
+    exactly what it was on entering that component, so later code sees it
+    unperturbed - that restored STATE is dropped too (see add())."""
     matrices = read_positions(text)
     component_names = list(matrices)
     comp_index = {name: i for i, name in enumerate(component_names)}
@@ -499,31 +499,47 @@ def parse_rays(text, max_rays=1000):
     M = np.eye(4)
     comp = -1
     last_v = None
+    # The (r, v) of the first point recorded since the current COMP: line -
+    # what a restore_neutron call in *this* component would restore back
+    # to. Reset on every COMP: transition and at each ENTER:, not just once
+    # per ray, since RESTORE_NEUTRON always restores to the current
+    # component's own entry state.
+    entry_r = None
+    entry_v = None
     in_ray = False
     after_leave = False
     absorbed = False
 
     def add(values, kind):
-        nonlocal last_v
+        nonlocal last_v, entry_r, entry_v
         r = M[:3, :3] @ values[0:3] + M[:3, 3]
         v = M[:3, :3] @ values[3:6]
         if kind == SCATTER and last_v is not None and np.allclose(v, last_v, rtol=1e-6, atol=1e-9):
             kind = PASS
+        # Comparisons below use rtol=0: two positions/velocities that are
+        # only "close" at the 6-significant-figure precision %g prints with
+        # (e.g. the same physical point recomputed through two different
+        # components' rotation matrices) are NOT the same point and must
+        # stay distinct - only bit-for-bit reprints of the same value (a
+        # real duplicate or a genuine restore) should ever match here.
         if (
             kind == STATE
-            and len(points) - offsets[-1] >= 2
-            and kinds[-1] != STATE
-            and np.allclose(points[-2], r, atol=1e-9)
-            and np.allclose(velocities[-2], v, rtol=1e-6, atol=1e-9)
+            and entry_r is not None
+            and len(points) > offsets[-1]
+            and not np.allclose(points[-1], r, atol=1e-9, rtol=0)
+            and np.allclose(entry_r, r, atol=1e-9, rtol=0)
+            and np.allclose(entry_v, v, atol=1e-9, rtol=0)
         ):
-            # restore_neutron: this STATE is an exact duplicate of the
-            # point two steps back. Drawing a segment to it would make the
-            # path shoot past the detector and snap back, so it's dropped
-            # and the ray is left ending at the detection point instead.
+            # restore_neutron: this STATE exactly repeats this component's
+            # own entry state. Drawing a segment back to it would make the
+            # path jump to a place it's already visited, so it's dropped
+            # and the ray is left ending at its most recent real point.
             last_v = v
             return
         last_v = v
-        if len(points) > offsets[-1] and np.allclose(points[-1], r, atol=1e-9):
+        if entry_r is None:
+            entry_r, entry_v = r, v
+        if len(points) > offsets[-1] and np.allclose(points[-1], r, atol=1e-9, rtol=0):
             # The same point printed again (e.g. once per component frame):
             # keep the latest, outgoing state.
             if kind != STATE:
@@ -568,12 +584,14 @@ def parse_rays(text, max_rays=1000):
             M = np.eye(4)
             comp = -1
             last_v = None
+            entry_r = entry_v = None
         elif not (in_ray or after_leave):
             continue
         elif line.startswith("COMP:"):
             name = _QUOTED_NAME_RE.search(line).group(1)
             M = matrices.get(name, np.eye(4))
             comp = comp_index.get(name, -1)
+            entry_r = entry_v = None
         elif line.startswith("STATE:"):
             if not (after_leave and absorbed):
                 add(_floats(line[6:]), STATE)

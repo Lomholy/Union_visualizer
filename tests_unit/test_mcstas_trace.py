@@ -178,6 +178,8 @@ COMPONENT: "b"
 POS: 0, 0, 5, 0, 1, 0, -1, 0, 0, 0, 0, 1
 COMPONENT: "c"
 POS: 0, 0, 20, 1, 0, 0, 0, 1, 0, 0, 0, 1
+COMPONENT: "i"
+POS: 0, 0, 50, 1, 0, 0, 0, 1, 0, 0, 0, 1
 MCDISPLAY: start
 MCDISPLAY: end
 INSTRUMENT END:
@@ -211,13 +213,24 @@ SCATTER: 0, 0, 0, 0, 0, 1000, 0.021, 0, 0, 0, 1
 STATE: 0, 0, -1, 0, 0, 1000, 0.02, 0, 0, 0, 1
 LEAVE:
 STATE: 5, 5, 5, 0, 0, 1000, 0, 0, 0, 0, 1
+ENTER:
+STATE: 0, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1
+COMP: "a"
+STATE: 0, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1
+STATE: 0, 0, 49.9999996, 0, 0, 1000, 0.05, 0, 0, 0, 1
+COMP: "i"
+STATE: 0, 0, -0.0000003, 0, 0, 1000, 0.05, 0, 0, 0, 1
+SCATTER: 0, 0, 5, 100, 0, 900, 0.055, 0, 0, 0, 1
+STATE: 0, 0, -0.0000003, 0, 0, 1000, 0.05, 0, 0, 0, 1
+LEAVE:
+STATE: 0, 0, -0.0000003, 0, 0, 1000, 0.05, 0, 0, 0, 1
 """
 
 
 class RayParsingTest(unittest.TestCase):
     def test_hand_written_rays(self):
         rays = parse_rays(HAND_WRITTEN_TRACE)
-        self.assertEqual(rays.n_rays, 3)
+        self.assertEqual(rays.n_rays, 4)
         first = slice(rays.ray_offsets[0], rays.ray_offsets[1])
         # b is at z=5, rotated 90 degrees about z: local x is world y.
         np.testing.assert_allclose(
@@ -254,6 +267,32 @@ class RayParsingTest(unittest.TestCase):
         d = third[-1] - third[0]
         d = d / np.linalg.norm(d)
         self.assertTrue(np.all(np.diff((third - third[0]) @ d) >= -1e-9))
+
+    def test_near_duplicate_points_across_frames_stay_distinct(self):
+        # Two points computed through DIFFERENT components' matrices can
+        # land within numpy's default relative tolerance of each other
+        # (~1e-4 for values around 50) while still being genuinely
+        # different physical points - e.g. the last point recorded in one
+        # component and the entry point of the next, printed via two
+        # different rotation matrices with %g's ~6-significant-figure
+        # precision. They must not be merged into one point (that both
+        # throws away real path detail and can make a later exact
+        # restore-neutron duplicate fail to match its true entry point).
+        rays = parse_rays(HAND_WRITTEN_TRACE)
+        fourth = rays.points[rays.ray_offsets[3]:rays.ray_offsets[4]]
+        fourth_kinds = rays.kind[rays.ray_offsets[3]:rays.ray_offsets[4]]
+        np.testing.assert_allclose(
+            fourth,
+            [(0, 0, 0), (0, 0, 49.9999996), (0, 0, 49.9999997), (0, 0, 55)],
+            atol=1e-7,
+        )
+        # The near-duplicate a/i points are distinct, not merged away, and
+        # the exact restore (matching i's own entry point) is dropped -
+        # the ray ends at the real scattering, not snapping back to 50.
+        self.assertEqual(list(fourth_kinds), [STATE, STATE, STATE, SCATTER])
+        d = fourth[-1] - fourth[0]
+        d = d / np.linalg.norm(d)
+        self.assertTrue(np.all(np.diff((fourth - fourth[0]) @ d) >= -1e-9))
 
     def test_captured_rays_are_in_world_space(self):
         rays = parse_rays(read("simple_test_ray_trace.txt"))

@@ -34,13 +34,6 @@ from gui_helpers import (
 from mcstas_trace import trace_instrument, SCATTER, ABSORB
 import argparse
 
-# A hard ceiling on how wide the left-hand dock column can grow, no matter
-# what a widget inside one of its panels asks for (a long combo box entry, a
-# wide colourbar, ...). Individual widgets already cap themselves where that
-# is practical (wrap_label, the clip frame combo's AdjustToMinimumContentsLength),
-# but this is the backstop that keeps the column from eating half the window.
-MAX_LEFT_DOCK_WIDTH = 420
-
 # The meshers offered in the dock, in display order.
 MESHER_KEYS = ("mc", "dc", "brep")
 
@@ -247,7 +240,16 @@ def compute_trace_data(input_file, force_pygen, params, ncount, seed):
     """Run input_file through mcrun --trace. Worker-process side of
     TraceWorker, like compute_mesh_data for MeshBuildWorker."""
     return trace_instrument(
-        input_file, params=params, force_pygen=force_pygen, ncount=ncount, seed=seed
+        input_file,
+        params=params,
+        force_pygen=force_pygen,
+        ncount=ncount,
+        seed=seed,
+        # trace_instrument's own max_rays default (1000) exists to bound a
+        # file loaded independently of any particular run; here ncount is
+        # exactly how many rays the user asked mcrun to simulate, so all of
+        # them should be kept rather than silently truncated at 1000.
+        max_rays=max(ncount, 1),
     )
 
 
@@ -1154,6 +1156,14 @@ class Viewer(QtWidgets.QMainWindow):
         reaching_layout = QtWidgets.QHBoxLayout()
         reaching_layout.addWidget(QtWidgets.QLabel("Only rays reaching"))
         self.ray_reaching_combo = QtWidgets.QComboBox()
+        # A long component name would otherwise widen the combo box (and
+        # with it the whole left-hand column) to fit it - cap the box at a
+        # fixed width instead and let Qt elide text that doesn't fit; the
+        # full name is still available as each item's tooltip.
+        self.ray_reaching_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.ray_reaching_combo.setMinimumContentsLength(12)
         self.ray_reaching_combo.addItem("any component", None)
         reaching_layout.addWidget(self.ray_reaching_combo)
         options_layout.addLayout(reaching_layout)
@@ -1194,7 +1204,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.geometry_visibility = {}
 
         self.geometry_dock = QtWidgets.QDockWidget("Visible Geometries", self)
-        self.geometry_dock.setMaximumWidth(MAX_LEFT_DOCK_WIDTH)
         geometry_dock_widget = QtWidgets.QWidget()
         geometry_dock_layout = QtWidgets.QVBoxLayout(geometry_dock_widget)
 
@@ -1291,7 +1300,6 @@ class Viewer(QtWidgets.QMainWindow):
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
             | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
         )
-        dock.setMaximumWidth(MAX_LEFT_DOCK_WIDTH)
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
         dock.setWidget(widget)
@@ -1870,6 +1878,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_reaching_combo.addItem("any component", None)
         for name in [] if rays is None else rays.component_names:
             self.ray_reaching_combo.addItem(name, name)
+            self.ray_reaching_combo.setItemData(
+                self.ray_reaching_combo.count() - 1, name, QtCore.Qt.ItemDataRole.ToolTipRole
+            )
         index = self.ray_reaching_combo.findData(current)
         self.ray_reaching_combo.setCurrentIndex(max(index, 0))
         self.ray_reaching_combo.blockSignals(False)
