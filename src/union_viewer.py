@@ -446,6 +446,32 @@ def make_coordinate_axes(
 
 
 # ============================================================
+# Floor grid
+# ============================================================
+
+# The floor grid defaults to this footprint (with unit-spaced divisions)
+# when nothing is loaded yet, or the loaded geometry is smaller than it.
+DEFAULT_GRID_SIZE = 100.0
+GRID_SPACING = 1.0
+MAX_GRID_DIVISIONS = 500
+
+
+def grid_size_for_bbox(bbox, minimum=DEFAULT_GRID_SIZE, margin=1.2):
+    """Pick a floor-grid size that comfortably covers a scene's footprint.
+
+    The grid lives in the xz-plane, so only the x and z extents of the
+    bounding box matter; instruments taller than the default grid (e.g. a
+    tall detector tank) don't need a larger footprint on their own.
+    """
+    if bbox is None:
+        return minimum
+    bmin, bmax = bbox
+    extent = bmax - bmin
+    footprint = max(extent[0], extent[2])
+    return max(minimum, footprint * margin)
+
+
+# ============================================================
 # Camera fitting
 # ============================================================
 
@@ -804,8 +830,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.controller.target = (0, 0, 0)
         self.scene.add(make_coordinate_axes(length=1000, tick_spacing=1000))
 
-        self.grid = gfx.GridHelper(size=100, divisions=100, thickness=1)
-        self.scene.add(self.grid)
+        self.grid = None
+        self._resize_grid(None)
 
         self.gizmo_viewport = Viewport(self.renderer, (0, 0, 120, 120))
         self.gizmo_scene = gfx.Scene()
@@ -1794,6 +1820,21 @@ class Viewer(QtWidgets.QMainWindow):
         self._reload_worker = worker
         thread.start()
 
+    def _resize_grid(self, group):
+        """(Re)build the floor grid to cover the loaded geometry's footprint.
+
+        GridHelper bakes its size and division count into its vertex data at
+        construction time, so there's no in-place resize - the old grid is
+        replaced instead.
+        """
+        bbox = group.get_world_bounding_box() if group is not None else None
+        size = grid_size_for_bbox(bbox)
+        divisions = min(MAX_GRID_DIVISIONS, max(10, round(size / GRID_SPACING)))
+        if self.grid is not None:
+            self.scene.remove(self.grid)
+        self.grid = gfx.GridHelper(size=size, divisions=divisions, thickness=1)
+        self.scene.add(self.grid)
+
     def _on_reload_finished(self, new_group, meshes, dependencies, instrument_info):
         self.rebuild_params_form(instrument_info["parameters"])
         self.world_matrices = {
@@ -1812,6 +1853,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.rebuild_geometry_panel()
         self.apply_geometry_visibility()
+        self._resize_grid(self.current_group)
         recentre_controller(self.controller, self.current_group)
         print("Reload complete")
 
