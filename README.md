@@ -2,15 +2,29 @@
 
 unviz converts your McStas union sample into a CAD model.
 
-It provides two different ways to do this. 
+Once installed, start the interactive viewer directly from the command line:
 
-The first is to use the mcstas-to-cad script like:
+```console
+unviz
+```
 
-`python3 mcstas_to_cad.py --input_file my_mcstas_instr.py --export --out_file {YOUR_FILE_NAME}`
+You can open an instrument immediately by passing it as a positional argument:
 
-The second is to use the union_viewer.py script to launch an interactive interface with live updates of your chosen mcstas instrument:
+```console
+unviz my_mcstas_instr.py
+```
 
-`union_viewer.py`
+To export its Union environment without opening the interface, add `--export`:
+
+```console
+unviz my_mcstas_instr.py --export --out-file YOUR_FILE_NAME
+```
+
+The former script-style options remain available, so this is equivalent:
+
+```console
+unviz --input_file my_mcstas_instr.py --export --out_file YOUR_FILE_NAME
+```
 
 And see your union environment become a CAD model!
 
@@ -59,9 +73,16 @@ Then you make a union visualizer environment by using the two commands below:
 
 `conda activate unviz`
 
+The environment installs this repository in editable mode, which makes the
+`unviz` command available while keeping it connected to your checkout. If the
+environment already existed before the command-line entry point was added, run:
+
+```console
+python -m pip install -e .
+```
+
 ### Author
 
 The union visualizer software was authored by
 Daniel Lomholt Christensen as part of his Phd. project at the Niels Bohr Institute at the University of Copenhagen
-
 

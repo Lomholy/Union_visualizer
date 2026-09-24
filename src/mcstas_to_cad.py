@@ -11,7 +11,6 @@ from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes
 from bounding_box import compute_all_world_bboxes
 
-from pathlib import Path
 # ==============================================================================
 # ============================ PARSE ARGUMENTS =================================
 # ==============================================================================
@@ -56,39 +55,62 @@ def parse():
 # =============================================================================
 
 
-if __name__ == "__main__":
-    parser = parse()
-    args = parser.parse_args()
-    input_file = args.input_file
-    out_file = args.out_file
-    n_points = args.n_points
-    verbose = args.verbose
-    res = args.resolution
-    export = args.export
-    mesher = args.mesher
+def convert(
+    input_file,
+    out_file="union_env",
+    resolution=64,
+    n_points=1_000,
+    mesher="brep",
+    verbose=False,
+    export=False,
+    force_pygen=False,
+):
+    """Build (and optionally export) the Union geometry for an instrument."""
+    # n_points remains part of the public interface for compatibility with the
+    # original script, even though the current mesh builders do not use it.
+    del n_points
     clip = {
-            "enable": False,
-            "axis": "X",
-            "mode": "Above",
-            "position": 0,
-        }
+        "enable": False,
+        "axis": "X",
+        "mode": "Above",
+        "position": 0,
+    }
 
     instr, world_matrices, union_geometries = preprocess(
-        input_file, verbose, force_pygen=args.force_pygen
+        input_file, verbose, force_pygen=force_pygen
     )
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     final_sdfs, sdfs = build_sdfs(
         union_geometries, world_matrices, world_bboxes=world_bboxes
     )
-    build_all_meshes(
+    return build_all_meshes(
         union_geometries,
         world_matrices,
         sdfs,
         final_sdfs,
-        res,
+        resolution,
         clip,
         out_file=out_file,
         export=export,
         mesher=mesher,
         world_bboxes=world_bboxes,
     )
+
+
+def main(argv=None):
+    parser = parse()
+    args = parser.parse_args(argv)
+    return convert(
+        input_file=args.input_file,
+        out_file=args.out_file,
+        resolution=args.resolution,
+        n_points=args.n_points,
+        mesher=args.mesher,
+        verbose=args.verbose,
+        export=args.export,
+        force_pygen=args.force_pygen,
+    )
+
+
+if __name__ == "__main__":
+    main()

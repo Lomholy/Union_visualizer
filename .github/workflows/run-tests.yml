@@ -29,6 +29,8 @@ jobs:
           which python
           python --version
           micromamba list
+          which unviz
+          unviz --help
 
 
       - name: Run script on all test files
