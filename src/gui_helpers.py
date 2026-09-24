@@ -1,5 +1,6 @@
 """Display-independent helpers for the union_viewer GUI: material name
-normalisation/grouping, vacuum detection, and default colour assignment."""
+normalisation/grouping, vacuum detection, default colour assignment, and
+neutron ray selection/colouring."""
 
 import importlib.util
 
@@ -175,3 +176,99 @@ def clip_mesh(mesh, clip):
     if len(faces) == 0:
         return None
     return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+
+# ---------------------------------------------------------------------------
+# Neutron rays
+# ---------------------------------------------------------------------------
+
+# {mode: (label, unit)}; "Uniform" draws every ray in one colour.
+RAY_COLOR_MODES = {
+    "Uniform": ("", ""),
+    "Speed": ("Speed", "m/s"),
+    "Weight": ("log10 weight", ""),
+    "Time": ("Time", "ms"),
+}
+
+# Public so a colorbar widget can build the same gradient stops as colormap().
+VIRIDIS_STOPS = np.array([
+    [0.267, 0.005, 0.329],
+    [0.230, 0.322, 0.546],
+    [0.128, 0.567, 0.551],
+    [0.369, 0.789, 0.383],
+    [0.993, 0.906, 0.144],
+])
+
+# Shared between the rendered ray markers/segments and the matching swatch
+# next to each checkbox in the Neutron Rays panel, so the two never drift
+# apart.
+UNIFORM_RAY_COLOR = "#1f6fd1"
+SCATTER_MARKER_COLOR = "#e67e22"
+ABSORB_MARKER_COLOR = "#c0392b"
+# A restore_neutron "teleport" (see mcstas_trace.parse_rays): the segment
+# leading to it is drawn in this light grey instead of the ray's own colour,
+# so it reads as a jump rather than a normal continuation of the path.
+TELEPORT_COLOR = "#d3d3d3"  # lightgray
+
+
+def hex_to_rgba(hex_color):
+    """hex_color ("#rrggbb") as a (4,) float32 RGBA array in [0, 1], for
+    building a per-vertex pygfx colour array."""
+    hex_color = hex_color.lstrip("#")
+    rgb = [int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    return np.array(rgb + [1.0], dtype=np.float32)
+
+
+def rays_reaching(rays, component_name=None):
+    """Indices of the rays with at least one point in component_name's
+    frame, or of every ray when component_name is None."""
+    if component_name is None:
+        return np.arange(rays.n_rays)
+    if component_name not in rays.component_names:
+        return np.arange(0)
+    index = rays.component_names.index(component_name)
+    hits = rays.component == index
+    return np.array([
+        i for i in range(rays.n_rays)
+        if hits[rays.ray_offsets[i]:rays.ray_offsets[i + 1]].any()
+    ], dtype=int)
+
+
+def ray_segment_indices(rays, ray_indices):
+    """(k, 2) indices into rays.points of every consecutive point pair
+    within the chosen rays, never joining the end of one ray to the start
+    of the next."""
+    starts = [
+        np.arange(rays.ray_offsets[i], rays.ray_offsets[i + 1] - 1)
+        for i in ray_indices
+    ]
+    if not starts:
+        return np.zeros((0, 2), dtype=int)
+    first = np.concatenate(starts)
+    return np.stack([first, first + 1], axis=1)
+
+
+def ray_color_values(rays, mode):
+    """Per-point value to colour by for a RAY_COLOR_MODES mode, or None for
+    "Uniform"."""
+    if mode == "Speed":
+        return rays.speed
+    if mode == "Weight":
+        positive = rays.weight[rays.weight > 0]
+        floor = positive.min() if len(positive) else 1e-300
+        return np.log10(np.maximum(rays.weight, floor))
+    if mode == "Time":
+        return rays.time * 1e3
+    return None
+
+
+def colormap(values, vmin=None, vmax=None):
+    """(n, 4) float32 viridis RGBA for values, scaled to [vmin, vmax]."""
+    values = np.asarray(values, dtype=float)
+    vmin = values.min() if vmin is None else vmin
+    vmax = values.max() if vmax is None else vmax
+    t = np.zeros_like(values) if vmax <= vmin else (values - vmin) / (vmax - vmin)
+    t = np.clip(t, 0, 1) * (len(VIRIDIS_STOPS) - 1)
+    stops = np.arange(len(VIRIDIS_STOPS))
+    rgb = np.stack([np.interp(t, stops, VIRIDIS_STOPS[:, c]) for c in range(3)], axis=1)
+    return np.concatenate([rgb, np.ones((len(values), 1))], axis=1).astype(np.float32)

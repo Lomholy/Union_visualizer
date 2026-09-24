@@ -98,11 +98,26 @@ class ParameterRecoveryTest(unittest.TestCase):
                 self.name, self.type, self.value = name, type, value
 
         class FakeInstr:
-            parameters = [Param("a", "double", 1.5), Param("b", "int", None), "raw x=1"]
+            parameters = [
+                Param("a", "double", 1.5),
+                Param("b", "int", None),
+                "double x=1",
+                'string filename="myfile.txt"',
+                "y",
+            ]
 
+        # A raw-string entry (mcstasscript's fallback when it can't parse
+        # a parameter into a typed object - see _recover_raw_parameter)
+        # must still appear in the list, not be silently dropped.
         self.assertEqual(
             pp.instrument_parameters(FakeInstr()),
-            [("a", "double", "1.5"), ("b", "int", None)],
+            [
+                ("a", "double", "1.5"),
+                ("b", "int", None),
+                ("x", "double", "1"),
+                ("filename", "string", "myfile.txt"),
+                ("y", "double", None),
+            ],
         )
 
 
