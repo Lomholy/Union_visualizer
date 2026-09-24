@@ -455,6 +455,64 @@ def _drawcall_geometry(call):
     return None, None
 
 
+def _orient_component_solid(solid):
+    """Make every disconnected piece of a component's assembled MCDISPLAY
+    solid face outward, in place of whatever winding McStas's own display
+    code happened to emit.
+
+    McStas's polygon() (mcdis_polygon in mccode-r.c) doesn't guarantee a
+    globally meaningful winding direction across separate calls of the same
+    component: e.g. Guide_gravity draws its four walls from the same
+    vertex-order template mirrored across the beam axis, so about half of
+    them come out wound inward by construction - confirmed against
+    tests/BL18_SENJU_generated.instr, where 34 of its 68 guide-wall pieces
+    (across 17 Guide_gravity components) were inward this way, independent
+    of any single triangle's winding. McStas's own viewers never notice,
+    since they always render this data double-sided.
+
+    A watertight piece (a real solid, e.g. a box or cylinder primitive) has
+    an unambiguous outward direction from its own signed volume, so
+    fix_normals() alone (single-body, not multibody - see PR #25 on why
+    multibody is the wrong call here) already gets it right. An open piece
+    (a thin wall sheet with no defined interior, like a guide wall) has no
+    such reference, so it's instead flipped to face away from the whole
+    component's own long axis (fit through all of its vertices) - a good
+    proxy for "outward" on the tube/channel-shaped components (guides,
+    mirrors, collimators) that draw themselves this way.
+    """
+    if len(solid.faces) == 0:
+        return solid
+    # repair=False: split()'s default (True, regardless of only_watertight)
+    # silently fills small holes in each piece - which would turn a wall's
+    # genuinely open boundary into a fabricated closed cap, corrupting both
+    # its watertightness below and the volume-based direction fix_normals()
+    # derives from it.
+    bodies = solid.split(only_watertight=False, repair=False)
+    if len(bodies) == 0:
+        return solid
+
+    points = solid.vertices
+    centre = points.mean(axis=0)
+    _, _, principal_axes = np.linalg.svd(points - centre, full_matrices=False)
+    long_axis = principal_axes[0]
+
+    oriented = []
+    for body in bodies:
+        body = body.copy()
+        body.fix_normals()
+        if not body.is_watertight:
+            along_axis = np.dot(body.centroid - centre, long_axis)
+            nearest_on_axis = centre + along_axis * long_axis
+            outward = body.centroid - nearest_on_axis
+            outward_length = np.linalg.norm(outward)
+            if outward_length > 1e-9:
+                outward /= outward_length
+                if np.dot(body.face_normals.mean(axis=0), outward) < 0:
+                    body.invert()
+        oriented.append(body)
+    return oriented[0] if len(oriented) == 1 else trimesh.util.concatenate(oriented)
+
+
 def _build_component_geometry(calls, comp_name):
     segments = []
     solids = []
@@ -474,6 +532,7 @@ def _build_component_geometry(calls, comp_name):
     solid = None
     if solids:
         solid = solids[0] if len(solids) == 1 else trimesh.util.concatenate(solids)
+        solid = _orient_component_solid(solid)
     return segments, solid
 
 

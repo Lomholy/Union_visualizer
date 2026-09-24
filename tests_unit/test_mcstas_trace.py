@@ -8,6 +8,7 @@ tests/simple_test.instr, so the parser tests need no McStas installation. The en
 skipped when it isn't on PATH.
 """
 
+import json
 import os
 import shutil
 import sys
@@ -142,6 +143,19 @@ class DrawcallTest(unittest.TestCase):
         _, mesh = _drawcall_geometry(text)
         self.assertEqual(len(mesh.faces), 2)
 
+    def test_polyhedron_preserves_the_source_faces(self):
+        # _polyhedron() itself trusts mcrun's winding as given - orienting
+        # it correctly needs the whole component's context (see
+        # ComponentSolidOrientationTest below), not just one polyhedron.
+        text = (
+            'polyhedron {"vertices": '
+            '[[-1,-1,0],[-1,-1,2],[-1,1,2],[-1,1,0],[-1,0,1]], '
+            '"faces": [{"face":[0,1,4]},{"face":[1,2,4]},'
+            '{"face":[2,3,4]},{"face":[3,4,0]}]}'
+        )
+        _, mesh = _drawcall_geometry(text)
+        np.testing.assert_array_equal(mesh.faces, [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 4, 0]])
+
     def test_rectangle_and_circle_are_closed_loops(self):
         segs, _ = _drawcall_geometry("mcdisrectangle('xy',0,0,0,2,1)")
         self.assertEqual(len(segs), 4)
@@ -225,6 +239,63 @@ STATE: 0, 0, -0.0000003, 0, 0, 1000, 0.05, 0, 0, 0, 1
 LEAVE:
 STATE: 0, 0, -0.0000003, 0, 0, 1000, 0.05, 0, 0, 0, 1
 """
+
+
+class ComponentSolidOrientationTest(unittest.TestCase):
+    """_build_component_geometry()/_orient_component_solid() against a
+    synthetic stand-in for Guide_gravity's real --trace=2 output: four
+    wall polyhedra around the local z axis, built exactly like
+    mcdis_polygon() in mccode-r.c builds them - each a fan around a
+    midpoint vertex, closed with mcdis_polygon()'s actual (buggy) index
+    order [i, apex, 0] instead of the winding-consistent [i, 0, apex].
+    Two of the four walls also use a vertex order that is, on its own,
+    already wound inward (mirroring what Guide_gravity's own MCDISPLAY
+    code does for its two "positive side" walls), reproducing both real
+    causes of the reported bug at once, not just the closing-triangle one.
+    """
+
+    @staticmethod
+    def _mcdis_polygon_json(corners):
+        """4 boundary corners -> the exact JSON mcdis_polygon() emits for
+        them (mccode-r.c), apex included, closing face intentionally
+        backwards."""
+        apex = np.mean(corners, axis=0)
+        vertices = [list(v) for v in corners] + [list(apex)]
+        faces = [[i, i + 1, 4] for i in range(3)] + [[3, 4, 0]]
+        return (
+            '{"vertices": ' + json.dumps(vertices)
+            + ', "faces": ' + json.dumps([{"face": f} for f in faces]) + "}"
+        )
+
+    def _wall_call(self, corners):
+        return "polyhedron " + self._mcdis_polygon_json(corners)
+
+    def test_all_four_walls_end_up_wound_consistently_and_outward(self):
+        w, l = 0.04, 0.8
+        # left/bottom use one winding template; right/top use the mirrored
+        # template Guide_gravity's own code uses for its "positive side"
+        # walls - already wound inward on its own, independent of the
+        # closing-triangle bug.
+        left = [(-w/2, -w/2, 0), (-w/2, -w/2, l), (-w/2, w/2, l), (-w/2, w/2, 0)]
+        right = [(w/2, -w/2, 0), (w/2, -w/2, l), (w/2, w/2, l), (w/2, w/2, 0)]
+        bottom = [(-w/2, -w/2, 0), (w/2, -w/2, 0), (w/2, -w/2, l), (-w/2, -w/2, l)]
+        top = [(-w/2, w/2, 0), (w/2, w/2, 0), (w/2, w/2, l), (-w/2, w/2, l)]
+        calls = [self._wall_call(c) for c in (left, right, bottom, top)]
+
+        _, solid = mcstas_trace._build_component_geometry(calls, "guide_test")
+
+        bodies = solid.split(only_watertight=False, repair=False)
+        self.assertEqual(len(bodies), 4)
+        centre = solid.vertices.mean(axis=0)
+        for body in bodies:
+            self.assertTrue(body.is_winding_consistent)
+            axis_point = centre.copy()
+            axis_point[2] = body.centroid[2]
+            outward = body.centroid - axis_point
+            outward /= np.linalg.norm(outward)
+            mean_normal = body.face_normals.mean(axis=0)
+            mean_normal /= np.linalg.norm(mean_normal)
+            self.assertGreater(np.dot(mean_normal, outward), 0.9)
 
 
 class RayParsingTest(unittest.TestCase):
