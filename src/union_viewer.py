@@ -1945,7 +1945,11 @@ class Viewer(QtWidgets.QMainWindow):
     def _on_trace_failed(self, error_text):
         print("McStas trace failed:")
         print(error_text)
-        self._set_trace_status(error_text, error=True)
+        self._set_trace_status(
+            "mcrun FAILED. ENSURE THAT INSTRUMENT COMPILES IN ORDER TO "
+            "VISUALIZE THE MCSTAS COMPONENTS",
+            error=True,
+        )
 
     def _on_trace_thread_finished(self):
         self._trace_thread = None
