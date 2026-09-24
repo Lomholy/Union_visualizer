@@ -206,9 +206,9 @@ UNIFORM_RAY_COLOR = "#1f6fd1"
 SCATTER_MARKER_COLOR = "#e67e22"
 ABSORB_MARKER_COLOR = "#c0392b"
 # A restore_neutron "teleport" (see mcstas_trace.parse_rays): the segment
-# leading to it is drawn in this dark grey instead of the ray's own colour,
+# leading to it is drawn in this light grey instead of the ray's own colour,
 # so it reads as a jump rather than a normal continuation of the path.
-TELEPORT_COLOR = "#404040"
+TELEPORT_COLOR = "#d3d3d3"  # lightgray
 
 
 def hex_to_rgba(hex_color):

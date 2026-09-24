@@ -301,35 +301,44 @@ def build_component_group(components, colors):
 
 
 def build_ray_group(rays, ray_indices, color_mode):
-    """One Line for every chosen ray (vertex-coloured; a segment whose end
-    point is a restore_neutron TELEPORT is always drawn in TELEPORT_COLOR,
-    regardless of color_mode) plus Points marking scatterings and
-    absorptions. Returns (group, (vmin, vmax) or None)."""
+    """Two separate Lines for the chosen rays, so the ordinary path and the
+    restore_neutron jumps can be shown/hidden independently:
+    group.ray_line for ordinary segments (vertex-coloured unless color_mode
+    is "Uniform") and group.teleport_line, always TELEPORT_COLOR, for a
+    segment whose end point is a TELEPORT. Plus Points marking scatterings
+    and absorptions. Returns (group, (vmin, vmax) or None)."""
     group = gfx.Group()
     pairs = ray_segment_indices(rays, ray_indices)
-    positions = rays.points[pairs].reshape(-1, 3).astype(np.float32)
+    # A segment "teleports" if the point it ends on is a restore_neutron
+    # duplicate.
+    is_teleport = rays.kind[pairs[:, 1]] == TELEPORT
+    regular_pairs, teleport_pairs = pairs[~is_teleport], pairs[is_teleport]
+
     values = ray_color_values(rays, color_mode)
     value_range = None
-    if len(positions) == 0:
-        group.ray_line = None
-    else:
+    group.ray_line = None
+    if len(regular_pairs):
+        positions = rays.points[regular_pairs].reshape(-1, 3).astype(np.float32)
         if values is None:
             colors = np.tile(hex_to_rgba(UNIFORM_RAY_COLOR), (len(positions), 1))
         else:
-            used = values[pairs.ravel()]
+            used = values[regular_pairs.ravel()]
             value_range = (float(used.min()), float(used.max()))
             colors = colormap(used, *value_range)
-        # A segment "teleports" if the point it ends on is a restore_neutron
-        # duplicate - colour both its vertices dark grey so the whole
-        # segment reads as a jump, not a gradient into/out of one.
-        teleport_pair = rays.kind[pairs[:, 1]] == TELEPORT
-        colors[np.repeat(teleport_pair, 2)] = hex_to_rgba(TELEPORT_COLOR)
         group.ray_line = gfx.Line(
             gfx.Geometry(positions=positions, colors=colors),
             gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex"),
         )
-    if group.ray_line is not None:
         group.add(group.ray_line)
+
+    group.teleport_line = None
+    if len(teleport_pairs):
+        positions = rays.points[teleport_pairs].reshape(-1, 3).astype(np.float32)
+        group.teleport_line = gfx.Line(
+            gfx.Geometry(positions=positions),
+            gfx.LineSegmentMaterial(thickness=1.5, color=TELEPORT_COLOR),
+        )
+        group.add(group.teleport_line)
 
     in_chosen = np.zeros(len(rays.points), dtype=bool)
     for i in ray_indices:
@@ -1192,6 +1201,27 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_reaching_combo.addItem("any component", None)
         options_layout.addWidget(self.ray_reaching_combo)
 
+        rays_line_layout = QtWidgets.QHBoxLayout()
+        self.rays_line_checkbox = QtWidgets.QCheckBox("Show rays")
+        self.rays_line_checkbox.setChecked(True)
+        self.rays_line_checkbox.setToolTip("The ordinary path each ray follows.")
+        rays_line_layout.addWidget(self.rays_line_checkbox)
+        rays_line_layout.addWidget(self._color_swatch(UNIFORM_RAY_COLOR))
+        rays_line_layout.addStretch()
+        options_layout.addLayout(rays_line_layout)
+
+        teleport_line_layout = QtWidgets.QHBoxLayout()
+        self.teleport_line_checkbox = QtWidgets.QCheckBox("Show teleports")
+        self.teleport_line_checkbox.setChecked(True)
+        self.teleport_line_checkbox.setToolTip(
+            "The jump a restore_neutron monitor (e.g. PSD_monitor) causes: "
+            "it detects a ray, then restores its pre-detection state."
+        )
+        teleport_line_layout.addWidget(self.teleport_line_checkbox)
+        teleport_line_layout.addWidget(self._color_swatch(TELEPORT_COLOR))
+        teleport_line_layout.addStretch()
+        options_layout.addLayout(teleport_line_layout)
+
         scatter_layout = QtWidgets.QHBoxLayout()
         self.scatter_points_checkbox = QtWidgets.QCheckBox("Mark scatterings")
         self.scatter_points_checkbox.setChecked(True)
@@ -1313,6 +1343,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_seed_val.valueChanged.connect(self.ray_rerun_timer.start)
         self.ray_color_combo.currentIndexChanged.connect(self.rebuild_ray_group)
         self.ray_reaching_combo.currentIndexChanged.connect(self.rebuild_ray_group)
+        self.rays_line_checkbox.stateChanged.connect(self.apply_ray_visibility)
+        self.teleport_line_checkbox.stateChanged.connect(self.apply_ray_visibility)
         self.scatter_points_checkbox.stateChanged.connect(self.apply_ray_visibility)
         self.absorb_points_checkbox.stateChanged.connect(self.apply_ray_visibility)
         self.axis_combo.currentTextChanged.connect(self.on_clip_changed)
@@ -1966,6 +1998,8 @@ class Viewer(QtWidgets.QMainWindow):
             return
         self.ray_group.visible = self.rays_checkbox.isChecked()
         for obj, checkbox in (
+            (self.ray_group.ray_line, self.rays_line_checkbox),
+            (self.ray_group.teleport_line, self.teleport_line_checkbox),
             (self.ray_group.scatter_points, self.scatter_points_checkbox),
             (self.ray_group.absorb_points, self.absorb_points_checkbox),
         ):
