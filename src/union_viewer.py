@@ -266,7 +266,8 @@ def compute_trace_data(input_file, force_pygen, params, ncount, seed):
 
 
 def compute_counts_data(run_folder, input_file, force_pygen):
-    """Load run_folder's spatial Union logger/abs_logger output as a
+    """Load run_folder's spatially-placeable detector output (Union
+    loggers/abs_loggers and ordinary McStas monitors alike) as a
     {name: LoggerCounts} dict. Worker-process side of CountsWorker, like
     compute_trace_data for TraceWorker."""
     types = component_types(input_file, force_pygen)
@@ -368,13 +369,50 @@ def build_ray_group(rays, ray_indices, color_mode):
     return group, value_range
 
 
+def _build_counts_plane(lc, world_matrix, vmin, vmax):
+    """A textured quad for a 2D LoggerCounts. Returns (mesh, texture)."""
+    local_pts = logger_output.local_corners(lc.axis1, lc.axis2, lc.limits)
+    world_pts = logger_output.world_points(local_pts, world_matrix).astype(np.float32)
+    texture = gfx.Texture(logger_output.texture_image(lc.grid, vmin, vmax), dim=2)
+    mesh = gfx.Mesh(
+        gfx.Geometry(
+            positions=world_pts,
+            indices=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
+            texcoords=np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32),
+        ),
+        # side="both": a logger's own local-frame winding has no meaningful
+        # "outward" direction to get right (same reasoning as MCDISPLAY-drawn
+        # components; see build_component_group).
+        gfx.MeshBasicMaterial(map=gfx.TextureMap(texture), color_mode="vertex_map", side="both"),
+    )
+    return mesh, texture
+
+
+def _build_counts_line(lc, world_matrix, vmin, vmax):
+    """A coloured line for a 1D LoggerCounts: one segment per bin, its two
+    endpoints both coloured by that bin's value."""
+    n_bins = len(lc.grid)
+    local_edges = logger_output.local_line_points(lc.axis1, lc.limits, n_bins)
+    world_edges = logger_output.world_points(local_edges, world_matrix).astype(np.float32)
+    positions = np.empty((2 * n_bins, 3), dtype=np.float32)
+    positions[0::2] = world_edges[:-1]
+    positions[1::2] = world_edges[1:]
+    colors = logger_output.line_vertex_colors(lc.grid, vmin, vmax)
+    return gfx.Line(
+        gfx.Geometry(positions=positions, colors=colors),
+        gfx.LineSegmentMaterial(thickness=4, color_mode="vertex"),
+    )
+
+
 def build_counts_group(counts, world_matrices, vmin, vmax):
-    """One textured quad per LoggerCounts in counts (see logger_output.py),
-    placed with world_matrices[name] - skipping any logger not found there
-    (the loaded instrument doesn't match the run the counts came from).
-    Returns (group, meshes, textures): meshes/textures are {name: obj}, so a
-    colour-range change can restyle in place via texture.set_data() instead
-    of rebuilding."""
+    """One plane (2D LoggerCounts) or coloured line (1D LoggerCounts) per
+    entry in counts (see logger_output.py), placed with world_matrices[name]
+    - skipping any detector not found there (the loaded instrument doesn't
+    match the run the counts came from). Returns (group, meshes, textures):
+    meshes/textures are {name: obj} (textures only has an entry for the 2D,
+    plane-shaped ones), so a colour-range change can restyle in place -
+    texture.set_data() for a plane, geometry.colors.set_data() for a line -
+    instead of rebuilding."""
     group = gfx.Group()
     meshes = {}
     textures = {}
@@ -383,23 +421,13 @@ def build_counts_group(counts, world_matrices, vmin, vmax):
         if world_matrix is None:
             print(f"Warning: logger '{name}' not found in the loaded instrument - skipping.")
             continue
-        local_pts = logger_output.local_corners(lc.axis1, lc.axis2, lc.limits)
-        world_pts = logger_output.world_corners(local_pts, world_matrix).astype(np.float32)
-        texture = gfx.Texture(logger_output.texture_image(lc.grid, vmin, vmax), dim=2)
-        mesh = gfx.Mesh(
-            gfx.Geometry(
-                positions=world_pts,
-                indices=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
-                texcoords=np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32),
-            ),
-            # side="both": a logger's own local-frame winding has no
-            # meaningful "outward" direction to get right (same reasoning
-            # as MCDISPLAY-drawn components; see build_component_group).
-            gfx.MeshBasicMaterial(map=gfx.TextureMap(texture), color_mode="vertex_map", side="both"),
-        )
-        group.add(mesh)
-        meshes[name] = mesh
-        textures[name] = texture
+        if lc.axis2 is None:
+            obj = _build_counts_line(lc, world_matrix, vmin, vmax)
+        else:
+            obj, texture = _build_counts_plane(lc, world_matrix, vmin, vmax)
+            textures[name] = texture
+        group.add(obj)
+        meshes[name] = obj
     return group, meshes, textures
 
 
@@ -862,7 +890,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_group = None
 
         # ----------------------------------------------------
-        # Detector counts (Union logger/abs_logger output)
+        # Detector counts
         # ----------------------------------------------------
         self.counts = {}              # {name: logger_output.LoggerCounts}
         self.counts_group = None
@@ -1376,7 +1404,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_rerun_timer.timeout.connect(self.rerun_rays)
 
         # ----------------------------------------------------
-        # Detector counts dock (Union logger/abs_logger output)
+        # Detector counts dock
         # ----------------------------------------------------
 
         counts_dock, counts_layout = self._add_dock("Detector Counts")
@@ -1388,9 +1416,11 @@ class Viewer(QtWidgets.QMainWindow):
         self.load_counts_button = QtWidgets.QPushButton("Load counts folder...")
         self.load_counts_button.setToolTip(
             "A McStas run's output folder (containing mccode.sim). Every "
-            "Union logger/abs_logger in it that can be placed in 3D - a "
-            "*_space logger, or an event-list logger with x/y/z columns - "
-            "is drawn as a colour-mapped plane at its own position."
+            "detector in it that can be placed in 3D - a Union logger/"
+            "abs_logger, an ordinary monitor (PSD_monitor, Monitor_nD, ...), "
+            "or an event-list logger with x/y/z columns - is drawn at its "
+            "own position: a colour-mapped plane for 2D data, a coloured "
+            "line for 1D."
         )
         self.load_counts_button.clicked.connect(self.load_counts_folder)
         counts_options_layout.addWidget(self.load_counts_button)
@@ -2207,7 +2237,7 @@ class Viewer(QtWidgets.QMainWindow):
                 obj.visible = checkbox.isChecked()
 
     # ========================================================
-    # Detector counts (Union logger/abs_logger output)
+    # Detector counts
     # ========================================================
 
     def load_counts_folder(self):
@@ -2256,10 +2286,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.counts_run_folder = folder
         self.counts_visibility = {name: True for name in counts}
         if counts:
-            self.counts_info_label.setText(f"{len(counts)} logger(s) loaded from '{folder}'.")
+            self.counts_info_label.setText(f"{len(counts)} detector(s) loaded from '{folder}'.")
         else:
             self.counts_info_label.setText(
-                f"No spatially-placeable logger/abs_logger output found in '{folder}'."
+                f"No spatially-placeable detector output found in '{folder}'."
             )
         self.rebuild_counts_panel()
         self.reset_counts_range()
@@ -2286,10 +2316,9 @@ class Viewer(QtWidgets.QMainWindow):
         for name, lc in self.counts.items():
             row = QtWidgets.QHBoxLayout()
             cb = QtWidgets.QCheckBox(wrap_label(f"{name} ({lc.kind})"))
-            cb.setToolTip(
-                f"{name}: axes ({lc.axis1}, {lc.axis2}), "
-                f"{lc.grid.shape[0]}x{lc.grid.shape[1]} bins, total {lc.total:.4g}"
-            )
+            axes = lc.axis1 if lc.axis2 is None else f"{lc.axis1}, {lc.axis2}"
+            bins = "x".join(str(n) for n in lc.grid.shape)
+            cb.setToolTip(f"{name}: axes ({axes}), {bins} bins, total {lc.total:.4g}")
             cb.setChecked(self.counts_visibility.get(name, True))
             cb.toggled.connect(lambda checked, n=name: self.on_counts_visibility_changed(n, checked))
             row.addWidget(cb)
@@ -2332,11 +2361,16 @@ class Viewer(QtWidgets.QMainWindow):
         if vmax <= vmin or not self.counts:
             self.counts_colorbar.hide()
             return
-        if not self.counts_textures:
+        if not self.counts_meshes:
             self.rebuild_counts_group()
             return
-        for name, texture in self.counts_textures.items():
-            texture.set_data(logger_output.texture_image(self.counts[name].grid, vmin, vmax))
+        for name, mesh in self.counts_meshes.items():
+            lc = self.counts[name]
+            texture = self.counts_textures.get(name)
+            if texture is not None:
+                texture.set_data(logger_output.texture_image(lc.grid, vmin, vmax))
+            else:
+                mesh.geometry.colors.set_data(logger_output.line_vertex_colors(lc.grid, vmin, vmax))
         self.counts_colorbar.set_range(f"{vmin:.4g}", f"{vmax:.4g}")
         self.counts_colorbar.show()
         self.rebalance_docks()

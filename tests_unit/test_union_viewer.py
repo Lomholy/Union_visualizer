@@ -85,6 +85,36 @@ class BuildCountsGroupTest(unittest.TestCase):
         np.testing.assert_allclose(positions[:, 1].max(), 22.0)
         np.testing.assert_allclose(positions[:, 2], 30.0)
 
+    def test_1d_detector_becomes_a_coloured_line_not_a_plane(self):
+        counts = {
+            "strip": LoggerCounts("strip", "Monitor_nD", "y", None, (-1, 1), np.array([1.0, 2.0, 3.0])),
+        }
+        group, meshes, textures = uv.build_counts_group(counts, {"strip": np.eye(4)}, vmin=0, vmax=3)
+
+        self.assertEqual(set(meshes), {"strip"})
+        self.assertNotIn("strip", textures)  # a line has no texture to restyle
+        line = meshes["strip"]
+        self.assertIsInstance(line, uv.gfx.Line)
+        positions = line.geometry.positions.data
+        self.assertEqual(len(positions), 6)  # 3 bins -> 3 segments -> 6 endpoints
+        np.testing.assert_allclose(positions[:, 1].min(), -1.0)
+        np.testing.assert_allclose(positions[:, 1].max(), 1.0)
+        # x, z (the unlisted axes) are 0 in this identity-placed detector's world frame.
+        np.testing.assert_array_equal(positions[:, 0], np.zeros(6))
+        np.testing.assert_array_equal(positions[:, 2], np.zeros(6))
+
+    def test_1d_and_2d_detectors_can_be_mixed_in_one_group(self):
+        counts = {
+            "plane": LoggerCounts("plane", "PSD_monitor", "x", "y", (-1, 1, -1, 1), np.ones((2, 2))),
+            "line": LoggerCounts("line", "Monitor_nD", "x", None, (-1, 1), np.ones(2)),
+        }
+        world_matrices = {"plane": np.eye(4), "line": np.eye(4)}
+        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
+
+        self.assertEqual(set(meshes), {"plane", "line"})
+        self.assertEqual(set(textures), {"plane"})
+        self.assertEqual(len(group.children), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
