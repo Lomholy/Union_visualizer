@@ -36,7 +36,8 @@ from gui_helpers import (
     ABSORB_MARKER_COLOR,
     TELEPORT_COLOR,
 )
-from mcstas_trace import trace_instrument, SCATTER, ABSORB, TELEPORT
+from mcstas_trace import trace_instrument, component_types, SCATTER, ABSORB, TELEPORT
+import logger_output
 import argparse
 
 # The meshers offered in the dock, in display order.
@@ -264,6 +265,15 @@ def compute_trace_data(input_file, force_pygen, params, ncount, seed):
     )
 
 
+def compute_counts_data(run_folder, input_file, force_pygen):
+    """Load run_folder's spatially-placeable detector output (Union
+    loggers/abs_loggers and ordinary McStas monitors alike) as a
+    {name: LoggerCounts} dict. Worker-process side of CountsWorker, like
+    compute_trace_data for TraceWorker."""
+    types = component_types(input_file, force_pygen)
+    return logger_output.load_counts(run_folder, types)
+
+
 def build_component_group(components, colors):
     """pygfx objects for every McStas component: one Line for all of its
     MCDISPLAY lines and one translucent Mesh for all of its solids."""
@@ -357,6 +367,68 @@ def build_ray_group(rays, ray_indices, color_mode):
             group.add(obj)
             setattr(group, attr, obj)
     return group, value_range
+
+
+def _build_counts_plane(lc, world_matrix, vmin, vmax):
+    """A textured quad for a 2D LoggerCounts. Returns (mesh, texture)."""
+    local_pts = logger_output.local_corners(lc.axis1, lc.axis2, lc.limits)
+    world_pts = logger_output.world_points(local_pts, world_matrix).astype(np.float32)
+    texture = gfx.Texture(logger_output.texture_image(lc.grid, vmin, vmax), dim=2)
+    mesh = gfx.Mesh(
+        gfx.Geometry(
+            positions=world_pts,
+            indices=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
+            texcoords=np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32),
+        ),
+        # side="both": a logger's own local-frame winding has no meaningful
+        # "outward" direction to get right (same reasoning as MCDISPLAY-drawn
+        # components; see build_component_group).
+        gfx.MeshBasicMaterial(map=gfx.TextureMap(texture), color_mode="vertex_map", side="both"),
+    )
+    return mesh, texture
+
+
+def _build_counts_line(lc, world_matrix, vmin, vmax):
+    """A coloured line for a 1D LoggerCounts: one segment per bin, its two
+    endpoints both coloured by that bin's value."""
+    n_bins = len(lc.grid)
+    local_edges = logger_output.local_line_points(lc.axis1, lc.limits, n_bins)
+    world_edges = logger_output.world_points(local_edges, world_matrix).astype(np.float32)
+    positions = np.empty((2 * n_bins, 3), dtype=np.float32)
+    positions[0::2] = world_edges[:-1]
+    positions[1::2] = world_edges[1:]
+    colors = logger_output.line_vertex_colors(lc.grid, vmin, vmax)
+    return gfx.Line(
+        gfx.Geometry(positions=positions, colors=colors),
+        gfx.LineSegmentMaterial(thickness=4, color_mode="vertex"),
+    )
+
+
+def build_counts_group(counts, world_matrices, vmin, vmax):
+    """One plane (2D LoggerCounts) or coloured line (1D LoggerCounts) per
+    entry in counts (see logger_output.py), placed with world_matrices[name]
+    - skipping any detector not found there (the loaded instrument doesn't
+    match the run the counts came from). Returns (group, meshes, textures):
+    meshes/textures are {name: obj} (textures only has an entry for the 2D,
+    plane-shaped ones), so a colour-range change can restyle in place -
+    texture.set_data() for a plane, geometry.colors.set_data() for a line -
+    instead of rebuilding."""
+    group = gfx.Group()
+    meshes = {}
+    textures = {}
+    for name, lc in counts.items():
+        world_matrix = world_matrices.get(name)
+        if world_matrix is None:
+            print(f"Warning: logger '{name}' not found in the loaded instrument - skipping.")
+            continue
+        if lc.axis2 is None:
+            obj = _build_counts_line(lc, world_matrix, vmin, vmax)
+        else:
+            obj, texture = _build_counts_plane(lc, world_matrix, vmin, vmax)
+            textures[name] = texture
+        group.add(obj)
+        meshes[name] = obj
+    return group, meshes, textures
 
 
 def generate_group(
@@ -629,6 +701,36 @@ class TraceWorker(QtCore.QObject):
         self.finished.emit(group, rays, time.time() - start)
 
 
+class CountsWorker(QtCore.QObject):
+    """Loads a run folder's detector counts off the GUI thread. Parsing a
+    run's mccode.sim/.dat files (mcstasscript) and histogramming any
+    event-list loggers ourselves is pure Python, so like TraceWorker this
+    runs in a worker process rather than only on this QThread - a large
+    event-list logger (hundreds of thousands of rows) can take a
+    perceptible moment to load."""
+
+    finished = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, process_pool, run_folder, input_file, force_pygen):
+        super().__init__()
+        self.process_pool = process_pool
+        self.run_folder = run_folder
+        self.input_file = input_file
+        self.force_pygen = force_pygen
+
+    def run(self):
+        try:
+            counts = self.process_pool.submit(
+                compute_counts_data, self.run_folder, self.input_file, self.force_pygen
+            ).result()
+        except Exception as e:
+            traceback.print_exc()
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        self.finished.emit(counts)
+
+
 class CollapsibleTitleBar(QtWidgets.QWidget):
     """Dock title bar whose arrow (or a double-click on the title)
     collapses the dock to just this bar, so the other docks get the room.
@@ -786,6 +888,23 @@ class Viewer(QtWidgets.QMainWindow):
         self.trace_group = None
         self.trace_rays = None
         self.ray_group = None
+
+        # ----------------------------------------------------
+        # Detector counts
+        # ----------------------------------------------------
+        self.counts = {}              # {name: logger_output.LoggerCounts}
+        self.counts_group = None
+        self.counts_meshes = {}       # {name: gfx.Mesh}
+        self.counts_textures = {}     # {name: gfx.Texture}
+        self.counts_visibility = {}   # {name: bool}
+        self.counts_checkboxes = {}
+        self.counts_run_folder = None
+        # A separate pool, so loading a large logger file never delays the
+        # meshes or a trace run, and vice versa.
+        self._counts_process_pool = ProcessPoolExecutor(max_workers=1)
+        self._counts_busy = False
+        self._counts_thread = None
+        self._counts_worker = None
 
         # ----------------------------------------------------
         # Render widget
@@ -1285,6 +1404,69 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_rerun_timer.timeout.connect(self.rerun_rays)
 
         # ----------------------------------------------------
+        # Detector counts dock
+        # ----------------------------------------------------
+
+        counts_dock, counts_layout = self._add_dock("Detector Counts")
+        self.counts_options = QtWidgets.QWidget()
+        counts_options_layout = QtWidgets.QVBoxLayout(self.counts_options)
+        counts_options_layout.setContentsMargins(0, 0, 0, 0)
+        counts_layout.addWidget(self.counts_options)
+
+        self.load_counts_button = QtWidgets.QPushButton("Load counts folder...")
+        self.load_counts_button.setToolTip(
+            "A McStas run's output folder (containing mccode.sim). Every "
+            "detector in it that can be placed in 3D - a Union logger/"
+            "abs_logger, an ordinary monitor (PSD_monitor, Monitor_nD, ...), "
+            "or an event-list logger with x/y/z columns - is drawn at its "
+            "own position: a colour-mapped plane for 2D data, a coloured "
+            "line for 1D."
+        )
+        self.load_counts_button.clicked.connect(self.load_counts_folder)
+        counts_options_layout.addWidget(self.load_counts_button)
+
+        self.counts_checkbox = QtWidgets.QCheckBox("Show detector counts")
+        self.counts_checkbox.setChecked(True)
+        self.counts_checkbox.stateChanged.connect(self.apply_counts_visibility)
+        counts_options_layout.addWidget(self.counts_checkbox)
+
+        range_layout = QtWidgets.QHBoxLayout()
+        range_layout.addWidget(QtWidgets.QLabel("Colour range"))
+        self.counts_min_val = QtWidgets.QDoubleSpinBox()
+        self.counts_max_val = QtWidgets.QDoubleSpinBox()
+        for spin in (self.counts_min_val, self.counts_max_val):
+            spin.setRange(-1e12, 1e12)
+            spin.setDecimals(4)
+            spin.setToolTip("Editable - overrides the automatic min/max for every visible logger's plane.")
+            range_layout.addWidget(spin)
+        counts_options_layout.addLayout(range_layout)
+        self.counts_min_val.valueChanged.connect(self.on_counts_range_changed)
+        self.counts_max_val.valueChanged.connect(self.on_counts_range_changed)
+
+        self.counts_auto_range_button = QtWidgets.QPushButton("Auto range")
+        self.counts_auto_range_button.setToolTip("Reset the colour range to the min/max of the currently visible loggers.")
+        self.counts_auto_range_button.clicked.connect(self.reset_counts_range)
+        counts_options_layout.addWidget(self.counts_auto_range_button)
+
+        self.counts_colorbar = ColorBarWidget()
+        self.counts_colorbar.hide()
+        counts_options_layout.addWidget(self.counts_colorbar)
+
+        self.counts_panel_layout = QtWidgets.QVBoxLayout()
+        counts_options_layout.addLayout(self.counts_panel_layout)
+
+        self.counts_info_label = QtWidgets.QLabel("No counts loaded.")
+        self.counts_info_label.setWordWrap(True)
+        self.counts_info_label.setStyleSheet("color: gray;")
+        counts_options_layout.addWidget(self.counts_info_label)
+
+        counts_layout.addStretch()
+        counts_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
         # Geometry visibility dock
         # ----------------------------------------------------
 
@@ -1576,7 +1758,7 @@ class Viewer(QtWidgets.QMainWindow):
 
     def apply_clipping(self):
         planes = clip_planes(self.resolved_clip())
-        for group in (self.current_group, self.trace_group, self.ray_group):
+        for group in (self.current_group, self.trace_group, self.ray_group, self.counts_group):
             if group is None:
                 continue
             for obj in group.iter():
@@ -1855,6 +2037,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.apply_geometry_visibility()
         self._resize_grid(self.current_group)
         recentre_controller(self.controller, self.current_group)
+        if self.counts:
+            self.rebuild_counts_group()
         print("Reload complete")
 
         if self._pending_fit_camera:
@@ -2052,6 +2236,162 @@ class Viewer(QtWidgets.QMainWindow):
             if obj is not None:
                 obj.visible = checkbox.isChecked()
 
+    # ========================================================
+    # Detector counts
+    # ========================================================
+
+    def load_counts_folder(self):
+        if self.input_file is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Detector Counts",
+                "Open an instrument first - counts are matched to it by component name.",
+            )
+            return
+        if self._counts_busy:
+            QtWidgets.QMessageBox.information(
+                self, "Detector Counts", "Already loading a counts folder - please wait."
+            )
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select a McStas run folder (containing mccode.sim)"
+        )
+        if not folder:
+            return
+
+        self._counts_busy = True
+        self.load_counts_button.setEnabled(False)
+        self.counts_info_label.setText(f"Loading counts from '{folder}'...")
+
+        thread = QtCore.QThread(self)
+        worker = CountsWorker(
+            self._counts_process_pool, folder, self.input_file, self.pygen_checkbox.isChecked()
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda counts: self._on_counts_finished(folder, counts))
+        worker.failed.connect(lambda error: self._on_counts_failed(folder, error))
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_counts_thread_finished)
+
+        self._counts_thread = thread
+        self._counts_worker = worker
+        thread.start()
+
+    def _on_counts_finished(self, folder, counts):
+        self.counts = counts
+        self.counts_run_folder = folder
+        self.counts_visibility = {name: True for name in counts}
+        if counts:
+            self.counts_info_label.setText(f"{len(counts)} detector(s) loaded from '{folder}'.")
+        else:
+            self.counts_info_label.setText(
+                f"No spatially-placeable detector output found in '{folder}'."
+            )
+        self.rebuild_counts_panel()
+        self.reset_counts_range()
+
+    def _on_counts_failed(self, folder, error_text):
+        print("Loading detector counts failed:")
+        print(error_text)
+        self.counts_info_label.setText(f"Could not load counts from '{folder}': {error_text}")
+        QtWidgets.QMessageBox.warning(
+            self, "Detector Counts", f"Could not load counts from '{folder}':\n{error_text}"
+        )
+
+    def _on_counts_thread_finished(self):
+        self._counts_thread = None
+        self._counts_worker = None
+        self._counts_busy = False
+        self.load_counts_button.setEnabled(True)
+
+    def rebuild_counts_panel(self):
+        while self.counts_panel_layout.count():
+            self._clear_geometry_layout_item(self.counts_panel_layout.takeAt(0))
+        self.counts_checkboxes.clear()
+
+        for name, lc in self.counts.items():
+            row = QtWidgets.QHBoxLayout()
+            cb = QtWidgets.QCheckBox(wrap_label(f"{name} ({lc.kind})"))
+            axes = lc.axis1 if lc.axis2 is None else f"{lc.axis1}, {lc.axis2}"
+            bins = "x".join(str(n) for n in lc.grid.shape)
+            cb.setToolTip(f"{name}: axes ({axes}), {bins} bins, total {lc.total:.4g}")
+            cb.setChecked(self.counts_visibility.get(name, True))
+            cb.toggled.connect(lambda checked, n=name: self.on_counts_visibility_changed(n, checked))
+            row.addWidget(cb)
+            self.counts_panel_layout.addLayout(row)
+            self.counts_checkboxes[name] = cb
+
+    def on_counts_visibility_changed(self, name, checked):
+        self.counts_visibility[name] = checked
+        mesh = self.counts_meshes.get(name)
+        if mesh is not None:
+            mesh.visible = checked
+
+    def apply_counts_visibility(self):
+        if self.counts_group is None:
+            return
+        self.counts_group.visible = self.counts_checkbox.isChecked()
+        for name, mesh in self.counts_meshes.items():
+            mesh.visible = self.counts_visibility.get(name, True)
+
+    def reset_counts_range(self):
+        """Set the colour range to the min/max of the currently visible
+        loggers (or every loaded logger, if none are individually toggled
+        off yet), then rebuild the planes to match."""
+        visible = [lc for name, lc in self.counts.items() if self.counts_visibility.get(name, True)]
+        grids = [lc.grid for lc in (visible or self.counts.values())]
+        vmax = max((float(grid.max()) for grid in grids), default=1.0)
+        vmin = 0.0
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+
+        for spin, value in ((self.counts_min_val, vmin), (self.counts_max_val, vmax)):
+            spin.blockSignals(True)
+            spin.setRange(min(-1e12, value * 2 - 1), max(1e12, value * 2 + 1))
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.on_counts_range_changed()
+
+    def on_counts_range_changed(self, *_args):
+        vmin, vmax = self.counts_min_val.value(), self.counts_max_val.value()
+        if vmax <= vmin or not self.counts:
+            self.counts_colorbar.hide()
+            return
+        if not self.counts_meshes:
+            self.rebuild_counts_group()
+            return
+        for name, mesh in self.counts_meshes.items():
+            lc = self.counts[name]
+            texture = self.counts_textures.get(name)
+            if texture is not None:
+                texture.set_data(logger_output.texture_image(lc.grid, vmin, vmax))
+            else:
+                mesh.geometry.colors.set_data(logger_output.line_vertex_colors(lc.grid, vmin, vmax))
+        self.counts_colorbar.set_range(f"{vmin:.4g}", f"{vmax:.4g}")
+        self.counts_colorbar.show()
+        self.rebalance_docks()
+
+    def rebuild_counts_group(self):
+        if self.counts_group is not None:
+            self.scene.remove(self.counts_group)
+        self.counts_group, self.counts_meshes, self.counts_textures = None, {}, {}
+        if not self.counts:
+            return
+        vmin, vmax = self.counts_min_val.value(), self.counts_max_val.value()
+        self.counts_group, self.counts_meshes, self.counts_textures = build_counts_group(
+            self.counts, self.world_matrices, vmin, vmax
+        )
+        self.scene.add(self.counts_group)
+        self.apply_counts_visibility()
+        self.apply_clipping()
+        self.counts_colorbar.set_range(f"{vmin:.4g}", f"{vmax:.4g}")
+        self.counts_colorbar.show()
+        self.rebalance_docks()
+
     def fit_whole_instrument(self):
         if self.trace_group is None or not self.trace_group.visible:
             self.reset_view()
@@ -2205,6 +2545,7 @@ class Viewer(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         self._mesh_process_pool.shutdown(wait=False, cancel_futures=True)
         self._trace_process_pool.shutdown(wait=False, cancel_futures=True)
+        self._counts_process_pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
 
