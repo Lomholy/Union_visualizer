@@ -36,7 +36,8 @@ from gui_helpers import (
     ABSORB_MARKER_COLOR,
     TELEPORT_COLOR,
 )
-from mcstas_trace import trace_instrument, SCATTER, ABSORB, TELEPORT
+from mcstas_trace import trace_instrument, component_types, SCATTER, ABSORB, TELEPORT
+import logger_output
 import argparse
 
 # The meshers offered in the dock, in display order.
@@ -357,6 +358,41 @@ def build_ray_group(rays, ray_indices, color_mode):
             group.add(obj)
             setattr(group, attr, obj)
     return group, value_range
+
+
+def build_counts_group(counts, world_matrices, vmin, vmax):
+    """One textured quad per LoggerCounts in counts (see logger_output.py),
+    placed with world_matrices[name] - skipping any logger not found there
+    (the loaded instrument doesn't match the run the counts came from).
+    Returns (group, meshes, textures): meshes/textures are {name: obj}, so a
+    colour-range change can restyle in place via texture.set_data() instead
+    of rebuilding."""
+    group = gfx.Group()
+    meshes = {}
+    textures = {}
+    for name, lc in counts.items():
+        world_matrix = world_matrices.get(name)
+        if world_matrix is None:
+            print(f"Warning: logger '{name}' not found in the loaded instrument - skipping.")
+            continue
+        local_pts = logger_output.local_corners(lc.axis1, lc.axis2, lc.limits)
+        world_pts = logger_output.world_corners(local_pts, world_matrix).astype(np.float32)
+        texture = gfx.Texture(logger_output.texture_image(lc.grid, vmin, vmax), dim=2)
+        mesh = gfx.Mesh(
+            gfx.Geometry(
+                positions=world_pts,
+                indices=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
+                texcoords=np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32),
+            ),
+            # side="both": a logger's own local-frame winding has no
+            # meaningful "outward" direction to get right (same reasoning
+            # as MCDISPLAY-drawn components; see build_component_group).
+            gfx.MeshBasicMaterial(map=gfx.TextureMap(texture), color_mode="vertex_map", side="both"),
+        )
+        group.add(mesh)
+        meshes[name] = mesh
+        textures[name] = texture
+    return group, meshes, textures
 
 
 def generate_group(
@@ -786,6 +822,17 @@ class Viewer(QtWidgets.QMainWindow):
         self.trace_group = None
         self.trace_rays = None
         self.ray_group = None
+
+        # ----------------------------------------------------
+        # Detector counts (Union logger/abs_logger output)
+        # ----------------------------------------------------
+        self.counts = {}              # {name: logger_output.LoggerCounts}
+        self.counts_group = None
+        self.counts_meshes = {}       # {name: gfx.Mesh}
+        self.counts_textures = {}     # {name: gfx.Texture}
+        self.counts_visibility = {}   # {name: bool}
+        self.counts_checkboxes = {}
+        self.counts_run_folder = None
 
         # ----------------------------------------------------
         # Render widget
@@ -1285,6 +1332,67 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_rerun_timer.timeout.connect(self.rerun_rays)
 
         # ----------------------------------------------------
+        # Detector counts dock (Union logger/abs_logger output)
+        # ----------------------------------------------------
+
+        counts_dock, counts_layout = self._add_dock("Detector Counts")
+        self.counts_options = QtWidgets.QWidget()
+        counts_options_layout = QtWidgets.QVBoxLayout(self.counts_options)
+        counts_options_layout.setContentsMargins(0, 0, 0, 0)
+        counts_layout.addWidget(self.counts_options)
+
+        self.load_counts_button = QtWidgets.QPushButton("Load counts folder...")
+        self.load_counts_button.setToolTip(
+            "A McStas run's output folder (containing mccode.sim). Every "
+            "Union logger/abs_logger in it that can be placed in 3D - a "
+            "*_space logger, or an event-list logger with x/y/z columns - "
+            "is drawn as a colour-mapped plane at its own position."
+        )
+        self.load_counts_button.clicked.connect(self.load_counts_folder)
+        counts_options_layout.addWidget(self.load_counts_button)
+
+        self.counts_checkbox = QtWidgets.QCheckBox("Show detector counts")
+        self.counts_checkbox.setChecked(True)
+        self.counts_checkbox.stateChanged.connect(self.apply_counts_visibility)
+        counts_options_layout.addWidget(self.counts_checkbox)
+
+        range_layout = QtWidgets.QHBoxLayout()
+        range_layout.addWidget(QtWidgets.QLabel("Colour range"))
+        self.counts_min_val = QtWidgets.QDoubleSpinBox()
+        self.counts_max_val = QtWidgets.QDoubleSpinBox()
+        for spin in (self.counts_min_val, self.counts_max_val):
+            spin.setRange(-1e12, 1e12)
+            spin.setDecimals(4)
+            spin.setToolTip("Editable - overrides the automatic min/max for every visible logger's plane.")
+            range_layout.addWidget(spin)
+        counts_options_layout.addLayout(range_layout)
+        self.counts_min_val.valueChanged.connect(self.on_counts_range_changed)
+        self.counts_max_val.valueChanged.connect(self.on_counts_range_changed)
+
+        self.counts_auto_range_button = QtWidgets.QPushButton("Auto range")
+        self.counts_auto_range_button.setToolTip("Reset the colour range to the min/max of the currently visible loggers.")
+        self.counts_auto_range_button.clicked.connect(self.reset_counts_range)
+        counts_options_layout.addWidget(self.counts_auto_range_button)
+
+        self.counts_colorbar = ColorBarWidget()
+        self.counts_colorbar.hide()
+        counts_options_layout.addWidget(self.counts_colorbar)
+
+        self.counts_panel_layout = QtWidgets.QVBoxLayout()
+        counts_options_layout.addLayout(self.counts_panel_layout)
+
+        self.counts_info_label = QtWidgets.QLabel("No counts loaded.")
+        self.counts_info_label.setWordWrap(True)
+        self.counts_info_label.setStyleSheet("color: gray;")
+        counts_options_layout.addWidget(self.counts_info_label)
+
+        counts_layout.addStretch()
+        counts_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
         # Geometry visibility dock
         # ----------------------------------------------------
 
@@ -1576,7 +1684,7 @@ class Viewer(QtWidgets.QMainWindow):
 
     def apply_clipping(self):
         planes = clip_planes(self.resolved_clip())
-        for group in (self.current_group, self.trace_group, self.ray_group):
+        for group in (self.current_group, self.trace_group, self.ray_group, self.counts_group):
             if group is None:
                 continue
             for obj in group.iter():
@@ -1855,6 +1963,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.apply_geometry_visibility()
         self._resize_grid(self.current_group)
         recentre_controller(self.controller, self.current_group)
+        if self.counts:
+            self.rebuild_counts_group()
         print("Reload complete")
 
         if self._pending_fit_camera:
@@ -2051,6 +2161,125 @@ class Viewer(QtWidgets.QMainWindow):
         ):
             if obj is not None:
                 obj.visible = checkbox.isChecked()
+
+    # ========================================================
+    # Detector counts (Union logger/abs_logger output)
+    # ========================================================
+
+    def load_counts_folder(self):
+        if self.input_file is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Detector Counts",
+                "Open an instrument first - counts are matched to it by component name.",
+            )
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select a McStas run folder (containing mccode.sim)"
+        )
+        if not folder:
+            return
+
+        try:
+            types = component_types(self.input_file, self.pygen_checkbox.isChecked())
+            counts = logger_output.load_counts(folder, types)
+        except Exception as e:
+            traceback.print_exc()
+            QtWidgets.QMessageBox.warning(
+                self, "Detector Counts", f"Could not load counts from '{folder}':\n{e}"
+            )
+            return
+
+        self.counts = counts
+        self.counts_run_folder = folder
+        self.counts_visibility = {name: True for name in counts}
+        if counts:
+            self.counts_info_label.setText(f"{len(counts)} logger(s) loaded from '{folder}'.")
+        else:
+            self.counts_info_label.setText(
+                f"No spatially-placeable logger/abs_logger output found in '{folder}'."
+            )
+        self.rebuild_counts_panel()
+        self.reset_counts_range()
+
+    def rebuild_counts_panel(self):
+        while self.counts_panel_layout.count():
+            self._clear_geometry_layout_item(self.counts_panel_layout.takeAt(0))
+        self.counts_checkboxes.clear()
+
+        for name, lc in self.counts.items():
+            row = QtWidgets.QHBoxLayout()
+            cb = QtWidgets.QCheckBox(wrap_label(f"{name} ({lc.kind})"))
+            cb.setToolTip(
+                f"{name}: axes ({lc.axis1}, {lc.axis2}), "
+                f"{lc.grid.shape[0]}x{lc.grid.shape[1]} bins, total {lc.total:.4g}"
+            )
+            cb.setChecked(self.counts_visibility.get(name, True))
+            cb.toggled.connect(lambda checked, n=name: self.on_counts_visibility_changed(n, checked))
+            row.addWidget(cb)
+            self.counts_panel_layout.addLayout(row)
+            self.counts_checkboxes[name] = cb
+
+    def on_counts_visibility_changed(self, name, checked):
+        self.counts_visibility[name] = checked
+        mesh = self.counts_meshes.get(name)
+        if mesh is not None:
+            mesh.visible = checked
+
+    def apply_counts_visibility(self):
+        if self.counts_group is None:
+            return
+        self.counts_group.visible = self.counts_checkbox.isChecked()
+        for name, mesh in self.counts_meshes.items():
+            mesh.visible = self.counts_visibility.get(name, True)
+
+    def reset_counts_range(self):
+        """Set the colour range to the min/max of the currently visible
+        loggers (or every loaded logger, if none are individually toggled
+        off yet), then rebuild the planes to match."""
+        visible = [lc for name, lc in self.counts.items() if self.counts_visibility.get(name, True)]
+        grids = [lc.grid for lc in (visible or self.counts.values())]
+        vmax = max((float(grid.max()) for grid in grids), default=1.0)
+        vmin = 0.0
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+
+        for spin, value in ((self.counts_min_val, vmin), (self.counts_max_val, vmax)):
+            spin.blockSignals(True)
+            spin.setRange(min(-1e12, value * 2 - 1), max(1e12, value * 2 + 1))
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.on_counts_range_changed()
+
+    def on_counts_range_changed(self, *_args):
+        vmin, vmax = self.counts_min_val.value(), self.counts_max_val.value()
+        if vmax <= vmin or not self.counts:
+            self.counts_colorbar.hide()
+            return
+        if not self.counts_textures:
+            self.rebuild_counts_group()
+            return
+        for name, texture in self.counts_textures.items():
+            texture.set_data(logger_output.texture_image(self.counts[name].grid, vmin, vmax))
+        self.counts_colorbar.set_range(f"{vmin:.4g}", f"{vmax:.4g}")
+        self.counts_colorbar.show()
+        self.rebalance_docks()
+
+    def rebuild_counts_group(self):
+        if self.counts_group is not None:
+            self.scene.remove(self.counts_group)
+        self.counts_group, self.counts_meshes, self.counts_textures = None, {}, {}
+        if not self.counts:
+            return
+        vmin, vmax = self.counts_min_val.value(), self.counts_max_val.value()
+        self.counts_group, self.counts_meshes, self.counts_textures = build_counts_group(
+            self.counts, self.world_matrices, vmin, vmax
+        )
+        self.scene.add(self.counts_group)
+        self.apply_counts_visibility()
+        self.apply_clipping()
+        self.counts_colorbar.set_range(f"{vmin:.4g}", f"{vmax:.4g}")
+        self.counts_colorbar.show()
+        self.rebalance_docks()
 
     def fit_whole_instrument(self):
         if self.trace_group is None or not self.trace_group.visible:
