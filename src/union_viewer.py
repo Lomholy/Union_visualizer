@@ -265,6 +265,14 @@ def compute_trace_data(input_file, force_pygen, params, ncount, seed):
     )
 
 
+def compute_counts_data(run_folder, input_file, force_pygen):
+    """Load run_folder's spatial Union logger/abs_logger output as a
+    {name: LoggerCounts} dict. Worker-process side of CountsWorker, like
+    compute_trace_data for TraceWorker."""
+    types = component_types(input_file, force_pygen)
+    return logger_output.load_counts(run_folder, types)
+
+
 def build_component_group(components, colors):
     """pygfx objects for every McStas component: one Line for all of its
     MCDISPLAY lines and one translucent Mesh for all of its solids."""
@@ -665,6 +673,36 @@ class TraceWorker(QtCore.QObject):
         self.finished.emit(group, rays, time.time() - start)
 
 
+class CountsWorker(QtCore.QObject):
+    """Loads a run folder's detector counts off the GUI thread. Parsing a
+    run's mccode.sim/.dat files (mcstasscript) and histogramming any
+    event-list loggers ourselves is pure Python, so like TraceWorker this
+    runs in a worker process rather than only on this QThread - a large
+    event-list logger (hundreds of thousands of rows) can take a
+    perceptible moment to load."""
+
+    finished = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, process_pool, run_folder, input_file, force_pygen):
+        super().__init__()
+        self.process_pool = process_pool
+        self.run_folder = run_folder
+        self.input_file = input_file
+        self.force_pygen = force_pygen
+
+    def run(self):
+        try:
+            counts = self.process_pool.submit(
+                compute_counts_data, self.run_folder, self.input_file, self.force_pygen
+            ).result()
+        except Exception as e:
+            traceback.print_exc()
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        self.finished.emit(counts)
+
+
 class CollapsibleTitleBar(QtWidgets.QWidget):
     """Dock title bar whose arrow (or a double-click on the title)
     collapses the dock to just this bar, so the other docks get the room.
@@ -833,6 +871,12 @@ class Viewer(QtWidgets.QMainWindow):
         self.counts_visibility = {}   # {name: bool}
         self.counts_checkboxes = {}
         self.counts_run_folder = None
+        # A separate pool, so loading a large logger file never delays the
+        # meshes or a trace run, and vice versa.
+        self._counts_process_pool = ProcessPoolExecutor(max_workers=1)
+        self._counts_busy = False
+        self._counts_thread = None
+        self._counts_worker = None
 
         # ----------------------------------------------------
         # Render widget
@@ -2173,22 +2217,41 @@ class Viewer(QtWidgets.QMainWindow):
                 "Open an instrument first - counts are matched to it by component name.",
             )
             return
+        if self._counts_busy:
+            QtWidgets.QMessageBox.information(
+                self, "Detector Counts", "Already loading a counts folder - please wait."
+            )
+            return
         folder = QtWidgets.QFileDialog.getExistingDirectory(
             self, "Select a McStas run folder (containing mccode.sim)"
         )
         if not folder:
             return
 
-        try:
-            types = component_types(self.input_file, self.pygen_checkbox.isChecked())
-            counts = logger_output.load_counts(folder, types)
-        except Exception as e:
-            traceback.print_exc()
-            QtWidgets.QMessageBox.warning(
-                self, "Detector Counts", f"Could not load counts from '{folder}':\n{e}"
-            )
-            return
+        self._counts_busy = True
+        self.load_counts_button.setEnabled(False)
+        self.counts_info_label.setText(f"Loading counts from '{folder}'...")
 
+        thread = QtCore.QThread(self)
+        worker = CountsWorker(
+            self._counts_process_pool, folder, self.input_file, self.pygen_checkbox.isChecked()
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda counts: self._on_counts_finished(folder, counts))
+        worker.failed.connect(lambda error: self._on_counts_failed(folder, error))
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_counts_thread_finished)
+
+        self._counts_thread = thread
+        self._counts_worker = worker
+        thread.start()
+
+    def _on_counts_finished(self, folder, counts):
         self.counts = counts
         self.counts_run_folder = folder
         self.counts_visibility = {name: True for name in counts}
@@ -2200,6 +2263,20 @@ class Viewer(QtWidgets.QMainWindow):
             )
         self.rebuild_counts_panel()
         self.reset_counts_range()
+
+    def _on_counts_failed(self, folder, error_text):
+        print("Loading detector counts failed:")
+        print(error_text)
+        self.counts_info_label.setText(f"Could not load counts from '{folder}': {error_text}")
+        QtWidgets.QMessageBox.warning(
+            self, "Detector Counts", f"Could not load counts from '{folder}':\n{error_text}"
+        )
+
+    def _on_counts_thread_finished(self):
+        self._counts_thread = None
+        self._counts_worker = None
+        self._counts_busy = False
+        self.load_counts_button.setEnabled(True)
 
     def rebuild_counts_panel(self):
         while self.counts_panel_layout.count():
@@ -2434,6 +2511,7 @@ class Viewer(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         self._mesh_process_pool.shutdown(wait=False, cancel_futures=True)
         self._trace_process_pool.shutdown(wait=False, cancel_futures=True)
+        self._counts_process_pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
 
