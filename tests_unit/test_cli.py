@@ -64,6 +64,29 @@ class ExportInstrumentTest(unittest.TestCase):
     parses the instrument itself) and every other McStas component (drawn
     via mcrun --trace, ncount=0), combined into one export."""
 
+    def test_skips_a_component_whose_geometry_came_out_empty(self):
+        # build_all_meshes() stores None (not omitting the key) for a
+        # component whose geometry came out empty - reproduces the crash
+        # this caused: AttributeError: 'NoneType' object has no attribute
+        # 'export', seen in CI (unviz --export on tests/crack_height.instr
+        # and others) once real instruments started hitting this path.
+        import trimesh
+        real_mesh = trimesh.creation.box(extents=(1, 1, 1))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            instr = os.path.join(tmp, "simple_test.instr")
+            shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
+            out_file = os.path.join(tmp, "with_empty")
+            with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")), \
+                 patch("meshing.build_all_meshes",
+                       return_value={"box_left": None, "box_lefttwo": real_mesh}):
+                meshes = cli.export_instrument(instr, out_file=out_file, mesher="mc", resolution=8)
+
+            self.assertEqual(set(meshes), {"box_lefttwo"})
+            self.assertTrue(os.path.exists(f"{out_file}.stl"))
+            self.assertTrue(os.path.exists(f"{out_file}_box_lefttwo.stl"))
+            self.assertFalse(os.path.exists(f"{out_file}_box_left.stl"))
+
     def test_falls_back_to_union_only_geometry_when_tracing_fails(self):
         # Only mcstas_trace.trace_instrument is mocked - preprocess() and
         # the meshing pipeline run for real against a real instrument, so

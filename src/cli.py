@@ -127,7 +127,7 @@ def export_instrument(
     )
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices, world_bboxes=world_bboxes)
-    all_meshes = build_all_meshes(
+    union_meshes = build_all_meshes(
         union_geometries,
         world_matrices,
         sdfs,
@@ -140,6 +140,10 @@ def export_instrument(
         mesher=mesher,
         world_bboxes=world_bboxes,
     )
+    # build_all_meshes() stores None for a component whose geometry came out
+    # empty (it prints "WARNING: empty mesh for <name>" when that happens) -
+    # drop those rather than exporting them.
+    all_meshes = {name: mesh for name, mesh in union_meshes.items() if mesh is not None}
 
     # Every other component along the beamline - drawn via mcrun --trace,
     # the same way the interactive viewer's "Show McStas components" does.
