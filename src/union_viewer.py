@@ -2557,19 +2557,30 @@ class Viewer(QtWidgets.QMainWindow):
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--input_file", help="Input mcstas file, can either be mcstasscript or mcstas"
+        "--input-file",
+        "--input_file",
+        dest="input_file",
+        help="Input mcstas file, can either be mcstasscript or mcstas",
     )
     return parser
 
 
-if __name__ == "__main__":
-    parser = parse()
-    args = parser.parse_args()
-    input_file = args.input_file
-    app = QtWidgets.QApplication(sys.argv)
+def launch(input_file=None):
+    """Create the application and open the interactive Union viewer."""
+    app = QtWidgets.QApplication([sys.argv[0]])
 
     app.setAttribute(QtCore.Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
 
     viewer = Viewer(input_file=input_file)
     viewer.show()
-    sys.exit(app.exec())
+    return app.exec()
+
+
+def main(argv=None):
+    parser = parse()
+    args = parser.parse_args(argv)
+    return launch(args.input_file)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

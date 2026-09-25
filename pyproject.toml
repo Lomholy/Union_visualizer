@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unviz"
+version = "0.1.0"
+description = "Visualize and export McStas Union sample environments"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Daniel Lomholt Christensen" },
+]
+
+[project.scripts]
+unviz = "cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = [
+    "bounding_box",
+    "brep",
+    "cli",
+    "clipping",
+    "dual_cont",
+    "gui_helpers",
+    "logger_output",
+    "mcstas_trace",
+    "meshing",
+    "plot_union_cloud",
+    "preprocess",
+    "signed_distance_functions",
+    "union_viewer",
+]

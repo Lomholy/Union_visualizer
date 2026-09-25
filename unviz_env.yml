@@ -10,3 +10,6 @@ dependencies:
   - pythonocc-core
   - shapely
   - mapbox_earcut
+  - pip
+  - pip:
+      - -e .
