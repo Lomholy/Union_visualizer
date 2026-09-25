@@ -1064,8 +1064,8 @@ def resolve_mesh_filenames(union_geometries, input_file):
     it's declared in - that's how real McStas resolves such paths too. Our
     own pipeline has no equivalent of McStas's search path, so without this
     a relative filename is instead resolved against the process's current
-    working directory, which silently depends on where mcstas_to_cad.py was
-    invoked from. Rewrite each filename to be resolved against the
+    working directory, which silently depends on where unviz was invoked
+    from. Rewrite each filename to be resolved against the
     instrument file's own directory instead, up front, so every downstream
     mesh loader (meshing.py, signed_distance_functions.py, bounding_box.py)
     gets a working, unambiguous path regardless of invocation cwd."""

@@ -26,7 +26,6 @@ py-modules = [
     "dual_cont",
     "gui_helpers",
     "logger_output",
-    "mcstas_to_cad",
     "mcstas_trace",
     "meshing",
     "plot_union_cloud",
