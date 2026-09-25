@@ -22,7 +22,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-i",
-        "--input-file",
         "--input_file",
         dest="input_file",
         help="McStas .instr file or mcstasscript Python file to open",
@@ -35,7 +34,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-o",
         "--out-file",
-        "--out_file",
         dest="out_file",
         default="union_env",
         help="Exported file name (default: union_env)",
@@ -48,7 +46,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--n-points",
-        "--n_points",
         dest="n_points",
         type=int,
         default=1_000,
@@ -63,7 +60,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true", help="Print detailed progress")
     parser.add_argument(
         "--force-pygen",
-        "--force_pygen",
         dest="force_pygen",
         action="store_true",
         help="Always translate .instr input through mcstas-pygen",
