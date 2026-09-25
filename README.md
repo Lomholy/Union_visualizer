@@ -54,7 +54,11 @@ To export the mcstas instrument without opening the interface, add `--export`:
 unviz my_mcstas_instr.py --export --out-file YOUR_FILE_NAME
 ```
 
-And see your mcstas instrument become a CAD model!
+And see your mcstas instrument become a CAD model! The export covers the
+whole instrument, not just the Union sample environment: every other
+component (sources, guides, slits, monitors, ...) is included too, drawn
+the same way the GUI's "Show McStas components" option draws them, so it
+needs a working McStas install and compiler.
 
 
 ## GUI options

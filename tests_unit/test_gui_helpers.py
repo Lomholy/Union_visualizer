@@ -8,7 +8,7 @@ exercised interactively with QT_QPA_PLATFORM=offscreen against real test
 instruments while implementing this change.
 
 Not under tests/: .github/workflows/run-tests.yml feeds every file there
-to src/mcstas_to_cad.py as a pipeline smoke test.
+to unviz --export as a pipeline smoke test.
 """
 
 import sys
