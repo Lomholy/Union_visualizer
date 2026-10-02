@@ -199,9 +199,9 @@ VIRIDIS_STOPS = np.array([
     [0.993, 0.906, 0.144],
 ])
 
-# Shared between the rendered ray markers/segments and the matching swatch
-# next to each checkbox in the Neutron Rays panel, so the two never drift
-# apart.
+# Defaults for the rendered ray markers/segments and the matching colour
+# button next to each checkbox in the Neutron Rays panel, which the user can
+# change.
 UNIFORM_RAY_COLOR = "#1f6fd1"
 SCATTER_MARKER_COLOR = "#e67e22"
 ABSORB_MARKER_COLOR = "#c0392b"
@@ -209,6 +209,8 @@ ABSORB_MARKER_COLOR = "#c0392b"
 # leading to it is drawn in this light grey instead of the ray's own colour,
 # so it reads as a jump rather than a normal continuation of the path.
 TELEPORT_COLOR = "#d3d3d3"  # lightgray
+SCATTER_MARKER_SIZE = 6
+ABSORB_MARKER_SIZE = 8
 
 
 def hex_to_rgba(hex_color):

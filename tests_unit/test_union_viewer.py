@@ -21,6 +21,36 @@ import union_viewer as uv  # noqa: E402
 from logger_output import LoggerCounts  # noqa: E402
 
 
+class BuildRayGroupStylingTest(unittest.TestCase):
+    @staticmethod
+    def _rays():
+        from mcstas_trace import STATE, SCATTER, ABSORB
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            n_rays=1,
+            points=np.array([[0, 0, 0], [0, 0, 1], [0, 0, 2]], dtype=float),
+            ray_offsets=np.array([0, 3]),
+            kind=np.array([STATE, SCATTER, ABSORB]),
+            speed=np.ones(3), weight=np.ones(3), time=np.ones(3),
+        )
+
+    def test_custom_colors_and_sizes_are_applied(self):
+        group, _ = uv.build_ray_group(
+            self._rays(), np.array([0]), "Uniform",
+            colors={"scatter": "#112233", "absorb": "#445566"},
+            marker_sizes={"scatter": 11, "absorb": 13},
+        )
+        self.assertEqual(group.scatter_points.material.size, 11)
+        self.assertEqual(group.absorb_points.material.size, 13)
+        self.assertEqual(group.scatter_points.material.color.hex, "#112233")
+        self.assertEqual(group.absorb_points.material.color.hex, "#445566")
+
+    def test_defaults_when_unspecified(self):
+        group, _ = uv.build_ray_group(self._rays(), np.array([0]), "Uniform")
+        self.assertEqual(group.scatter_points.material.size, uv.SCATTER_MARKER_SIZE)
+        self.assertEqual(group.absorb_points.material.size, uv.ABSORB_MARKER_SIZE)
+
+
 @unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")
 class ComputeTraceDataTest(unittest.TestCase):
     def test_all_requested_rays_are_kept(self):
