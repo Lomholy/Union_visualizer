@@ -35,6 +35,8 @@ from gui_helpers import (
     SCATTER_MARKER_COLOR,
     ABSORB_MARKER_COLOR,
     TELEPORT_COLOR,
+    SCATTER_MARKER_SIZE,
+    ABSORB_MARKER_SIZE,
 )
 from mcstas_trace import trace_instrument, component_types, SCATTER, ABSORB, TELEPORT
 import logger_output
@@ -310,13 +312,30 @@ def build_component_group(components, colors):
     return group
 
 
-def build_ray_group(rays, ray_indices, color_mode):
+DEFAULT_RAY_COLORS = {
+    "ray": UNIFORM_RAY_COLOR,
+    "teleport": TELEPORT_COLOR,
+    "scatter": SCATTER_MARKER_COLOR,
+    "absorb": ABSORB_MARKER_COLOR,
+}
+DEFAULT_MARKER_SIZES = {
+    "scatter": SCATTER_MARKER_SIZE,
+    "absorb": ABSORB_MARKER_SIZE,
+}
+
+
+def build_ray_group(rays, ray_indices, color_mode, colors=None, marker_sizes=None):
     """Two separate Lines for the chosen rays, so the ordinary path and the
     restore_neutron jumps can be shown/hidden independently:
     group.ray_line for ordinary segments (vertex-coloured unless color_mode
-    is "Uniform") and group.teleport_line, always TELEPORT_COLOR, for a
-    segment whose end point is a TELEPORT. Plus Points marking scatterings
-    and absorptions. Returns (group, (vmin, vmax) or None)."""
+    is "Uniform") and group.teleport_line for a segment whose end point is
+    a TELEPORT. Plus Points marking scatterings and absorptions.
+    colors maps "ray", "teleport", "scatter" and "absorb" to a hex colour,
+    marker_sizes maps "scatter" and "absorb" to a point size; missing keys
+    fall back to the gui_helpers defaults. Returns
+    (group, (vmin, vmax) or None)."""
+    colors = {**DEFAULT_RAY_COLORS, **(colors or {})}
+    marker_sizes = {**DEFAULT_MARKER_SIZES, **(marker_sizes or {})}
     group = gfx.Group()
     pairs = ray_segment_indices(rays, ray_indices)
     # A segment "teleports" if the point it ends on is a restore_neutron
@@ -330,13 +349,13 @@ def build_ray_group(rays, ray_indices, color_mode):
     if len(regular_pairs):
         positions = rays.points[regular_pairs].reshape(-1, 3).astype(np.float32)
         if values is None:
-            colors = np.tile(hex_to_rgba(UNIFORM_RAY_COLOR), (len(positions), 1))
+            vertex_colors = np.tile(hex_to_rgba(colors["ray"]), (len(positions), 1))
         else:
             used = values[regular_pairs.ravel()]
             value_range = (float(used.min()), float(used.max()))
-            colors = colormap(used, *value_range)
+            vertex_colors = colormap(used, *value_range)
         group.ray_line = gfx.Line(
-            gfx.Geometry(positions=positions, colors=colors),
+            gfx.Geometry(positions=positions, colors=vertex_colors),
             gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex"),
         )
         group.add(group.ray_line)
@@ -346,7 +365,7 @@ def build_ray_group(rays, ray_indices, color_mode):
         positions = rays.points[teleport_pairs].reshape(-1, 3).astype(np.float32)
         group.teleport_line = gfx.Line(
             gfx.Geometry(positions=positions),
-            gfx.LineSegmentMaterial(thickness=1.5, color=TELEPORT_COLOR),
+            gfx.LineSegmentMaterial(thickness=1.5, color=colors["teleport"]),
         )
         group.add(group.teleport_line)
 
@@ -354,15 +373,15 @@ def build_ray_group(rays, ray_indices, color_mode):
     for i in ray_indices:
         in_chosen[rays.ray_offsets[i]:rays.ray_offsets[i + 1]] = True
     group.scatter_points = group.absorb_points = None
-    for attr, kind, color, size in (
-        ("scatter_points", SCATTER, SCATTER_MARKER_COLOR, 6),
-        ("absorb_points", ABSORB, ABSORB_MARKER_COLOR, 8),
+    for attr, kind, key in (
+        ("scatter_points", SCATTER, "scatter"),
+        ("absorb_points", ABSORB, "absorb"),
     ):
         points = rays.points[in_chosen & (rays.kind == kind)]
         if len(points):
             obj = gfx.Points(
                 gfx.Geometry(positions=points.astype(np.float32)),
-                gfx.PointsMaterial(size=size, color=color),
+                gfx.PointsMaterial(size=marker_sizes[key], color=colors[key]),
             )
             group.add(obj)
             setattr(group, attr, obj)
@@ -1358,12 +1377,20 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_reaching_combo.addItem("any component", None)
         options_layout.addWidget(self.ray_reaching_combo)
 
+        self.ray_colors = dict(DEFAULT_RAY_COLORS)
+        self.ray_marker_sizes = dict(DEFAULT_MARKER_SIZES)
+        self.ray_color_buttons = {}
+        self.ray_size_spins = {}
+
         rays_line_layout = QtWidgets.QHBoxLayout()
         self.rays_line_checkbox = QtWidgets.QCheckBox("Show rays")
         self.rays_line_checkbox.setChecked(True)
-        self.rays_line_checkbox.setToolTip("The ordinary path each ray follows.")
+        self.rays_line_checkbox.setToolTip(
+            "The ordinary path each ray follows. The colour applies when "
+            "colouring by Uniform."
+        )
         rays_line_layout.addWidget(self.rays_line_checkbox)
-        rays_line_layout.addWidget(self._color_swatch(UNIFORM_RAY_COLOR))
+        rays_line_layout.addWidget(self._ray_color_button("ray"))
         rays_line_layout.addStretch()
         options_layout.addLayout(rays_line_layout)
 
@@ -1375,7 +1402,7 @@ class Viewer(QtWidgets.QMainWindow):
             "it detects a ray, then restores its pre-detection state."
         )
         teleport_line_layout.addWidget(self.teleport_line_checkbox)
-        teleport_line_layout.addWidget(self._color_swatch(TELEPORT_COLOR))
+        teleport_line_layout.addWidget(self._ray_color_button("teleport"))
         teleport_line_layout.addStretch()
         options_layout.addLayout(teleport_line_layout)
 
@@ -1387,7 +1414,8 @@ class Viewer(QtWidgets.QMainWindow):
             "crossings are not marked."
         )
         scatter_layout.addWidget(self.scatter_points_checkbox)
-        scatter_layout.addWidget(self._color_swatch(SCATTER_MARKER_COLOR))
+        scatter_layout.addWidget(self._ray_color_button("scatter"))
+        scatter_layout.addWidget(self._marker_size_spin("scatter"))
         scatter_layout.addStretch()
         options_layout.addLayout(scatter_layout)
 
@@ -1395,7 +1423,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.absorb_points_checkbox = QtWidgets.QCheckBox("Mark absorptions")
         self.absorb_points_checkbox.setChecked(True)
         absorb_layout.addWidget(self.absorb_points_checkbox)
-        absorb_layout.addWidget(self._color_swatch(ABSORB_MARKER_COLOR))
+        absorb_layout.addWidget(self._ray_color_button("absorb"))
+        absorb_layout.addWidget(self._marker_size_spin("absorb"))
         absorb_layout.addStretch()
         options_layout.addLayout(absorb_layout)
 
@@ -1796,14 +1825,28 @@ class Viewer(QtWidgets.QMainWindow):
     def _set_swatch_color(self, button, hex_color):
         button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
 
-    def _color_swatch(self, hex_color):
-        """A small, fixed, non-interactive colour square - for a marker
-        colour that isn't user-editable (unlike _set_swatch_color's
-        buttons)."""
-        label = QtWidgets.QLabel()
-        label.setFixedSize(14, 14)
-        label.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
-        return label
+    def _ray_color_button(self, key):
+        """A small colour button that picks the colour of one object in the
+        Neutron Rays panel ("ray", "teleport", "scatter" or "absorb")."""
+        button = QtWidgets.QPushButton()
+        button.setFixedSize(14, 14)
+        button.setToolTip("Click to change the colour.")
+        self._set_swatch_color(button, self.ray_colors[key])
+        button.clicked.connect(lambda: self.pick_ray_color(key))
+        self.ray_color_buttons[key] = button
+        return button
+
+    def _marker_size_spin(self, key):
+        spin = QtWidgets.QDoubleSpinBox()
+        spin.setRange(1, 50)
+        spin.setSingleStep(1)
+        spin.setDecimals(1)
+        spin.setSuffix(" px")
+        spin.setValue(self.ray_marker_sizes[key])
+        spin.setToolTip("Marker size.")
+        spin.valueChanged.connect(lambda value: self.set_ray_marker_size(key, value))
+        self.ray_size_spins[key] = spin
+        return spin
 
     def pick_color(self, key):
         if self.current_group is None or key not in self.current_group.geometry_meshes:
@@ -2215,7 +2258,9 @@ class Viewer(QtWidgets.QMainWindow):
             return
         chosen = rays_reaching(rays, self.ray_reaching_combo.currentData())
         mode = self.ray_color_combo.currentText()
-        self.ray_group, value_range = build_ray_group(rays, chosen, mode)
+        self.ray_group, value_range = build_ray_group(
+            rays, chosen, mode, self.ray_colors, self.ray_marker_sizes
+        )
         self.scene.add(self.ray_group)
         self.apply_ray_visibility()
         self.apply_clipping()
@@ -2234,6 +2279,34 @@ class Viewer(QtWidgets.QMainWindow):
         # The colorbar appearing/disappearing changes this panel's natural
         # height - give the docks a chance to reclaim or yield that space.
         self.rebalance_docks()
+
+    def pick_ray_color(self, key):
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(self.ray_colors[key]), self, "Colour"
+        )
+        if not color.isValid():
+            return
+        self.ray_colors[key] = color.name()
+        self._set_swatch_color(self.ray_color_buttons[key], color.name())
+        group = self.ray_group
+        if group is None:
+            return
+        obj = {
+            "teleport": group.teleport_line,
+            "scatter": group.scatter_points,
+            "absorb": group.absorb_points,
+        }.get(key)
+        if key == "ray":
+            if self.ray_color_combo.currentText() == "Uniform":
+                self.rebuild_ray_group()
+        elif obj is not None:
+            obj.material.color = color.name()
+
+    def set_ray_marker_size(self, key, size):
+        self.ray_marker_sizes[key] = size
+        points = getattr(self.ray_group, f"{key}_points", None)
+        if points is not None:
+            points.material.size = size
 
     def apply_ray_visibility(self):
         if self.ray_group is None:
