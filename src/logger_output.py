@@ -29,6 +29,9 @@ from gui_helpers import colormap
 SPATIAL_AXES = ("x", "y", "z")
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
+# Metres per unit, for the "[unit]" at the end of a monitor's axis label.
+_UNIT_TO_METRES = {"m": 1.0, "cm": 1e-2, "mm": 1e-3, "um": 1e-6, "AA": 1e-10}
+
 # Bin count used to histogram an event-list logger ourselves (it has no
 # built-in binning to fall back on).
 DEFAULT_EVENT_BINS = 200
@@ -58,14 +61,30 @@ class LoggerCounts:
         return float(self.grid.sum())
 
 
+def _spatial_axis(name):
+    """The lowercase x/y/z for an xvar/yvar naming a spatial axis (McStas
+    writes "x" for Union loggers but "X"/"Y" for PSD_monitor), else None."""
+    name = name.strip().lower()
+    return name if name in SPATIAL_AXES else None
+
+
+def _axis_scale(label):
+    """Metres per unit for an axis label like "X position [cm]" (1.0 when the
+    label has no recognised unit, i.e. the data is already in metres)."""
+    if "[" not in label or "]" not in label:
+        return 1.0
+    unit = label[label.rindex("[") + 1:label.rindex("]")].strip()
+    return _UNIT_TO_METRES.get(unit, 1.0)
+
+
 def _binned_axes(dataset):
     """(axis1, axis2) for a binned 2D dataset whose xvar/yvar are both
     spatial, or None (e.g. a Union_logger_2DQ/2D_kf's reciprocal-space axes,
     or an energy/wavelength monitor's non-spatial axes)."""
     info = dataset.metadata.info
-    xvar = info.get("xvar", "").strip()
-    yvar = info.get("yvar", "").strip()
-    if xvar in SPATIAL_AXES and yvar in SPATIAL_AXES:
+    xvar = _spatial_axis(info.get("xvar", ""))
+    yvar = _spatial_axis(info.get("yvar", ""))
+    if xvar and yvar:
         return xvar, yvar
     return None
 
@@ -73,8 +92,7 @@ def _binned_axes(dataset):
 def _binned_1d_axis(dataset):
     """axis1 for a binned 1D dataset whose xvar is spatial, or None (e.g. a
     time-of-flight or wavelength monitor)."""
-    xvar = dataset.metadata.info.get("xvar", "").strip()
-    return xvar if xvar in SPATIAL_AXES else None
+    return _spatial_axis(dataset.metadata.info.get("xvar", ""))
 
 
 def _event_axes(dataset):
@@ -117,14 +135,20 @@ def spatial_grid(dataset, event_bins=DEFAULT_EVENT_BINS):
         if axes is None:
             return None
         axis1, axis2 = axes
-        limits = tuple(dataset.metadata.limits)
+        info = dataset.metadata.info
+        scale1 = _axis_scale(info.get("xlabel", ""))
+        scale2 = _axis_scale(info.get("ylabel", ""))
+        min1, max1, min2, max2 = dataset.metadata.limits
+        limits = (min1 * scale1, max1 * scale1, min2 * scale2, max2 * scale2)
         return axis1, axis2, limits, np.asarray(dataset.Intensity, dtype=float)
 
     if np.ndim(dataset.Intensity) == 1:
         axis1 = _binned_1d_axis(dataset)
         if axis1 is None:
             return None
-        limits = tuple(dataset.metadata.limits)
+        scale = _axis_scale(dataset.metadata.info.get("xlabel", ""))
+        min1, max1 = dataset.metadata.limits
+        limits = (min1 * scale, max1 * scale)
         return axis1, None, limits, np.asarray(dataset.Intensity, dtype=float)
 
     return None

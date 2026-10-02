@@ -32,9 +32,10 @@ class FakeBinnedDataset:
     logger_output.py only reads .data_type, .metadata.info/.limits/
     .component_name, and .Intensity."""
 
-    def __init__(self, xvar, yvar, limits, intensity, component_name=""):
+    def __init__(self, xvar, yvar, limits, intensity, component_name="", xlabel="", ylabel=""):
         self.data_type = f"Binned {np.ndim(intensity)}D"
-        self.metadata = FakeMetadata({"xvar": xvar, "yvar": yvar}, limits, component_name)
+        info = {"xvar": xvar, "yvar": yvar, "xlabel": xlabel, "ylabel": ylabel}
+        self.metadata = FakeMetadata(info, limits, component_name)
         self.Intensity = intensity
 
 
@@ -62,6 +63,21 @@ class SpatialGridBinnedTest(unittest.TestCase):
         self.assertEqual(limits, (-0.1, 0.2, -0.3, 0.4))
         np.testing.assert_array_equal(grid, intensity)
 
+    def test_psd_monitor_uppercase_xvar_yvar_is_spatial_and_converted_from_cm(self):
+        intensity = np.zeros((60, 60))
+        dataset = FakeBinnedDataset(
+            "X ", "Y ", (-10, 10, -5, 5), intensity,
+            xlabel="X position [cm]", ylabel="Y position [cm]",
+        )
+        axis1, axis2, limits, grid = logger_output.spatial_grid(dataset)
+        self.assertEqual((axis1, axis2), ("x", "y"))
+        np.testing.assert_allclose(limits, (-0.1, 0.1, -0.05, 0.05))
+
+    def test_axis_without_unit_is_taken_as_metres(self):
+        dataset = FakeBinnedDataset("x", "y", (-1, 1, -2, 2), np.zeros((2, 2)), xlabel="x", ylabel="y")
+        _, _, limits, _ = logger_output.spatial_grid(dataset)
+        self.assertEqual(limits, (-1, 1, -2, 2))
+
     def test_time_logger_has_no_spatial_axes(self):
         dataset = FakeBinnedDataset("t", "(I,I_err)", (0.035, 0.037), np.zeros(1000))
         self.assertIsNone(logger_output.spatial_grid(dataset))
@@ -80,6 +96,12 @@ class SpatialGrid1DTest(unittest.TestCase):
         self.assertIsNone(axis2)
         self.assertEqual(limits, (-0.1, 0.1))
         np.testing.assert_array_equal(grid, intensity)
+
+    def test_1d_monitor_in_cm_is_converted_to_metres(self):
+        dataset = FakeBinnedDataset("X", "", (-10, 10), np.zeros(4), xlabel="X position [cm]")
+        axis1, _, limits, _ = logger_output.spatial_grid(dataset)
+        self.assertEqual(axis1, "x")
+        np.testing.assert_allclose(limits, (-0.1, 0.1))
 
     def test_1d_wavelength_monitor_has_no_spatial_axis(self):
         dataset = FakeBinnedDataset("L", "", (0.5, 5.0), np.zeros(100))
