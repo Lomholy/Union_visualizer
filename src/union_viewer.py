@@ -548,6 +548,13 @@ def grid_size_for_bbox(bbox, minimum=DEFAULT_GRID_SIZE, margin=1.2):
 # ============================================================
 
 
+# Near clipping distance in metres: as close to 0 as a perspective projection
+# allows (exactly 0 divides by zero in its depth maths), so even a small
+# detector can be viewed up close without being clipped away.
+CAMERA_NEAR = 1e-4
+CAMERA_FAR = 1e6
+
+
 def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     print(scene)
     bbox = scene.get_world_bounding_box()
@@ -565,10 +572,7 @@ def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     position = center + direction * distance
     camera.local.position = position
     camera.look_at(center)
-    camera.depth_range = (
-        max(0.01, distance - radius * 4),
-        1e6,
-    )
+    camera.depth_range = (CAMERA_NEAR, CAMERA_FAR)
     controller.target = center
 
 
