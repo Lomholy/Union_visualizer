@@ -8,4 +8,8 @@ dependencies:
   - scikit-image
   - pygfx
   - pythonocc-core
-
+  - shapely
+  - mapbox_earcut
+  - pip
+  - pip:
+      - -e .

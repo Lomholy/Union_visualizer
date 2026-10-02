@@ -3,6 +3,7 @@ import trimesh
 
 from preprocess import box_dimensions
 from bounding_box import compute_all_world_bboxes, overlapping
+from clipping import clip_plane
 
 
 # =============================================================================
@@ -84,24 +85,11 @@ def sdf_mesh(mesh, p):
     return sdf
 
 
-def sdf_halfspace(axis, threshold, keep_above=True):
-    """
-    axis:
-        0 -> X
-        1 -> Y
-        2 -> Z
-    """
+def sdf_plane(normal, point):
+    """Negative on the side normal points to, like the other SDFs' inside."""
 
     def f(p):
-        coord = p[:, axis]
-
-        if keep_above:
-            # Keep coord > threshold
-            return threshold - coord
-
-        else:
-            # Keep coord < threshold
-            return coord - threshold
+        return (point - p[:, :3]) @ normal
 
     return f
 
@@ -193,19 +181,8 @@ def build_sdfs(
         final_sdfs[name] = sdf_subtract_all(sdfs[name], higher_comps)
 
     if clip.get("enable", True):
-        axis_map = {
-            "X": 0,
-            "Y": 1,
-            "Z": 2,
-        }
-        axis = axis_map[clip["axis"]]
-        threshold = clip["position"]
-        keep_above = clip["mode"] == "Above"
-        clip_sdf = sdf_halfspace(
-            axis,
-            threshold,
-            keep_above,
-        )
+        normal, point = clip_plane(clip)
+        clip_sdf = sdf_plane(normal, point)
         for name in final_sdfs:
             final_sdfs[name] = sdf_intersection(
                 final_sdfs[name],

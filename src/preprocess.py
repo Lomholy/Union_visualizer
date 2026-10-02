@@ -667,11 +667,59 @@ def _apply_conditional_statement(cond, name, expr, else_name, else_expr, var_map
         _assign_or_warn(var_map, else_name, else_expr, display)
 
 
-def create_var_map(instr: ms.McStas_instr):
+def _parameter_info_from_raw(raw_text):
+    """(name, type, default_text) for a raw-string instr.parameters entry -
+    see _recover_raw_parameter for why mcstasscript's parser sometimes
+    falls back to plain text instead of a typed Parameter object. Used only
+    for display (the viewer's parameter form), so a best-effort type ("double"
+    unless the default is visibly a quoted string) is enough."""
+    statement = _strip_c_type_prefix(raw_text.strip(), _PARAM_TYPE_KEYWORDS)
+    match = _RAW_ASSIGNMENT_RE.match(statement)
+    if not match:
+        # A bare parameter name with no default value.
+        return statement.strip(), "double", None
+    name, expr = match.groups()
+    expr = expr.strip()
+    quoted = _QUOTED_STRING_RE.match(expr)
+    if quoted:
+        return name, "string", quoted.group(1)
+    return name, "double", expr
+
+
+def instrument_parameters(instr: ms.McStas_instr):
+    """[(name, type, default or None)] for every instrument parameter,
+    including ones mcstasscript's parser only reports as raw text (a bare
+    name still appears, with no default)."""
+    params = []
+    for param in instr.parameters:
+        if isinstance(param, str):
+            params.append(_parameter_info_from_raw(param))
+            continue
+        default = param.value
+        params.append((param.name, param.type or "double", None if default in (None, "") else str(default)))
+    return params
+
+
+def _override_parameter(name, text, param_type, var_map):
+    """Use a user-given value (e.g. from the viewer's parameter form) for
+    instrument parameter name instead of its default."""
+    text = text.strip()
+    quoted = _QUOTED_STRING_RE.match(text)
+    if param_type == "string" or quoted:
+        var_map[name] = quoted.group(1) if quoted else text
+        return
+    try:
+        var_map[name] = eval_expr("".join(text.split()), var_map)
+    except Exception as e:
+        print(f"Warning: Failed to evaluate parameter value {name}={text}: {e}")
+
+
+def create_var_map(instr: ms.McStas_instr, param_values=None):
     var_map = {}
     _populate_declare_vars(list(instr.declare_list), var_map)
     _populate_declare_vars(list(instr.user_var_list), var_map)
 
+    param_types = {}
     for param in instr.parameters:
         # Parameters come from mcstasscript's DEFINE INSTRUMENT(...) parser,
         # a different code path from the freeform DECLARE/USERVARS
@@ -681,6 +729,11 @@ def create_var_map(instr: ms.McStas_instr):
             _recover_raw_parameter(param, var_map)
             continue
         var_map[param.name] = _resolved_value(param)
+        param_types[param.name] = param.type
+
+    for name, text in (param_values or {}).items():
+        if name in param_types and text.strip():
+            _override_parameter(name, text, param_types[name], var_map)
 
     lines = instr.initialize_section.splitlines()
 
@@ -1011,8 +1064,8 @@ def resolve_mesh_filenames(union_geometries, input_file):
     it's declared in - that's how real McStas resolves such paths too. Our
     own pipeline has no equivalent of McStas's search path, so without this
     a relative filename is instead resolved against the process's current
-    working directory, which silently depends on where mcstas_to_cad.py was
-    invoked from. Rewrite each filename to be resolved against the
+    working directory, which silently depends on where unviz was invoked
+    from. Rewrite each filename to be resolved against the
     instrument file's own directory instead, up front, so every downstream
     mesh loader (meshing.py, signed_distance_functions.py, bounding_box.py)
     gets a working, unambiguous path regardless of invocation cwd."""
@@ -1023,7 +1076,9 @@ def resolve_mesh_filenames(union_geometries, input_file):
             comp.filename = _resolve_relative_path(filename, base_dir)
 
 
-def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
+def preprocess(
+    input_file: str, verbose: bool, force_pygen: bool = False, param_values=None
+):
     """
     Function to preprocess the input file.
 
@@ -1031,6 +1086,8 @@ def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
         instead of mcstasscript's lightweight .instr reader (that reader is
         still used as an automatic fallback on parse failure regardless of
         this flag - see load_McStas_file).
+    param_values: {parameter name: value text} used instead of the
+        instrument's defaults.
 
     Returns:
         McStas_instr containing the processed instrument
@@ -1038,7 +1095,7 @@ def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
         list: Each union geometry in the instrument.
     """
     instr = load_McStas_file(input_file, force_pygen=force_pygen, verbose=verbose)
-    var_map = create_var_map(instr)
+    var_map = create_var_map(instr, param_values)
     for comp in instr.component_list:
         comp = attempt_conversion(comp, instr, var_map)
 

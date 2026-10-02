@@ -11,7 +11,7 @@ Section 1 (itself grounded in McCode's cogen_comp_init_position()):
 
 This directory is intentionally NOT under tests/, since
 .github/workflows/run-tests.yml feeds every file in tests/* to
-src/mcstas_to_cad.py as a pipeline smoke test; a plain assertion script
+unviz --export as a pipeline smoke test; a plain assertion script
 there would break that loop.
 """
 

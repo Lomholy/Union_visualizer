@@ -17,7 +17,7 @@ the property both the SDF and the BRep loft are built to have.
 
 This directory is intentionally NOT under tests/, since
 .github/workflows/run-tests.yml feeds every file in tests/* to
-src/mcstas_to_cad.py as a pipeline smoke test; a plain assertion script
+unviz --export as a pipeline smoke test; a plain assertion script
 there would break that loop.
 """
 

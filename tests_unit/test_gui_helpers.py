@@ -8,12 +8,14 @@ exercised interactively with QT_QPA_PLATFORM=offscreen against real test
 instruments while implementing this change.
 
 Not under tests/: .github/workflows/run-tests.yml feeds every file there
-to src/mcstas_to_cad.py as a pipeline smoke test.
+to unviz --export as a pipeline smoke test.
 """
 
 import sys
 import unittest
 from pathlib import Path
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import gui_helpers  # noqa: E402
@@ -252,6 +254,124 @@ class TestMesherCapabilities(unittest.TestCase):
         for mesher in MESHER_CAPABILITIES:
             with self.subTest(mesher=mesher):
                 self.assertTrue(MESHER_CAPABILITIES[mesher]["clip"])
+
+
+class WrapLabelTest(unittest.TestCase):
+    def test_short_names_are_unchanged(self):
+        self.assertEqual(gui_helpers.wrap_label("sample"), "sample")
+        self.assertEqual(gui_helpers.wrap_label("x" * 18), "x" * 18)
+
+    def test_breaks_after_a_separator(self):
+        self.assertEqual(
+            gui_helpers.wrap_label("sample_holder_aluminium_can"),
+            "sample_holder_\naluminium_can",
+        )
+
+    def test_cuts_mid_word_without_separators(self):
+        self.assertEqual(gui_helpers.wrap_label("a" * 40), "\n".join(["a" * 18, "a" * 18, "a" * 4]))
+
+    def test_every_line_fits_and_no_text_is_lost(self):
+        name = "Guide_gravity_segment-12.upper wall_left"
+        wrapped = gui_helpers.wrap_label(name)
+        self.assertTrue(all(len(line) <= 18 for line in wrapped.split("\n")))
+        self.assertEqual(wrapped.replace("\n", "").replace(" ", ""), name.replace(" ", ""))
+
+
+class TraceHelpersTest(unittest.TestCase):
+    def test_component_color_key_does_not_collide_with_union_names(self):
+        self.assertNotEqual(gui_helpers.component_color_key("box"), "box")
+
+    def test_clip_planes_keep_the_same_side_as_brep(self):
+        # pygfx keeps points where a*x + b*y + c*z + d >= 0.
+        clip = {"enable": True, "axis": "Z", "mode": "Above", "position": 2.0}
+        (_, _, c, d), = gui_helpers.clip_planes(clip)
+        self.assertGreater(c * 3.0 + d, 0)
+        self.assertLess(c * 1.0 + d, 0)
+        clip["mode"] = "Below"
+        (_, _, c, d), = gui_helpers.clip_planes(clip)
+        self.assertGreater(c * 1.0 + d, 0)
+        self.assertLess(c * 3.0 + d, 0)
+
+    def test_clip_disabled_has_no_planes(self):
+        clip = {"enable": False, "axis": "X", "mode": "Above", "position": 0}
+        self.assertEqual(gui_helpers.clip_planes(clip), [])
+
+    def test_instrument_param_args(self):
+        self.assertEqual(
+            gui_helpers.instrument_param_args({"l_min": " 1 ", "l_max": "", "n": "3"}),
+            ["l_min=1", "n=3"],
+        )
+
+    def test_clip_mesh_matches_clip_planes(self):
+        import trimesh
+        from clipping import resolve_clip_frame
+
+        box = trimesh.creation.box(extents=(2, 2, 2))
+        # A frame at x=0.5 rotated 90 degrees about z: its local x is world y.
+        frame = np.eye(4)
+        frame[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+        frame[:3, 3] = (0.5, 0, 0)
+        clip = resolve_clip_frame(
+            {"enable": True, "axis": "X", "mode": "Above", "position": 0.25, "frame": "arm"},
+            {"arm": frame},
+        )
+        clipped = gui_helpers.clip_mesh(box, clip)
+        np.testing.assert_allclose(clipped.bounds, [[-1, 0.25, -1], [1, 1, 1]], atol=1e-9)
+        self.assertTrue(clipped.is_watertight)
+        (a, b, c, d), = gui_helpers.clip_planes(clip)
+        self.assertGreater(b * 0.5 + d, 0)
+        self.assertLess(b * 0.0 + d, 0)
+
+    def test_clip_mesh_can_remove_everything(self):
+        import trimesh
+
+        box = trimesh.creation.box(extents=(1, 1, 1))
+        clip = {"enable": True, "axis": "Z", "mode": "Above", "position": 5}
+        self.assertIsNone(gui_helpers.clip_mesh(box, clip))
+        clip["enable"] = False
+        self.assertIs(gui_helpers.clip_mesh(box, clip), box)
+
+class RayHelpersTest(unittest.TestCase):
+    def setUp(self):
+        from mcstas_trace import TraceRays
+
+        # Ray 0: a -> b (3 points). Ray 1: a only (2 points).
+        self.rays = TraceRays(
+            points=np.arange(15, dtype=float).reshape(5, 3),
+            ray_offsets=np.array([0, 3, 5]),
+            speed=np.array([1.0, 2.0, 3.0, 4.0, 5.0]),
+            time=np.array([0.0, 0.001, 0.002, 0.0, 0.001]),
+            weight=np.array([1.0, 0.1, 0.0, 1.0, 1.0]),
+            component=np.array([0, 0, 1, 0, 0]),
+            kind=np.zeros(5, dtype=int),
+            component_names=["a", "b"],
+        )
+
+    def test_rays_reaching(self):
+        self.assertEqual(list(gui_helpers.rays_reaching(self.rays)), [0, 1])
+        self.assertEqual(list(gui_helpers.rays_reaching(self.rays, "b")), [0])
+        self.assertEqual(list(gui_helpers.rays_reaching(self.rays, "missing")), [])
+
+    def test_segments_never_join_two_rays(self):
+        pairs = gui_helpers.ray_segment_indices(self.rays, [0, 1])
+        self.assertEqual(pairs.tolist(), [[0, 1], [1, 2], [3, 4]])
+        self.assertEqual(gui_helpers.ray_segment_indices(self.rays, []).shape, (0, 2))
+
+    def test_color_values(self):
+        self.assertIsNone(gui_helpers.ray_color_values(self.rays, "Uniform"))
+        np.testing.assert_allclose(
+            gui_helpers.ray_color_values(self.rays, "Time"), [0, 1, 2, 0, 1]
+        )
+        weight = gui_helpers.ray_color_values(self.rays, "Weight")
+        self.assertTrue(np.all(np.isfinite(weight)))
+        self.assertAlmostEqual(weight[1], -1.0)
+
+    def test_colormap(self):
+        colors = gui_helpers.colormap([0.0, 0.5, 1.0])
+        self.assertEqual(colors.shape, (3, 4))
+        self.assertTrue(np.all((colors >= 0) & (colors <= 1)))
+        self.assertFalse(np.allclose(colors[0], colors[2]))
+        np.testing.assert_allclose(gui_helpers.colormap([2.0, 2.0])[0], gui_helpers.colormap([2.0, 2.0])[1])
 
 
 if __name__ == "__main__":

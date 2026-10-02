@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  run-mcstas_to_cad:
+  run-unviz-export:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,6 +29,8 @@ jobs:
           which python
           python --version
           micromamba list
+          which unviz
+          unviz --help
 
 
       - name: Run script on all test files
@@ -36,8 +38,8 @@ jobs:
         run: |
           status=0
           for file in tests/*.instr tests/*.py; do
-            echo "Running mcstas_to_cad on $file"
-            python src/mcstas_to_cad.py --input_file="$file" || status=1
+            echo "Running unviz --export on $file"
+            unviz "$file" --export --out-file /tmp/unviz_export_smoke_test || status=1
           done
           exit $status
 

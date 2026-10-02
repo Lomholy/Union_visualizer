@@ -3,7 +3,7 @@
 #
 # tests/crack_height.instr references its mesh as `filename =
 # "./crack_cryst.stl"`. CI (.github/workflows/run-tests.yml) invokes
-# mcstas_to_cad.py from the repo root over every file in tests/*, so the
+# unviz --export from the repo root over every file in tests/*, so the
 # process's current working directory is the repo root, not tests/ - a
 # filename resolved against cwd would point at a nonexistent
 # <repo-root>/crack_cryst.stl instead of the real tests/crack_cryst.stl.
@@ -12,7 +12,7 @@
 # resolves such paths.
 #
 # Not wired into CI's tests/* loop (that loop feeds every file in tests/ to
-# mcstas_to_cad.py as an instrument input, so a plain unittest module can't
+# unviz --export as an instrument input, so a plain unittest module can't
 # live there). Run directly:
 #
 #   python tests_unit/test_mesh_path_resolution.py

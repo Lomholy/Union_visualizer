@@ -2,7 +2,7 @@
 # raw-string fallback entries in declare_list/user_var_list.
 #
 # Not wired into CI's tests/* loop (that loop feeds every file in tests/ to
-# mcstas_to_cad.py as an instrument input, so a plain unittest module can't
+# unviz --export as an instrument input, so a plain unittest module can't
 # live there). Run directly:
 #
 #   python tests_unit/test_declare_recovery.py
