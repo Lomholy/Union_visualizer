@@ -116,5 +116,49 @@ class BuildCountsGroupTest(unittest.TestCase):
         self.assertEqual(len(group.children), 2)
 
 
+class FitCameraToSceneTest(unittest.TestCase):
+    class FakeScene:
+        def __init__(self, bbox):
+            self.bbox = bbox
+
+        def get_world_bounding_box(self):
+            return self.bbox
+
+    class FakeCamera:
+        def __init__(self):
+            self.local = type("Local", (), {})()
+            self.depth_range = None
+
+        def look_at(self, point):
+            pass
+
+    class FakeController:
+        target = None
+
+    def fit(self, bbox):
+        camera = self.FakeCamera()
+        uv.fit_camera_to_scene(camera, self.FakeController(), self.FakeScene(np.array(bbox, dtype=float)))
+        return camera
+
+    def test_near_plane_is_tiny_for_a_small_scene(self):
+        camera = self.fit([[-0.05, -0.05, 0.0], [0.05, 0.05, 0.001]])
+        self.assertEqual(camera.depth_range[0], uv.CAMERA_NEAR)
+        self.assertLessEqual(camera.depth_range[0], 1e-3)
+
+    def test_near_plane_is_the_same_for_a_large_scene(self):
+        camera = self.fit([[-50.0, -50.0, -50.0], [50.0, 50.0, 50.0]])
+        self.assertEqual(camera.depth_range, (uv.CAMERA_NEAR, uv.CAMERA_FAR))
+
+    def test_unfitted_camera_gets_the_same_range_as_a_fitted_one(self):
+        unfitted = self.FakeCamera()
+        uv.set_camera_depth_range(unfitted)
+        fitted = self.fit([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]])
+        self.assertEqual(unfitted.depth_range, fitted.depth_range)
+
+    def test_near_plane_is_positive(self):
+        camera = self.fit([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+        self.assertGreater(camera.depth_range[0], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

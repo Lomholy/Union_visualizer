@@ -548,6 +548,20 @@ def grid_size_for_bbox(bbox, minimum=DEFAULT_GRID_SIZE, margin=1.2):
 # ============================================================
 
 
+# Near clipping distance in metres: as close to 0 as a perspective projection
+# allows (exactly 0 divides by zero in its depth maths), so even a small
+# detector can be viewed up close without being clipped away.
+CAMERA_NEAR = 1e-4
+CAMERA_FAR = 1e6
+
+
+def set_camera_depth_range(camera):
+    """Give camera an explicit near/far clipping range. Without one, pygfx
+    derives the planes from the camera's fov and depth, which clips whatever
+    is close to the camera."""
+    camera.depth_range = (CAMERA_NEAR, CAMERA_FAR)
+
+
 def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     print(scene)
     bbox = scene.get_world_bounding_box()
@@ -565,10 +579,7 @@ def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     position = center + direction * distance
     camera.local.position = position
     camera.look_at(center)
-    camera.depth_range = (
-        max(0.01, distance - radius * 4),
-        1e6,
-    )
+    set_camera_depth_range(camera)
     controller.target = center
 
 
@@ -940,6 +951,7 @@ class Viewer(QtWidgets.QMainWindow):
         # Camera
         # ----------------------------------------------------
         self.camera = gfx.PerspectiveCamera(35)
+        set_camera_depth_range(self.camera)
         self.camera.local.position = (0, 1, 10)
         self.camera.look_at((0, 0, 0))
         self.controller = gfx.OrbitController(
