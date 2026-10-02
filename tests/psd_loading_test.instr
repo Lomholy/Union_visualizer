@@ -10,15 +10,10 @@
 * Expected image on psd_det (x to the right, y up): a rectangle spanning
 * x in [-0.02, 0.04] m and y in [-0.01, 0.03] m.
 *
-* %Parameters
-* xmin, xmax, ymin, ymax: [m] Slit edges
-* nx, ny: [1] PSD bins
 * %End
 *******************************************************************************/
 
-DEFINE INSTRUMENT psd_loading_test(
-    xmin = -0.02, xmax = 0.04, ymin = -0.01, ymax = 0.03, int nx = 60, int ny = 60
-)
+DEFINE INSTRUMENT psd_loading_test()
 
 TRACE
 
@@ -31,11 +26,11 @@ COMPONENT src = Source_simple(
 )
 AT (0, 0, 0) RELATIVE origin
 
-COMPONENT slit = Slit(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax)
+COMPONENT slit = Slit(xmin = -0.02, xmax = 0.04, ymin = -0.01, ymax = 0.03)
 AT (0, 0, 1) RELATIVE src
 
 COMPONENT psd_det = PSD_monitor(
-    nx = nx, ny = ny, xwidth = 0.2, yheight = 0.2,
+    nx = 60, ny = 40, xwidth = 0.2, yheight = 0.2,
     filename = "psd_det.dat", restore_neutron = 1
 )
 AT (0, 0, 0.01) RELATIVE slit
