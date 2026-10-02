@@ -149,6 +149,12 @@ class FitCameraToSceneTest(unittest.TestCase):
         camera = self.fit([[-50.0, -50.0, -50.0], [50.0, 50.0, 50.0]])
         self.assertEqual(camera.depth_range, (uv.CAMERA_NEAR, uv.CAMERA_FAR))
 
+    def test_unfitted_camera_gets_the_same_range_as_a_fitted_one(self):
+        unfitted = self.FakeCamera()
+        uv.set_camera_depth_range(unfitted)
+        fitted = self.fit([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]])
+        self.assertEqual(unfitted.depth_range, fitted.depth_range)
+
     def test_near_plane_is_positive(self):
         camera = self.fit([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
         self.assertGreater(camera.depth_range[0], 0)
