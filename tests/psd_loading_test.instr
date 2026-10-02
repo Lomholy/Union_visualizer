@@ -1,0 +1,43 @@
+/*******************************************************************************
+* Instrument: psd_loading_test
+*
+* %Description
+* Minimal instrument for testing the loading of mcrun detector output into a
+* PSD monitor. A source illuminates an off-centre rectangular slit, so the
+* PSD image is a bright rectangle that is not symmetric in x or y. Any
+* transposition or flip of the loaded counts is therefore visible.
+*
+* Expected image on psd_det (x to the right, y up): a rectangle spanning
+* x in [-0.02, 0.04] m and y in [-0.01, 0.03] m.
+*
+* %Parameters
+* xmin, xmax, ymin, ymax: [m] Slit edges
+* nx, ny: [1] PSD bins
+* %End
+*******************************************************************************/
+
+DEFINE INSTRUMENT psd_loading_test(
+    xmin = -0.02, xmax = 0.04, ymin = -0.01, ymax = 0.03, int nx = 60, int ny = 60
+)
+
+TRACE
+
+COMPONENT origin = Progress_bar()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT src = Source_simple(
+    radius = 0.1, dist = 1, focus_xw = 0.2, focus_yh = 0.2,
+    lambda0 = 3, dlambda = 0.1, flux = 1e10
+)
+AT (0, 0, 0) RELATIVE origin
+
+COMPONENT slit = Slit(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax)
+AT (0, 0, 1) RELATIVE src
+
+COMPONENT psd_det = PSD_monitor(
+    nx = nx, ny = ny, xwidth = 0.2, yheight = 0.2,
+    filename = "psd_det.dat", restore_neutron = 1
+)
+AT (0, 0, 0.01) RELATIVE slit
+
+END
