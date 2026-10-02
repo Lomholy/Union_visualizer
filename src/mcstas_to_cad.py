@@ -9,6 +9,7 @@ import argparse
 from preprocess import preprocess
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes
+from bounding_box import compute_all_world_bboxes
 
 from pathlib import Path
 # ==============================================================================
@@ -37,6 +38,16 @@ def parse():
     )
     parser.add_argument("--verbose", action="store_true", default=False)
     parser.add_argument("--export", action="store_true", default=False)
+    parser.add_argument(
+        "--force_pygen",
+        action="store_true",
+        default=False,
+        help=(
+            "Always translate a .instr input through mcstas-pygen instead of "
+            "mcstasscript's lightweight .instr reader (that reader's parse "
+            "failures already fall back to mcstas-pygen automatically)."
+        ),
+    )
     return parser
 
 
@@ -62,8 +73,13 @@ if __name__ == "__main__":
             "position": 0,
         }
 
-    instr, world_matrices, union_geometries = preprocess(input_file, verbose)
-    final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices)
+    instr, world_matrices, union_geometries = preprocess(
+        input_file, verbose, force_pygen=args.force_pygen
+    )
+    world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
+    final_sdfs, sdfs = build_sdfs(
+        union_geometries, world_matrices, world_bboxes=world_bboxes
+    )
     build_all_meshes(
         union_geometries,
         world_matrices,
@@ -74,5 +90,5 @@ if __name__ == "__main__":
         out_file=out_file,
         export=export,
         mesher=mesher,
-
+        world_bboxes=world_bboxes,
     )

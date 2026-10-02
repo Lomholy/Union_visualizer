@@ -1,0 +1,125 @@
+/********************************************************************************
+*
+* McStas, neutron ray-tracing package
+*
+* Instrument: MULTI_STATEMENT_LINES_TEST
+*
+* %Identification
+* Written by: Union_visualizer test suite
+* %INSTRUMENT_SITE: Generated_instruments
+*
+* %Description
+* Regression fixture for preprocess.py's multi-statement-line handling.
+* create_var_map's INITIALIZE loop used to match a whole line against one
+* "name = expr;" regex, so several ';'-terminated statements on one line -
+* extremely common in real McStas INITIALIZE sections - made the WHOLE
+* line fail with "invalid syntax" and none of its assignments happened.
+* Every INITIALIZE line below mirrors a pattern actually observed in the
+* mcstas-comps corpus:
+*   - a pure multi-assignment line ('SM = 1; SS = -1; SA = 1;')
+*   - a tab-separated variant ('sT1=313.;	sI1=8.05e12;')
+*   - a plain assignment followed by a single-line conditional
+*     reassignment of the same variable
+*     ('Emin = EI-20; if (Emin < EI/3) Emin=EI/3;')
+*   - a plain if/else assignment using C's '!' negation
+*   - two more multi-assignment lines (A4/A6) whose values are then used
+*     together downstream in box_angle - a real, and more insidious,
+*     silent-wrong-value bug on top of the printed warnings (see below)
+*
+* Before the fix: every one of the 5 multi-statement INITIALIZE lines
+* below prints "Warning: Failed to evaluate ...: invalid syntax
+* (<unknown>, line 1)", and Emin/A4 are never actually assigned their
+* intended values. But because DECLARE zero-initializes an unset "double"
+* global (matching real C static-initialization semantics), Emin and A4
+* silently read back as 0.0 rather than as an unresolved string - so
+* box_angle = Emin * A4 evaluates "successfully" to 0.0 with NO further
+* warning, and the box's ROTATED angle ends up silently wrong (0 degrees)
+* instead of erroring loudly. This is arguably worse than the printed
+* warnings: a wrong-but-plausible-looking result with no signal anything
+* went wrong. After the fix, Emin/A4 carry their actual intended values
+* and box_angle correctly ends up around 11.67 degrees, reaching the
+* box's real ROTATED vector below - mirroring rad2deg_test.instr's
+* pattern of proving an INITIALIZE-computed value reaches real geometry,
+* not just create_var_map's internal var_map.
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT MULTI_STATEMENT_LINES_TEST (
+)
+
+DECLARE
+%{
+double SM;
+double SS;
+double SA;
+double sT1;
+double sI1;
+double EI;
+double Emin;
+double A2;
+double A4;
+double A6;
+double flag;
+double q;
+double box_angle;
+%}
+
+INITIALIZE
+%{
+SM = 1; SS = -1; SA = 1;
+sT1=313.;	sI1=8.05e12;
+EI = 5.0;
+Emin = EI-20; if (Emin < EI/3) Emin=EI/3;
+A2 = 7.0;
+A4 = A2; A6 = A2;
+flag = 0; if (!flag) q = 1; else q = 0;
+box_angle = Emin * A4;
+%}
+
+TRACE
+
+COMPONENT Origin = Progress_bar(
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT sample = Arm(
+)
+AT (0,0,10) RELATIVE Origin
+
+COMPONENT init = Union_init(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT non = Non_process(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT mat = Union_make_material(
+    my_absorption = 100, process_string="non"
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT box = Union_box(
+    priority = 10,
+    xwidth = 0.6,
+    yheight = 0.6,
+    zdepth = 0.6,
+    material_string = "mat"
+)
+AT (0,0,0) RELATIVE sample
+ROTATED (0, box_angle, 0) RELATIVE sample
+
+COMPONENT master = Union_master(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT stop = Union_stop(
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+FINALLY
+%{
+%}
+
+END

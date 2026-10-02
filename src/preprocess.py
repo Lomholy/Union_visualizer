@@ -5,6 +5,9 @@ import ast
 import os
 import re
 import math
+import shutil
+import subprocess
+import tempfile
 import numpy as np
 
 
@@ -32,6 +35,118 @@ def execute_mcstasscript_file(input_file):
     return instruments[0]
 
 
+class PygenNotFoundError(RuntimeError):
+    """Raised when the mcstas-pygen binary can't be located."""
+
+
+def find_mcstas_pygen():
+    """Locate the mcstas-pygen binary. It ships alongside mcstas/mcrun (e.g.
+    as part of the same conda package that provides mcstasscript's backend),
+    so PATH lookup is normally enough once that environment is active;
+    MCSTAS_PYGEN lets it be pointed at explicitly otherwise."""
+    override = os.environ.get("MCSTAS_PYGEN")
+    if override:
+        if shutil.which(override) or os.path.isfile(override):
+            return override
+        raise PygenNotFoundError(
+            f"MCSTAS_PYGEN is set to '{override}', but no executable was found there."
+        )
+    found = shutil.which("mcstas-pygen")
+    if found:
+        return found
+    raise PygenNotFoundError(
+        "mcstas-pygen not found on PATH. It ships with the McStas install "
+        "(e.g. via the 'mcstas' conda package used by unviz_env.yml) - "
+        "activate that environment, or set MCSTAS_PYGEN to its path."
+    )
+
+
+def run_mcstas_pygen(instr_file, verbose=False):
+    """Translate a .instr file into a McStasScript module via mcstas-pygen,
+    the McStas-provided code generator that runs the instrument through the
+    real McStas front-end (component definitions and all) instead of
+    mcstasscript's own lightweight regex-based .instr reader. Useful for
+    instruments the lightweight reader can't parse. Returns the path to the
+    generated .py file, written into a fresh temp directory.
+
+    Component search: standard/contrib components (including Union) come
+    from the MCSTAS environment variable, same as mcrun/mcstas. mcstas-pygen
+    3.8.5's own -I flag errors out instead of extending that path (verified
+    against the installed binary - its --help text lists -I, but passing it
+    always falls straight to the usage banner), so the only way left to pick
+    up instrument-local .comp files is to run with the instrument's own
+    directory as cwd, which is what mcrun does too.
+    """
+    pygen = find_mcstas_pygen()
+    out_dir = tempfile.mkdtemp(prefix="union_viewer_pygen_")
+    abs_instr_file = os.path.abspath(instr_file)
+    instr_dir = os.path.dirname(abs_instr_file) or "."
+    base = os.path.splitext(os.path.basename(instr_file))[0]
+    out_file = os.path.join(out_dir, f"{base}_generated.py")
+    cmd = [pygen, "-o", out_file, abs_instr_file]
+
+    if verbose:
+        print("Running:", " ".join(cmd), "(cwd=%s)" % instr_dir)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=instr_dir)
+    if verbose and result.stdout:
+        print(result.stdout)
+
+    if result.returncode != 0 or not os.path.isfile(out_file):
+        message = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(
+            f"mcstas-pygen failed to translate '{instr_file}':\n{message}"
+        )
+    return out_file
+
+
+def _clear_pygen_unset_string_defaults(instr):
+    """Undo a mismatch pygen's output otherwise creates against the rest of
+    this codebase's expectations: McStas represents an omitted string
+    parameter with the literal, unquoted token 0 (e.g. `string
+    mask_string = 0` in a .comp DEFINE - a real string value is always
+    quoted, e.g. '"non"', so the bare '0' is unambiguous). mcstasscript's
+    lightweight .instr reader only sets attributes that are actually
+    written in the .instr text, so an omitted one simply stays absent and
+    reads back as the Component class's own default of None. pygen's
+    generated code instead assigns every declared parameter explicitly,
+    including that literal '0' sentinel for the ones the instrument never
+    set - and code elsewhere (e.g. brep.py's `hasattr(comp, 'mask_string')
+    and comp.mask_string != None` mask check) relies on the "still None"
+    state to know a parameter was never given a real value. Rewriting
+    each such sentinel back to None makes pygen-loaded components behave
+    like natively-read ones for every one of those checks."""
+    for comp in instr.component_list:
+        for pname, ptype in comp.parameter_types.items():
+            if ptype == "string" and getattr(comp, pname, None) == "0":
+                setattr(comp, pname, None)
+
+
+def execute_pygen_file(generated_file):
+    """Load the McStasScript instrument built by a mcstas-pygen-generated
+    module. Unlike a hand-written McStasScript script (which instantiates
+    McStas_instr at module scope, what execute_mcstasscript_file scans
+    for), pygen's output wraps construction in a make() factory function
+    and guards its demo CLI behind `if __name__ == "__main__"` - so this
+    calls make() directly rather than scanning module globals, and sets
+    __name__ to something other than "__main__" so exec() doesn't run
+    into that guard reading an undefined name."""
+    with open(generated_file, "r") as f:
+        code = f.read()
+
+    namespace = {"__name__": "mcstas_pygen_module"}
+    exec(compile(code, generated_file, "exec"), namespace)
+
+    make = namespace.get("make")
+    if make is None:
+        raise ValueError(
+            f"mcstas-pygen output '{generated_file}' has no make() function; "
+            "unexpected mcstas-pygen output format."
+        )
+    instr = make()
+    _clear_pygen_unset_string_defaults(instr)
+    return instr
+
+
 def get_union_geometries(instr: ms.McStas_instr):
     union_geometries = {}
     union_names = ["Union_cylinder",
@@ -45,13 +160,32 @@ def get_union_geometries(instr: ms.McStas_instr):
     return union_geometries
 
 
-def load_McStas_file(input_file):
+def load_McStas_file(input_file, force_pygen=False, verbose=False):
+    """Load a .py (McStasScript) or .instr (native McStas) file into an
+    McStas_instr. For .instr inputs there are two ways to reach the
+    mcstas-pygen path instead of mcstasscript's own lightweight .instr
+    reader: force_pygen=True always takes it (e.g. because a user enabled
+    it in the GUI settings for an instrument they know the lightweight
+    reader mishandles), and otherwise it's used automatically as a
+    fallback if the lightweight reader raises."""
     if input_file.endswith(".py"):
         instr = execute_mcstasscript_file(input_file)
     elif input_file.endswith(".instr"):
-        file = ms.McStas_file(input_file)
-        instr = ms.McStas_instr("union_cad")
-        file.add_to_instr(instr)
+        if force_pygen:
+            instr = execute_pygen_file(run_mcstas_pygen(input_file, verbose=verbose))
+        else:
+            try:
+                file = ms.McStas_file(input_file)
+                instr = ms.McStas_instr("union_cad")
+                file.add_to_instr(instr)
+            except Exception as exc:
+                print(
+                    f"mcstasscript's built-in .instr reader failed on "
+                    f"'{input_file}' ({exc}); falling back to mcstas-pygen."
+                )
+                instr = execute_pygen_file(
+                    run_mcstas_pygen(input_file, verbose=verbose)
+                )
     return instr
 
 
@@ -75,6 +209,23 @@ OPERATORS = {
 UNARY = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
+    ast.Not: operator.not_,   # the "!" -> " not " substitution ahead of a
+                               # single-line "if (cond) ..." turns C's "!"
+                               # into an ast.UnaryOp(ast.Not, ...) node,
+                               # which the existing UNARY dispatch handles
+                               # for free once it's in this table.
+}
+
+# Comparison operators for "if (cond) name = expr;" conditions (2.1 part 2).
+# Chained comparisons (a < b < c) are walked pairwise in eval_expr, mirroring
+# how OPERATORS/UNARY are already node-type -> callable lookup tables.
+COMPARE_OPERATORS = {
+    ast.Lt: operator.lt,
+    ast.Gt: operator.gt,
+    ast.LtE: operator.le,
+    ast.GtE: operator.ge,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
 }
 
 # Allowed math functions/constants
@@ -184,8 +335,37 @@ def eval_expr(expr, var_map=None, comp_context=None):
                 )
                 return 0
 
-        elif isinstance(node, ast.UnaryOp):  # -x
+        elif isinstance(node, ast.UnaryOp):  # -x, or "not x" from a translated C "!x"
             return UNARY[type(node.op)](_eval(node.operand))
+
+        elif isinstance(node, ast.Compare):  # a < b, chained a < b < c, etc.
+            left = _eval(node.left)
+            for op, comparator in zip(node.ops, node.comparators):
+                if type(op) not in COMPARE_OPERATORS:
+                    raise TypeError(f"Unsupported comparison operator: {type(op).__name__}")
+                right = _eval(comparator)
+                if not COMPARE_OPERATORS[type(op)](left, right):
+                    return False
+                left = right
+            return True
+
+        elif isinstance(node, ast.BoolOp):  # translated C "&&"/"||"
+            if isinstance(node.op, ast.And):
+                result = True
+                for value in node.values:
+                    result = _eval(value)
+                    if not result:
+                        return result
+                return result
+            elif isinstance(node.op, ast.Or):
+                result = False
+                for value in node.values:
+                    result = _eval(value)
+                    if result:
+                        return result
+                return result
+            else:
+                raise TypeError(f"Unsupported boolean operator: {type(node.op).__name__}")
 
         elif isinstance(node, ast.Name):  # variables
             if node.id in var_map:
@@ -260,6 +440,8 @@ _PARAM_TYPE_KEYWORDS = _C_TYPE_KEYWORDS | {"string"}
 
 _RAW_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
 _QUOTED_STRING_RE = re.compile(r'^"(.*)"$', re.S)
+_ELSE_ASSIGNMENT_RE = re.compile(r"^else\s+([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
+_NEGATION_RE = re.compile(r"!(?!=)")  # a bare "!", not part of "!="
 
 
 def _resolved_value(entry):
@@ -305,6 +487,43 @@ def _split_top_level_statements(text):
     if tail:
         statements.append(tail)
     return statements
+
+
+def _c_bool_ops_to_python(text):
+    """Textually translate C's boolean operators to Python's before handing
+    a condition to eval_expr (ast.parse rejects "&&"/"||"/bare "!" outright,
+    they aren't Python syntax at all). "!=" is left untouched - it's already
+    valid Python and _NEGATION_RE's negative lookahead skips it."""
+    text = text.replace("&&", " and ").replace("||", " or ")
+    return _NEGATION_RE.sub(" not ", text)
+
+
+def _split_if_statement(statement):
+    """Split a statement starting with "if (" into (cond, rest), where rest
+    is everything after the condition's *matching* close-paren. A naive
+    regex like r"if\\s*\\((.+)\\)" stops at the first ")", which breaks on
+    any condition that has parens of its own, e.g. "if ((a<b) && c) x=1" -
+    so this walks the text counting paren depth instead, the same technique
+    _split_top_level_statements already uses for ';'. Returns None if the
+    statement doesn't start with "if (" or the parens never balance."""
+    match = re.match(r"^if\s*\(", statement)
+    if not match:
+        return None
+    i = match.end()
+    depth = 1
+    start = i
+    n = len(statement)
+    while i < n and depth > 0:
+        if statement[i] == "(":
+            depth += 1
+        elif statement[i] == ")":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        return None
+    cond = statement[start:i - 1].strip()
+    rest = statement[i:].strip()
+    return cond, rest
 
 
 def _strip_c_type_prefix(statement, type_keywords=_C_TYPE_KEYWORDS):
@@ -407,6 +626,47 @@ def _recover_raw_parameter(raw_text, var_map):
         print(f"Warning: Failed to evaluate parameter {statement};: {e}")
 
 
+def _assign_or_warn(var_map, name, expr, display_text):
+    """Evaluate expr and store it under name in var_map, or print the
+    appropriate Info:/Warning: message and leave it unresolved - shared by
+    a plain "name = expr;" statement and whichever branch of an
+    "if (cond) name = expr; [else name2 = expr2;]" actually gets taken."""
+    try:
+        var_map[name] = eval_expr(expr, var_map)
+    except OpaqueRuntimeCall as e:
+        print(f"Info: {display_text} depends on runtime state ({e}()), left unresolved")
+    except Exception as e:
+        print(f"Warning: Failed to evaluate {display_text}: {e}")
+
+
+def _apply_conditional_statement(cond, name, expr, else_name, else_expr, var_map):
+    """Handle one "if (cond) name = expr;", optionally paired with
+    "else name2 = expr2;". Real C semantics: only the taken branch is ever
+    executed, so the untaken one must never be evaluated or warned about -
+    a failing expression that's never reached isn't a bug."""
+    display = f"if ({cond}) {name} = {expr};"
+    if else_name is not None:
+        display += f" else {else_name} = {else_expr};"
+
+    try:
+        # ast.parse(mode="eval") treats leading whitespace as an
+        # (invalid) indent, not just insignificant padding - and "!x" at
+        # the very start of a condition becomes " not x" after the
+        # substitution below, so this can't skip the strip().
+        cond_value = eval_expr(_c_bool_ops_to_python(cond).strip(), var_map)
+    except OpaqueRuntimeCall as e:
+        print(f"Info: {display} depends on runtime state ({e}()), left unresolved")
+        return
+    except Exception as e:
+        print(f"Warning: Failed to evaluate {display}: {e}")
+        return
+
+    if cond_value:
+        _assign_or_warn(var_map, name, expr, display)
+    elif else_name is not None:
+        _assign_or_warn(var_map, else_name, else_expr, display)
+
+
 def create_var_map(instr: ms.McStas_instr):
     var_map = {}
     _populate_declare_vars(list(instr.declare_list), var_map)
@@ -422,8 +682,6 @@ def create_var_map(instr: ms.McStas_instr):
             continue
         var_map[param.name] = _resolved_value(param)
 
-    ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*;$")
-
     lines = instr.initialize_section.splitlines()
 
     for line in lines:
@@ -432,20 +690,45 @@ def create_var_map(instr: ms.McStas_instr):
         if not line or line.startswith("//"):
             continue
 
-        match = ASSIGNMENT_RE.match(line)
+        # C allows several ';'-terminated statements on one line (McStas
+        # INITIALIZE sections use this constantly, e.g. "SM=1; SS=-1;
+        # SA=1;"), so split on top-level ';' first and process each
+        # resulting statement independently, instead of matching (and
+        # requiring) exactly one assignment for the whole line.
+        statements = _split_top_level_statements(line)
+        idx = 0
+        n = len(statements)
+        while idx < n:
+            statement = statements[idx]
 
-        if not match:
-            continue
+            if_split = _split_if_statement(statement)
+            if if_split is not None:
+                cond, rest = if_split
+                match = _RAW_ASSIGNMENT_RE.match(rest)
+                if match:
+                    name, expr = match.groups()
+                    else_name = else_expr = None
+                    # An "if (cond) x=a;" and its "else x=b;" become two
+                    # separate chunks after the ';'-split above - look ahead
+                    # one chunk to re-associate them before evaluating.
+                    if idx + 1 < n:
+                        else_match = _ELSE_ASSIGNMENT_RE.match(statements[idx + 1])
+                        if else_match:
+                            else_name, else_expr = else_match.groups()
+                            idx += 1
+                    _apply_conditional_statement(
+                        cond, name, expr.strip(), else_name,
+                        else_expr.strip() if else_expr is not None else None,
+                        var_map,
+                    )
+                idx += 1
+                continue
 
-        name, expr = match.groups()
-
-        try:
-            value = eval_expr(expr, var_map)
-            var_map[name] = value
-        except OpaqueRuntimeCall as e:
-            print(f"Info: {line} depends on runtime state ({e}()), left unresolved")
-        except Exception as e:
-            print(f"Warning: Failed to evaluate {line}: {e}")
+            match = _RAW_ASSIGNMENT_RE.match(statement)
+            if match:
+                name, expr = match.groups()
+                _assign_or_warn(var_map, name, expr, f"{statement};")
+            idx += 1
     return var_map
 
 
@@ -480,6 +763,78 @@ def attempt_conversion(comp: mshelp.Component, instr: ms.McStas_instr, var_map: 
         comp.ROTATED_data[i] = value
 
     return comp
+
+
+# =============================================================================
+# ======================== COMPONENT GEOMETRY PARAMETERS ======================
+# =============================================================================
+
+
+def _taper_dimension(value, untapered, comp_name, param_name):
+    """Normalise one optional Union_box taper parameter (xwidth2/yheight2)
+    into an actual dimension, falling back to the untapered one.
+
+    Union_box.comp declares these with a -1 default and treats any negative
+    value as "same as xwidth/yheight" (`if (xwidth2 < 0) xwidth2 = xwidth;`),
+    while rejecting a value that is <= 0 but not exactly -1. mcstasscript
+    reports a setting parameter the instrument never wrote as None rather
+    than as the component's own -1 default, so both spellings of "unset"
+    reach us here and both have to mean "untapered".
+
+    Anything McStas itself would reject (0, or a negative that isn't the -1
+    sentinel) warns and falls back to the untapered dimension, matching how
+    the rest of this module prefers a visible warning plus a still-usable
+    instrument over aborting the whole run."""
+    if value is None:
+        return untapered
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        # parse_param leaves an expression it could not evaluate as the
+        # original string, and has already warned about it.
+        print(
+            f"Warning: Component '{comp_name}': could not resolve {param_name} "
+            f"to a number ({value!r}); treating the box as untapered."
+        )
+        return untapered
+
+    if value == -1:
+        return untapered
+
+    if value <= 0:
+        print(
+            f"Warning: Component '{comp_name}': {param_name}={value} is not a "
+            f"usable dimension (McStas requires it to be > 0 or the -1 "
+            f"default); treating the box as untapered."
+        )
+        return untapered
+
+    return value
+
+
+def box_dimensions(comp):
+    """Return (x1, y1, x2, y2): a Union_box's cross-section at its -z face
+    and at its +z face.
+
+    McStas's Union_box takes optional xwidth2/yheight2 giving a different
+    width and height at the +z face, which turns the box into a rectangular
+    frustum whose cross-section varies linearly along local z. Every
+    consumer of box dimensions goes through this one helper so the "what
+    counts as unset" rule lives in a single place."""
+    x1 = float(comp.xwidth)
+    y1 = float(comp.yheight)
+    x2 = _taper_dimension(getattr(comp, "xwidth2", None), x1, comp.name, "xwidth2")
+    y2 = _taper_dimension(getattr(comp, "yheight2", None), y1, comp.name, "yheight2")
+    return x1, y1, x2, y2
+
+
+def box_is_tapered(comp):
+    """Does this Union_box actually need frustum handling? Kept next to
+    box_dimensions so the exact-equality test is written once: every caller
+    has a cheaper and more accurate untapered path worth preserving."""
+    x1, y1, x2, y2 = box_dimensions(comp)
+    return x1 != x2 or y1 != y2
 
 
 # =============================================================================
@@ -668,16 +1023,21 @@ def resolve_mesh_filenames(union_geometries, input_file):
             comp.filename = _resolve_relative_path(filename, base_dir)
 
 
-def preprocess(input_file: str, verbose: bool):
+def preprocess(input_file: str, verbose: bool, force_pygen: bool = False):
     """
     Function to preprocess the input file.
+
+    force_pygen: always translate a .instr input through mcstas-pygen
+        instead of mcstasscript's lightweight .instr reader (that reader is
+        still used as an automatic fallback on parse failure regardless of
+        this flag - see load_McStas_file).
 
     Returns:
         McStas_instr containing the processed instrument
         dict: {component_name_lower: 4x4 world matrix}
         list: Each union geometry in the instrument.
     """
-    instr = load_McStas_file(input_file)
+    instr = load_McStas_file(input_file, force_pygen=force_pygen, verbose=verbose)
     var_map = create_var_map(instr)
     for comp in instr.component_list:
         comp = attempt_conversion(comp, instr, var_map)

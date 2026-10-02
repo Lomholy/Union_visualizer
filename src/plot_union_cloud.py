@@ -1,4 +1,5 @@
 from signed_distance_functions import *
+from preprocess import box_dimensions
 import mcstasscript.helper.mcstas_objects as mshelp
 import trimesh
 import numpy as np
@@ -41,31 +42,48 @@ def sample_union_cylinder(comp: mshelp.Component, n_points):
 
 
 def sample_union_box(comp: mshelp.Component, n_points):
-    sizes = np.array([comp.xwidth / 2, comp.yheight / 2, comp.zdepth / 2])
-    point_per_face = int(np.sqrt(n_points / 6))
-    points = np.zeros((point_per_face**2 * 6, 3))
+    """Sample the six faces of a Union_box. The box may be tapered
+    (xwidth2/yheight2), in which case the four side faces are slanted quads
+    and the two z-caps have different sizes, so each face is parameterised by
+    its own (u, v) rather than by one shared set of half-extents."""
+    x1, y1, x2, y2 = box_dimensions(comp)
+    zdepth = float(comp.zdepth)
 
-    x = np.linspace(-sizes[0], sizes[0], point_per_face)
-    y = np.linspace(-sizes[1], sizes[1], point_per_face)
-    z = np.linspace(-sizes[2], sizes[2], point_per_face)
-    x, t = np.meshgrid(x, x)
-    y, z = np.meshgrid(y, z)
-    t = t.ravel()
-    x = x.ravel()
-    y = y.ravel()
-    z = z.ravel()
-    x_tmp = np.ones_like(y) * sizes[0]
-    y_tmp = np.ones_like(y) * sizes[1]
-    z_tmp = np.ones_like(y) * sizes[2]
+    # At least 2 samples per direction, so a face is spanned rather than
+    # collapsed to a single point for small n_points.
+    per_side = max(int(np.sqrt(n_points / 6)), 2)
+    u = np.linspace(0.0, 1.0, per_side)
+    u, v = np.meshgrid(u, u, indexing="ij")
+    u = u.ravel()
+    v = v.ravel()
 
-    point_per_face = point_per_face**2
-    points[:point_per_face] = np.column_stack((x_tmp, y, z))
-    points[point_per_face : 2 * point_per_face] = np.column_stack((-x_tmp, y, z))
-    points[2 * point_per_face : 3 * point_per_face] = np.column_stack((x, y_tmp, z))
-    points[3 * point_per_face : 4 * point_per_face] = np.column_stack((x, -y_tmp, z))
-    points[4 * point_per_face : 5 * point_per_face] = np.column_stack((t, y, z_tmp))
-    points[5 * point_per_face : 6 * point_per_face] = np.column_stack((t, y, -z_tmp))
-    return points
+    # u runs from the -z face to the +z face along the four side faces, so
+    # the half-extents at that depth interpolate with it.
+    z = (u - 0.5) * zdepth
+    half_x = 0.5 * (x1 + u * (x2 - x1))
+    half_y = 0.5 * (y1 + u * (y2 - y1))
+    span = 2 * v - 1  # -1 .. +1 across the face
+
+    faces = [
+        np.column_stack((half_x, span * half_y, z)),
+        np.column_stack((-half_x, span * half_y, z)),
+        np.column_stack((span * half_x, half_y, z)),
+        np.column_stack((span * half_x, -half_y, z)),
+    ]
+
+    # The two z-caps, each at its own cross-section.
+    for width, height, z_face in ((x1, y1, -zdepth / 2), (x2, y2, zdepth / 2)):
+        faces.append(
+            np.column_stack(
+                (
+                    (2 * u - 1) * width / 2,
+                    span * height / 2,
+                    np.full_like(u, z_face),
+                )
+            )
+        )
+
+    return np.vstack(faces)
 
 
 def sample_union_sphere(comp: mshelp.Component, n_points):
