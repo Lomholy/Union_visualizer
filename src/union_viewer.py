@@ -570,15 +570,19 @@ def grid_size_for_bbox(bbox, minimum=DEFAULT_GRID_SIZE, margin=1.2):
 # Near clipping distance in metres: as close to 0 as a perspective projection
 # allows (exactly 0 divides by zero in its depth maths), so even a small
 # detector can be viewed up close without being clipped away.
-CAMERA_NEAR = 1e-4
-CAMERA_FAR = 1e6
+CAMERA_NEAR = 1e-2
+CAMERA_FAR = 1e4
 
 
-def set_camera_depth_range(camera):
-    """Give camera an explicit near/far clipping range. Without one, pygfx
-    derives the planes from the camera's fov and depth, which clips whatever
-    is close to the camera."""
-    camera.depth_range = (CAMERA_NEAR, CAMERA_FAR)
+def update_camera_depth_range(camera, target):
+    """Set camera's explicit near/far clipping range from its distance to
+    target. Without an explicit range pygfx derives the planes from the
+    camera's fov and depth, which clips whatever is close to the camera."""
+    distance = np.linalg.norm(np.asarray(camera.local.position) - np.asarray(target))
+    near = max(CAMERA_NEAR, distance * 1e-2)
+    if camera.depth_range != (near, CAMERA_FAR):
+        camera.depth_range = (near, CAMERA_FAR)
+
 
 
 def fit_camera_to_scene(camera, controller, scene, scale=2.0):
@@ -598,8 +602,8 @@ def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     position = center + direction * distance
     camera.local.position = position
     camera.look_at(center)
-    set_camera_depth_range(camera)
     controller.target = center
+    update_camera_depth_range(camera, controller.target)
 
 
 def recentre_controller(controller, group):
@@ -970,7 +974,6 @@ class Viewer(QtWidgets.QMainWindow):
         # Camera
         # ----------------------------------------------------
         self.camera = gfx.PerspectiveCamera(35)
-        set_camera_depth_range(self.camera)
         self.camera.local.position = (0, 1, 10)
         self.camera.look_at((0, 0, 0))
         self.controller = gfx.OrbitController(
@@ -978,6 +981,8 @@ class Viewer(QtWidgets.QMainWindow):
             register_events=self.renderer,
         )
         self.controller.target = (0, 0, 0)
+
+        update_camera_depth_range(self.camera, self.controller.target)
         self.scene.add(make_coordinate_axes(length=1000, tick_spacing=1000))
 
         self.grid = None
@@ -2620,6 +2625,7 @@ class Viewer(QtWidgets.QMainWindow):
         s = 160
         self.gizmo_viewport.rect = (10, h - s - 10, s, s)
         self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera)
+        update_camera_depth_range(self.camera, self.controller.target)
 
         self.canvas.request_draw()
 
