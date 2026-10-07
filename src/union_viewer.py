@@ -118,7 +118,6 @@ class Viewer(QtWidgets.QMainWindow):
         )
         self.controller.target = (0, 0, 0)
 
-        update_camera_depth_range(self.camera, self.controller.target)
         self.scene.add(make_coordinate_axes(length=1000, tick_spacing=1000))
 
         self.grid = None

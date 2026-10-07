@@ -28,7 +28,7 @@ import logger_output
 # out of it as cavity walls, coinciding with those surfaces but facing the
 # other way; drawing both moved outward separates them, with the surface
 # facing the camera in front, so they don't z-fight.
-RENDER_OFFSET = 1e-4
+RENDER_OFFSET = 2e-4
 
 
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):

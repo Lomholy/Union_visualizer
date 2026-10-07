@@ -6,8 +6,8 @@ import numpy as np
 # Near clipping distance in metres: as close to 0 as a perspective projection
 # allows (exactly 0 divides by zero in its depth maths), so even a small
 # detector can be viewed up close without being clipped away.
-CAMERA_NEAR = 1e-2
-CAMERA_FAR = 1e4
+CAMERA_NEAR = 0.1
+CAMERA_FAR = 1e3
 
 
 def update_camera_depth_range(camera, target):
@@ -37,7 +37,6 @@ def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     camera.local.position = position
     camera.look_at(center)
     controller.target = center
-    update_camera_depth_range(camera, controller.target)
 
 
 def recentre_controller(controller, group):
