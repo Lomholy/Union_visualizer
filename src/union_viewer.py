@@ -176,15 +176,8 @@ class Viewer(QtWidgets.QMainWindow):
         self._add_dock("Clipping", self.clipping_panel)
         self._add_dock("Neutron Rays", self.rays_panel)
         self._add_dock("Detector Counts", self.counts_panel)
-
-        self.geometry_dock = QtWidgets.QDockWidget("Visible Geometries", self)
-        self.geometry_dock.setWidget(self.geometry_panel)
-        self.addDockWidget(
-            QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
-            self.geometry_dock,
-        )
-        self.geometry_dock.setTitleBarWidget(
-            CollapsibleTitleBar(self.geometry_dock, self.settings, self.rebalance_docks)
+        self.geometry_dock = self._add_dock(
+            "Visible Geometries", self.geometry_panel, expanding=True
         )
         QtCore.QTimer.singleShot(0, self.rebalance_docks)
 
@@ -232,28 +225,33 @@ class Viewer(QtWidgets.QMainWindow):
         geometry.set_components_shown(settings.components_checkbox.isChecked())
         rays.setEnabled(settings.rays_checkbox.isChecked())
 
-    def _add_dock(self, title, panel, collapsed=True, stretch=True):
+    def _add_dock(self, title, panel, collapsed=True, stretch=True, expanding=False):
         """Put panel in a collapsible, left-docked QDockWidget titled
-        `title` (collapsed at first unless collapsed=False) that only takes
-        the height its contents need. With stretch=True, extra space goes
-        below the panel. Returns the dock."""
+        `title` (collapsed at first unless collapsed=False) and return the
+        dock. By default the dock only takes the height its contents need,
+        with any extra space below the panel unless stretch=False. With
+        expanding=True the panel is the dock's widget itself and is left to
+        fill whatever height rebalance_docks() hands the dock."""
         dock = QtWidgets.QDockWidget(title, self)
         dock.setAllowedAreas(
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
             | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
         )
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        layout.addWidget(panel)
-        if stretch:
-            layout.addStretch()
-        dock.setWidget(widget)
+        if expanding:
+            dock.setWidget(panel)
+        else:
+            widget = QtWidgets.QWidget()
+            layout = QtWidgets.QVBoxLayout(widget)
+            layout.addWidget(panel)
+            if stretch:
+                layout.addStretch()
+            dock.setWidget(widget)
+            dock.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Preferred,
+                QtWidgets.QSizePolicy.Policy.Maximum,
+            )
         dock.setTitleBarWidget(
             CollapsibleTitleBar(dock, self.settings, self.rebalance_docks, collapsed)
-        )
-        dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
         )
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         return dock
