@@ -3,7 +3,6 @@ import sys
 import time
 from pathlib import Path
 import traceback
-from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import trimesh
 import pygfx as gfx
@@ -37,6 +36,7 @@ from scene_objects import (
     grid_size_for_bbox,
     make_coordinate_axes,
 )
+from background import JobRunner
 from camera import fit_camera_to_scene, recentre_controller, update_camera_depth_range
 
 # The meshers offered in the dock, in display order.
@@ -63,154 +63,6 @@ DEFLECTION_TOOLTIP = (
     "surface, in metres. Smaller values hug curves more closely (more "
     "triangles, slower to build); larger values are coarser but faster."
 )
-
-
-# ============================================================
-# Background mesh building
-# ============================================================
-
-
-class MeshBuildWorker(QtCore.QObject):
-    """Off-loads a mesh rebuild so the GUI thread stays responsive.
-
-    The actual geometry-kernel work (compute_mesh_data) runs in a worker
-    *process*, not just this QThread: pythonocc-core's OpenCASCADE calls
-    (used by the "brep" mesher) don't release the GIL, so a long boolean
-    operation running on a plain QThread would still starve the main
-    thread's event loop and freeze the window. Blocking here on
-    future.result() is safe because waiting on inter-process I/O releases
-    the GIL, unlike the geometry-kernel call itself. Building the pygfx
-    objects from the returned trimesh data is cheap and stays on this
-    thread.
-    """
-
-    finished = QtCore.Signal(object, object, object, object)
-    failed = QtCore.Signal(str)
-
-    def __init__(
-        self,
-        process_pool,
-        input_file,
-        clip,
-        colors,
-        meshes,
-        dependencies,
-        mesher,
-        res,
-        force_remesh,
-        group_by_material,
-        deflection,
-        force_pygen,
-        param_values,
-    ):
-        super().__init__()
-        self.process_pool = process_pool
-        self.input_file = input_file
-        self.clip = clip
-        self.colors = colors
-        self.meshes = meshes
-        self.dependencies = dependencies
-        self.mesher = mesher
-        self.res = res
-        self.force_remesh = force_remesh
-        self.group_by_material = group_by_material
-        self.deflection = deflection
-        self.force_pygen = force_pygen
-        self.param_values = param_values
-
-    def run(self):
-        try:
-            future = self.process_pool.submit(
-                compute_mesh_data,
-                self.input_file,
-                self.clip,
-                meshes=self.meshes,
-                dependencies=self.dependencies,
-                mesher=self.mesher,
-                force_remesh=self.force_remesh,
-                res=self.res,
-                group_by_material=self.group_by_material,
-                deflection=self.deflection,
-                force_pygen=self.force_pygen,
-                param_values=self.param_values,
-            )
-            render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info = (
-                future.result()
-            )
-            group = build_gfx_group(render_meshes, geometry_is_vacuum, self.colors)
-        except Exception:
-            self.failed.emit(traceback.format_exc())
-            return
-        self.finished.emit(group, meshes, dependencies, instrument_info)
-
-
-class TraceWorker(QtCore.QObject):
-    """Runs the instrument through mcrun --trace off the GUI thread. Parsing
-    the trace is pure Python, so like MeshBuildWorker it runs in a worker
-    process rather than only on this QThread."""
-
-    finished = QtCore.Signal(object, object, float)
-    failed = QtCore.Signal(str)
-
-    def __init__(
-        self, process_pool, input_file, force_pygen, params, ncount, seed, colors
-    ):
-        super().__init__()
-        self.process_pool = process_pool
-        self.input_file = input_file
-        self.force_pygen = force_pygen
-        self.params = params
-        self.ncount = ncount
-        self.seed = seed
-        self.colors = colors
-
-    def run(self):
-        start = time.time()
-        try:
-            components, rays = self.process_pool.submit(
-                compute_trace_data,
-                self.input_file,
-                self.force_pygen,
-                self.params,
-                self.ncount,
-                self.seed,
-            ).result()
-            group = build_component_group(components, self.colors)
-        except Exception as e:
-            traceback.print_exc()
-            self.failed.emit(f"{type(e).__name__}: {e}")
-            return
-        self.finished.emit(group, rays, time.time() - start)
-
-
-class CountsWorker(QtCore.QObject):
-    """Loads a run folder's detector counts off the GUI thread. Parsing a
-    run's mccode.sim/.dat files (mcstasscript) and histogramming any
-    event-list loggers ourselves is pure Python, so like TraceWorker this
-    runs in a worker process rather than only on this QThread - a large
-    event-list logger (hundreds of thousands of rows) can take a
-    perceptible moment to load."""
-
-    finished = QtCore.Signal(object)
-    failed = QtCore.Signal(str)
-
-    def __init__(self, process_pool, run_folder, input_file, force_pygen):
-        super().__init__()
-        self.process_pool = process_pool
-        self.run_folder = run_folder
-        self.input_file = input_file
-        self.force_pygen = force_pygen
-
-    def run(self):
-        try:
-            counts = self.process_pool.submit(
-                compute_counts_data, self.run_folder, self.input_file, self.force_pygen
-            ).result()
-        except Exception as e:
-            traceback.print_exc()
-            self.failed.emit(f"{type(e).__name__}: {e}")
-            return
-        self.finished.emit(counts)
 
 
 class CollapsibleTitleBar(QtWidgets.QWidget):
@@ -347,26 +199,22 @@ class Viewer(QtWidgets.QMainWindow):
         self.mesher = "brep"
 
         # ----------------------------------------------------
-        # Async mesh rebuild state
+        # Background jobs
         # ----------------------------------------------------
-        # Geometry-kernel work runs in this pool, not just a QThread - see
-        # MeshBuildWorker's docstring for why (pythonocc doesn't release
-        # the GIL, so a thread alone still freezes the GUI).
-        self._mesh_process_pool = ProcessPoolExecutor(max_workers=1)
-        self._reload_busy = False
-        self._reload_pending = False
+        # Meshing, mcrun --trace and counts loading each get their own
+        # worker process, so a slow mcrun compile never delays the meshes,
+        # a mesher/clip change never reruns McStas, and loading a large
+        # logger file never delays either.
+        self.mesh_jobs = JobRunner(
+            self, self._on_reload_finished, self._on_reload_failed, self._on_mesh_jobs_idle
+        )
+        self.trace_jobs = JobRunner(self, self._on_trace_finished, self._on_trace_failed)
+        self.counts_jobs = JobRunner(
+            self, self._on_counts_finished, self._on_counts_failed, self._on_counts_jobs_idle
+        )
         self._reload_pending_force = False
-        self._reload_thread = None
-        self._reload_worker = None
         self._pending_fit_camera = False
 
-        # A separate pool, so a slow mcrun compile never delays the meshes
-        # and a mesher/clip change never reruns McStas.
-        self._trace_process_pool = ProcessPoolExecutor(max_workers=1)
-        self._trace_busy = False
-        self._trace_pending = False
-        self._trace_thread = None
-        self._trace_worker = None
         self.trace_group = None
         self.trace_rays = None
         self.ray_group = None
@@ -381,12 +229,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.counts_visibility = {}   # {name: bool}
         self.counts_checkboxes = {}
         self.counts_run_folder = None
-        # A separate pool, so loading a large logger file never delays the
-        # meshes or a trace run, and vice versa.
-        self._counts_process_pool = ProcessPoolExecutor(max_workers=1)
-        self._counts_busy = False
-        self._counts_thread = None
-        self._counts_worker = None
+        self._loading_counts_folder = None
 
         # ----------------------------------------------------
         # Render widget
@@ -1447,47 +1290,36 @@ class Viewer(QtWidgets.QMainWindow):
         if not MESHER_CAPABILITIES[self.mesher]["incremental_rebuild"]:
             force_reload = True
 
-        if self._reload_busy:
-            self._reload_pending = True
+        if self.mesh_jobs.busy:
             self._reload_pending_force = self._reload_pending_force or force_reload
+            self.mesh_jobs.run_when_idle(self._reload_pending_meshes)
             return
 
-        self._reload_busy = True
-        self._reload_pending = False
         self._reload_pending_force = False
         self._set_loading(True)
         print("Building meshes...")
 
-        thread = QtCore.QThread(self)
-        worker = MeshBuildWorker(
-            self._mesh_process_pool,
+        colors = self.colors
+        self.mesh_jobs.start(
+            compute_mesh_data,
             self.input_file,
             NO_CLIP,
-            self.colors,
-            self.meshes,
-            self.dependencies,
-            self.mesher,
-            self.res_val.currentData(),
-            force_reload,
-            self.material_group_checkbox.isChecked(),
-            self.deflection_val.value(),
-            self.pygen_checkbox.isChecked(),
-            dict(self.param_values),
+            meshes=self.meshes,
+            dependencies=self.dependencies,
+            mesher=self.mesher,
+            force_remesh=force_reload,
+            res=self.res_val.currentData(),
+            group_by_material=self.material_group_checkbox.isChecked(),
+            deflection=self.deflection_val.value(),
+            force_pygen=self.pygen_checkbox.isChecked(),
+            param_values=dict(self.param_values),
+            # Building the pygfx objects is cheap, so it stays on the job's
+            # QThread instead of crossing the process boundary.
+            post=lambda data: (build_gfx_group(data[0], data[1], colors), *data[2:]),
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_reload_finished)
-        worker.failed.connect(self._on_reload_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_reload_thread_finished)
 
-        self._reload_thread = thread
-        self._reload_worker = worker
-        thread.start()
+    def _reload_pending_meshes(self):
+        self.reload_meshes(force_reload=self._reload_pending_force)
 
     def _resize_grid(self, group):
         """(Re)build the floor grid to cover the loaded geometry's footprint.
@@ -1504,7 +1336,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.grid = gfx.GridHelper(size=size, divisions=divisions, thickness=1)
         self.scene.add(self.grid)
 
-    def _on_reload_finished(self, new_group, meshes, dependencies, instrument_info):
+    def _on_reload_finished(self, result, elapsed):
+        new_group, meshes, dependencies, instrument_info = result
         self.rebuild_params_form(instrument_info["parameters"])
         self.world_matrices = {
             name: np.array(M) for name, M in instrument_info["world_matrices"].items()
@@ -1536,21 +1369,12 @@ class Viewer(QtWidgets.QMainWindow):
                 self.current_group,
             )
 
-    def _on_reload_failed(self, error_text):
+    def _on_reload_failed(self, traceback_text, summary):
         print("Mesh rebuild failed:")
-        print(error_text)
+        print(traceback_text)
 
-    def _on_reload_thread_finished(self):
-        self._reload_thread = None
-        self._reload_worker = None
-        self._reload_busy = False
+    def _on_mesh_jobs_idle(self):
         self._set_loading(False)
-
-        if self._reload_pending:
-            pending_force = self._reload_pending_force
-            self._reload_pending = False
-            self._reload_pending_force = False
-            self.reload_meshes(force_reload=pending_force)
 
     # ========================================================
     # McStas trace (components and rays)
@@ -1565,41 +1389,26 @@ class Viewer(QtWidgets.QMainWindow):
     def reload_trace(self):
         if self.input_file is None or not self.trace_enabled():
             return
-        if self._trace_busy:
-            self._trace_pending = True
+        if self.trace_jobs.busy:
+            self.trace_jobs.run_when_idle(self.reload_trace)
             return
         params = instrument_param_args(self.param_values)
 
-        self._trace_busy = True
-        self._trace_pending = False
         self._set_trace_status("Running mcrun --trace...")
 
-        thread = QtCore.QThread(self)
-        worker = TraceWorker(
-            self._trace_process_pool,
+        colors = self.colors
+        self.trace_jobs.start(
+            compute_trace_data,
             self.input_file,
             self.pygen_checkbox.isChecked(),
             params,
             self.ray_count_val.value() if self.rays_enabled() else 0,
             self.ray_seed_val.value() or None,
-            self.colors,
+            post=lambda data: (build_component_group(data[0], colors), data[1]),
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_trace_finished)
-        worker.failed.connect(self._on_trace_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_trace_thread_finished)
 
-        self._trace_thread = thread
-        self._trace_worker = worker
-        thread.start()
-
-    def _on_trace_finished(self, group, rays, elapsed):
+    def _on_trace_finished(self, result, elapsed):
+        group, rays = result
         if self.trace_group is not None:
             self.scene.remove(self.trace_group)
         self.trace_group = group
@@ -1613,22 +1422,15 @@ class Viewer(QtWidgets.QMainWindow):
         self.apply_clipping()
         self._set_trace_status(f"{status} ({elapsed:.1f} s)")
 
-    def _on_trace_failed(self, error_text):
+    def _on_trace_failed(self, traceback_text, summary):
+        print(traceback_text, end="", file=sys.stderr)
         print("McStas trace failed:")
-        print(error_text)
+        print(summary)
         self._set_trace_status(
             "mcrun FAILED. ENSURE THAT INSTRUMENT COMPILES IN ORDER TO "
             "VISUALIZE THE MCSTAS COMPONENTS",
             error=True,
         )
-
-    def _on_trace_thread_finished(self):
-        self._trace_thread = None
-        self._trace_worker = None
-        self._trace_busy = False
-        if self._trace_pending:
-            self._trace_pending = False
-            self.reload_trace()
 
     def _set_trace_status(self, text, error=False):
         if error:
@@ -1764,7 +1566,7 @@ class Viewer(QtWidgets.QMainWindow):
                 "Open an instrument first - counts are matched to it by component name.",
             )
             return
-        if self._counts_busy:
+        if self.counts_jobs.busy:
             QtWidgets.QMessageBox.information(
                 self, "Detector Counts", "Already loading a counts folder - please wait."
             )
@@ -1775,30 +1577,16 @@ class Viewer(QtWidgets.QMainWindow):
         if not folder:
             return
 
-        self._counts_busy = True
         self.load_counts_button.setEnabled(False)
         self.counts_info_label.setText(f"Loading counts from '{folder}'...")
 
-        thread = QtCore.QThread(self)
-        worker = CountsWorker(
-            self._counts_process_pool, folder, self.input_file, self.pygen_checkbox.isChecked()
+        self._loading_counts_folder = folder
+        self.counts_jobs.start(
+            compute_counts_data, folder, self.input_file, self.pygen_checkbox.isChecked()
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(lambda counts: self._on_counts_finished(folder, counts))
-        worker.failed.connect(lambda error: self._on_counts_failed(folder, error))
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_counts_thread_finished)
 
-        self._counts_thread = thread
-        self._counts_worker = worker
-        thread.start()
-
-    def _on_counts_finished(self, folder, counts):
+    def _on_counts_finished(self, counts, elapsed):
+        folder = self._loading_counts_folder
         self.counts = counts
         self.counts_run_folder = folder
         self.counts_visibility = {name: True for name in counts}
@@ -1811,7 +1599,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.rebuild_counts_panel()
         self.reset_counts_range()
 
-    def _on_counts_failed(self, folder, error_text):
+    def _on_counts_failed(self, traceback_text, error_text):
+        folder = self._loading_counts_folder
+        print(traceback_text, end="", file=sys.stderr)
         print("Loading detector counts failed:")
         print(error_text)
         self.counts_info_label.setText(f"Could not load counts from '{folder}': {error_text}")
@@ -1819,10 +1609,7 @@ class Viewer(QtWidgets.QMainWindow):
             self, "Detector Counts", f"Could not load counts from '{folder}':\n{error_text}"
         )
 
-    def _on_counts_thread_finished(self):
-        self._counts_thread = None
-        self._counts_worker = None
-        self._counts_busy = False
+    def _on_counts_jobs_idle(self):
         self.load_counts_button.setEnabled(True)
 
     def rebuild_counts_panel(self):
@@ -2061,9 +1848,8 @@ class Viewer(QtWidgets.QMainWindow):
     # ========================================================
 
     def closeEvent(self, event):
-        self._mesh_process_pool.shutdown(wait=False, cancel_futures=True)
-        self._trace_process_pool.shutdown(wait=False, cancel_futures=True)
-        self._counts_process_pool.shutdown(wait=False, cancel_futures=True)
+        for jobs in (self.mesh_jobs, self.trace_jobs, self.counts_jobs):
+            jobs.shutdown()
         super().closeEvent(event)
 
 
