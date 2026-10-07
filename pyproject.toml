@@ -33,6 +33,7 @@ py-modules = [
     "pipeline",
     "plot_union_cloud",
     "preprocess",
+    "qt_helpers",
     "scene_objects",
     "signed_distance_functions",
     "union_viewer",
