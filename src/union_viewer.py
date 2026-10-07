@@ -37,6 +37,21 @@ from scene_objects import (
     make_coordinate_axes,
 )
 from background import JobRunner
+from qt_helpers import (
+    add_labeled_row,
+    add_row,
+    ask_color,
+    clear_layout,
+    make_button,
+    make_checkbox,
+    make_double_spin,
+    make_elided_combo,
+    make_note_label,
+    make_swatch_button,
+    repopulate_combo,
+    set_option_enabled,
+    set_swatch_color,
+)
 from camera import fit_camera_to_scene, recentre_controller, update_camera_depth_range
 
 # The meshers offered in the dock, in display order.
@@ -57,6 +72,10 @@ MESHER_DESCRIPTIONS = {
         "complex boolean operations."
     ),
 }
+
+# The marching-cubes grid resolutions offered in the dock.
+RESOLUTIONS = (16, 32, 64, 128, 256, 512)
+DEFAULT_RESOLUTION = 64
 
 DEFLECTION_TOOLTIP = (
     "How closely the brep mesher's triangles must follow the exact curved "
@@ -343,118 +362,104 @@ class Viewer(QtWidgets.QMainWindow):
         }
         self.world_matrices = {}
 
-        # Docks are added in this order (Settings, Mesher options, Clipping,
-        # Visible geometries) so they stack top-to-bottom in the left panel.
+        # Docks are added in this order (Settings, Instrument Parameters,
+        # Mesher Options, Clipping, Neutron Rays, Detector Counts, Visible
+        # Geometries) so they stack top-to-bottom in the left panel.
 
         # ----------------------------------------------------
         # Settings dock
         # ----------------------------------------------------
 
-        settings_dock, settings_layout = self._add_dock("Settings", collapsed=False)
+        settings_layout = self._add_dock("Settings", collapsed=False)
 
-        self.open_file_button = QtWidgets.QPushButton("Open File...")
-        self.open_file_button.setToolTip("Open a McStas instrument (shortcut: Ctrl+O)")
-        self.open_file_button.clicked.connect(self.open_file)
-        settings_layout.addWidget(self.open_file_button)
-
-        self.material_group_checkbox = QtWidgets.QCheckBox("Group by material")
-        self.material_group_checkbox.setChecked(True)
-        self.material_group_checkbox.setToolTip(
+        self.open_file_button = make_button(
+            "Open File...", "Open a McStas instrument (shortcut: Ctrl+O)", self.open_file
+        )
+        self.material_group_checkbox = make_checkbox(
+            "Group by material",
+            True,
             "Combine components that share a material into a single "
-            "rendered object (trimesh concatenation, not a boolean fusion)."
+            "rendered object (trimesh concatenation, not a boolean fusion).",
         )
-        settings_layout.addWidget(self.material_group_checkbox)
-
-        self.vacuum_checkbox = QtWidgets.QCheckBox("Hide vacuum")
-        self.vacuum_checkbox.setChecked(True)
-        self.vacuum_checkbox.setToolTip(
+        self.vacuum_checkbox = make_checkbox(
+            "Hide vacuum",
+            True,
             "Hides volumes whose material is 'vacuum'/'Vacuum' or "
-            "'exit'/'Exit' (McStas treats 'exit' as vacuum too)."
+            "'exit'/'Exit' (McStas treats 'exit' as vacuum too).",
         )
-        settings_layout.addWidget(self.vacuum_checkbox)
-
-        self.pygen_checkbox = QtWidgets.QCheckBox("Force mcstas-pygen preprocessing")
-        self.pygen_checkbox.setChecked(False)
-        self.pygen_checkbox.setToolTip(
+        self.pygen_checkbox = make_checkbox(
+            "Force mcstas-pygen preprocessing",
+            False,
             "Translate a .instr input through the real McStas front-end "
             "(mcstas-pygen) instead of mcstasscript's lightweight .instr "
             "reader. mcstas-pygen already runs automatically whenever that "
             "lightweight reader raises an error - this instead forces it "
             "for every load, for instruments the lightweight reader "
             "mis-parses without raising an error. Requires mcstas-pygen "
-            "on PATH (ships with the McStas install)."
+            "on PATH (ships with the McStas install).",
         )
-        settings_layout.addWidget(self.pygen_checkbox)
-
-        self.components_checkbox = QtWidgets.QCheckBox("Show McStas components")
-        self.components_checkbox.setChecked(True)
-        self.components_checkbox.setToolTip(
+        self.components_checkbox = make_checkbox(
+            "Show McStas components",
+            True,
             "Draw every non-Union component the way McStas's own MCDISPLAY "
             "draws it (no priority cutting). Compiles and runs the "
             "instrument with mcrun --trace, so it needs a working McStas "
-            "install and compiler."
+            "install and compiler.",
         )
-        settings_layout.addWidget(self.components_checkbox)
-
-        self.arms_checkbox = QtWidgets.QCheckBox("Show Arms")
-        self.arms_checkbox.setChecked(False)
-        self.arms_checkbox.setToolTip("Arms only mark coordinate frames.")
-        settings_layout.addWidget(self.arms_checkbox)
-
-        self.rays_checkbox = QtWidgets.QCheckBox("Show neutron rays")
-        self.rays_checkbox.setChecked(False)
-        self.rays_checkbox.setToolTip(
+        self.arms_checkbox = make_checkbox(
+            "Show Arms", False, "Arms only mark coordinate frames."
+        )
+        self.rays_checkbox = make_checkbox(
+            "Show neutron rays",
+            False,
             "Trace neutrons through the instrument with mcrun --trace and "
-            "draw their paths. Options are in the Neutron Rays panel."
+            "draw their paths. Options are in the Neutron Rays panel.",
         )
-        settings_layout.addWidget(self.rays_checkbox)
-
-        self.trace_status_label = QtWidgets.QLabel("")
-        self.trace_status_label.setWordWrap(True)
-        settings_layout.addWidget(self.trace_status_label)
-
-        self.reset_view_button = QtWidgets.QPushButton("Reset view")
-        self.reset_view_button.setToolTip("Refit the camera (shortcut: R)")
-        self.reset_view_button.clicked.connect(self.reset_view)
-        settings_layout.addWidget(self.reset_view_button)
-        self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
-        self.reset_view_shortcut.activated.connect(self.reset_view)
-
-        self.fit_instrument_button = QtWidgets.QPushButton("Fit whole instrument")
-        self.fit_instrument_button.setToolTip(
-            "Fit the camera to every McStas component, not just the Union geometry."
+        self.trace_status_label = make_note_label()
+        self.reset_view_button = make_button(
+            "Reset view", "Refit the camera (shortcut: R)", self.reset_view
         )
-        self.fit_instrument_button.clicked.connect(self.fit_whole_instrument)
-        settings_layout.addWidget(self.fit_instrument_button)
-
-        self.export_stl_button = QtWidgets.QPushButton("Export STL...")
-        self.export_stl_button.setToolTip(
+        self.fit_instrument_button = make_button(
+            "Fit whole instrument",
+            "Fit the camera to every McStas component, not just the Union geometry.",
+            self.fit_whole_instrument,
+        )
+        self.export_stl_button = make_button(
+            "Export STL...",
             "Export the visible Union meshes and McStas components as a "
             "single .stl file, cut by the clipping plane if enabled. "
-            "McStas lines are exported as thin tubes."
+            "McStas lines are exported as thin tubes.",
+            self.export_stl,
         )
-        self.export_stl_button.clicked.connect(self.export_stl)
-        settings_layout.addWidget(self.export_stl_button)
-
-        settings_layout.addStretch()
-        settings_dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
-        )
+        for widget in (
+            self.open_file_button,
+            self.material_group_checkbox,
+            self.vacuum_checkbox,
+            self.pygen_checkbox,
+            self.components_checkbox,
+            self.arms_checkbox,
+            self.rays_checkbox,
+            self.trace_status_label,
+            self.reset_view_button,
+            self.fit_instrument_button,
+            self.export_stl_button,
+        ):
+            settings_layout.addWidget(widget)
+        self.reset_view_shortcut = QtGui.QShortcut(QtGui.QKeySequence("R"), self)
+        self.reset_view_shortcut.activated.connect(self.reset_view)
 
         # ----------------------------------------------------
         # Instrument parameters dock
         # ----------------------------------------------------
 
-        params_dock, params_layout = self._add_dock("Instrument Parameters")
+        params_layout = self._add_dock("Instrument Parameters", stretch=False)
         self.param_values = {}
         self.param_edits = {}
         self.param_names = None
 
         params_widget = QtWidgets.QWidget()
         self.params_form = QtWidgets.QFormLayout(params_widget)
-        self.params_empty_label = QtWidgets.QLabel("No instrument loaded.")
-        self.params_empty_label.setStyleSheet("color: gray;")
+        self.params_empty_label = make_note_label("No instrument loaded.")
         params_layout.addWidget(self.params_empty_label)
 
         # Scrollable, and capped at a fixed height rather than growing with
@@ -465,19 +470,13 @@ class Viewer(QtWidgets.QMainWindow):
         params_scroll.setWidget(params_widget)
         params_scroll.setMaximumHeight(220)
         params_layout.addWidget(params_scroll)
-        params_dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
-        )
 
         # ----------------------------------------------------
         # Mesher options dock
         # ----------------------------------------------------
 
-        mesher_dock, mesher_options_layout = self._add_dock("Mesher Options")
+        mesher_options_layout = self._add_dock("Mesher Options")
 
-        mesher_selector_layout = QtWidgets.QHBoxLayout()
-        mesher_selector_layout.addWidget(QtWidgets.QLabel("Mesher"))
         self.mesher_box = QtWidgets.QComboBox()
         for key in MESHER_KEYS:
             label = key
@@ -485,119 +484,67 @@ class Viewer(QtWidgets.QMainWindow):
                 label += " (full rebuild only)"
             self.mesher_box.addItem(label, key)
         self.mesher_box.setCurrentIndex(self.mesher_box.findData(self.mesher))
-        mesher_selector_layout.addWidget(self.mesher_box)
-        mesher_options_layout.addLayout(mesher_selector_layout)
+        add_labeled_row(mesher_options_layout, "Mesher", self.mesher_box)
 
-        self.mesher_description_label = QtWidgets.QLabel(
-            MESHER_DESCRIPTIONS.get(self.mesher, "")
+        self.mesher_description_label = make_note_label(
+            MESHER_DESCRIPTIONS.get(self.mesher, ""), italic=True
         )
-        self.mesher_description_label.setWordWrap(True)
-        self.mesher_description_label.setStyleSheet("color: gray; font-style: italic;")
         mesher_options_layout.addWidget(self.mesher_description_label)
 
-        resolution_layout = QtWidgets.QHBoxLayout()
-        self.resolution_label = QtWidgets.QLabel("Resolution")
         self.res_val = QtWidgets.QComboBox()
-        self.res_val.addItem("16", 16)
-        self.res_val.addItem("32", 32)
-        self.res_val.addItem("64", 64)
-        self.res_val.addItem("128", 128)
-        self.res_val.addItem("256", 256)
-        self.res_val.addItem("512", 512)
-        self.res_val.setCurrentIndex(2)
-        resolution_layout.addWidget(self.resolution_label)
-        resolution_layout.addWidget(self.res_val)
-        mesher_options_layout.addLayout(resolution_layout)
-
-        deflection_layout = QtWidgets.QHBoxLayout()
-        self.deflection_label = QtWidgets.QLabel("Surface deflection")
-        self.deflection_val = QtWidgets.QDoubleSpinBox()
-        self.deflection_val.setDecimals(4)
-        self.deflection_val.setRange(0.0001, 10.0)
-        self.deflection_val.setSingleStep(0.001)
-        self.deflection_val.setValue(0.01)
-        self.deflection_val.setToolTip(DEFLECTION_TOOLTIP)
-        self.deflection_label.setToolTip(DEFLECTION_TOOLTIP)
-        deflection_layout.addWidget(self.deflection_label)
-        deflection_layout.addWidget(self.deflection_val)
-        mesher_options_layout.addLayout(deflection_layout)
-
-        mesher_options_layout.addStretch()
-        mesher_dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
+        for res in RESOLUTIONS:
+            self.res_val.addItem(str(res), res)
+        self.res_val.setCurrentIndex(self.res_val.findData(DEFAULT_RESOLUTION))
+        self.resolution_label = add_labeled_row(
+            mesher_options_layout, "Resolution", self.res_val
         )
+
+        self.deflection_val = make_double_spin(
+            0.0001, 10.0, 0.01, decimals=4, step=0.001, tooltip=DEFLECTION_TOOLTIP
+        )
+        self.deflection_label = add_labeled_row(
+            mesher_options_layout, "Surface deflection", self.deflection_val
+        )
+        self.deflection_label.setToolTip(DEFLECTION_TOOLTIP)
 
         # ----------------------------------------------------
         # Clipping dock
         # ----------------------------------------------------
 
-        clipping_dock, clipping_layout = self._add_dock("Clipping")
+        clipping_layout = self._add_dock("Clipping")
 
-        self.clip_checkbox = QtWidgets.QCheckBox("Enable clipping")
+        self.clip_checkbox = make_checkbox("Enable clipping")
         clipping_layout.addWidget(self.clip_checkbox)
 
-        frame_layout = QtWidgets.QHBoxLayout()
-        frame_layout.addWidget(QtWidgets.QLabel("Coordinate system"))
-        self.clip_frame_combo = QtWidgets.QComboBox()
-        # A long component name would otherwise widen the combo box (and
-        # with it the whole left-hand column) to fit it - cap the box at a
-        # fixed width instead and let Qt elide text that doesn't fit; the
-        # full name is still available as each item's tooltip.
-        self.clip_frame_combo.setSizeAdjustPolicy(
-            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.clip_frame_combo.setMinimumContentsLength(12)
+        self.clip_frame_combo = make_elided_combo()
         self.clip_frame_combo.addItem("World", None)
         self.clip_frame_combo.setToolTip(
             "Axis and position are taken in this component's own coordinate "
             "system (its AT/ROTATED frame), e.g. the sample's Arm."
         )
-        frame_layout.addWidget(self.clip_frame_combo)
-        clipping_layout.addLayout(frame_layout)
+        add_labeled_row(clipping_layout, "Coordinate system", self.clip_frame_combo)
 
-        axis_layout = QtWidgets.QHBoxLayout()
-        axis_layout.addWidget(QtWidgets.QLabel("Axis"))
         self.axis_combo = QtWidgets.QComboBox()
         self.axis_combo.addItems(["X", "Y", "Z"])
-        axis_layout.addWidget(self.axis_combo)
-        clipping_layout.addLayout(axis_layout)
+        add_labeled_row(clipping_layout, "Axis", self.axis_combo)
 
-        mode_layout = QtWidgets.QHBoxLayout()
-        mode_layout.addWidget(QtWidgets.QLabel("Mode"))
         self.mode_combo = QtWidgets.QComboBox()
         self.mode_combo.addItems(["Above", "Below"])
-        mode_layout.addWidget(self.mode_combo)
-        clipping_layout.addLayout(mode_layout)
+        add_labeled_row(clipping_layout, "Mode", self.mode_combo)
 
-        position_layout = QtWidgets.QHBoxLayout()
-        position_layout.addWidget(QtWidgets.QLabel("Position"))
-        self.slice_val = QtWidgets.QDoubleSpinBox()
-        self.slice_val.setDecimals(5)
-        self.slice_val.setRange(-1e6, 1e6)
-        self.slice_val.setSingleStep(0.01)
-        self.slice_val.setValue(0.0)
-        position_layout.addWidget(self.slice_val)
-        clipping_layout.addLayout(position_layout)
-
-        clipping_layout.addStretch()
-        clipping_dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
-        )
+        self.slice_val = make_double_spin(-1e6, 1e6, 0.0, decimals=5, step=0.01)
+        add_labeled_row(clipping_layout, "Position", self.slice_val)
 
         # ----------------------------------------------------
         # Neutron rays dock
         # ----------------------------------------------------
 
-        rays_dock, rays_layout = self._add_dock("Neutron Rays")
+        rays_layout = self._add_dock("Neutron Rays")
         self.rays_options = QtWidgets.QWidget()
         options_layout = QtWidgets.QVBoxLayout(self.rays_options)
         options_layout.setContentsMargins(0, 0, 0, 0)
         rays_layout.addWidget(self.rays_options)
 
-        count_layout = QtWidgets.QHBoxLayout()
-        count_layout.addWidget(QtWidgets.QLabel("Number of rays"))
         self.ray_count_val = QtWidgets.QSpinBox()
         self.ray_count_val.setRange(1, 100_000_000)
         self.ray_count_val.setValue(50)
@@ -605,31 +552,22 @@ class Viewer(QtWidgets.QMainWindow):
             "Trace mode is single-threaded and verbose - keep this small; "
             "McStas itself has no lower limit worth mentioning."
         )
-        count_layout.addWidget(self.ray_count_val)
-        options_layout.addLayout(count_layout)
+        add_labeled_row(options_layout, "Number of rays", self.ray_count_val)
 
-        seed_layout = QtWidgets.QHBoxLayout()
-        seed_layout.addWidget(QtWidgets.QLabel("Seed"))
         self.ray_seed_val = QtWidgets.QSpinBox()
         self.ray_seed_val.setRange(0, 2**31 - 1)
         self.ray_seed_val.setSpecialValueText("random")
         self.ray_seed_val.setToolTip("0 picks a new random seed on every run.")
-        seed_layout.addWidget(self.ray_seed_val)
-        options_layout.addLayout(seed_layout)
+        add_labeled_row(options_layout, "Seed", self.ray_seed_val)
 
-        rerun_layout = QtWidgets.QHBoxLayout()
-        self.rerun_rays_button = QtWidgets.QPushButton("Re-run")
-        self.rerun_rays_button.setToolTip("Trace a new set of rays.")
-        self.rerun_rays_button.clicked.connect(self.rerun_rays)
-        rerun_layout.addWidget(self.rerun_rays_button)
-        options_layout.addLayout(rerun_layout)
+        self.rerun_rays_button = make_button(
+            "Re-run", "Trace a new set of rays.", self.rerun_rays
+        )
+        add_row(options_layout, self.rerun_rays_button)
 
-        color_layout = QtWidgets.QHBoxLayout()
-        color_layout.addWidget(QtWidgets.QLabel("Colour by"))
         self.ray_color_combo = QtWidgets.QComboBox()
         self.ray_color_combo.addItems(list(RAY_COLOR_MODES))
-        color_layout.addWidget(self.ray_color_combo)
-        options_layout.addLayout(color_layout)
+        add_labeled_row(options_layout, "Colour by", self.ray_color_combo)
 
         self.ray_colorbar = ColorBarWidget()
         self.ray_colorbar.hide()
@@ -638,15 +576,7 @@ class Viewer(QtWidgets.QMainWindow):
         # Label above the combo, not beside it, so a long selected/eliding
         # entry doesn't push the row (and the panel) wider.
         options_layout.addWidget(QtWidgets.QLabel("Only rays reaching"))
-        self.ray_reaching_combo = QtWidgets.QComboBox()
-        # A long component name would otherwise widen the combo box (and
-        # with it the whole left-hand column) to fit it - cap the box at a
-        # fixed width instead and let Qt elide text that doesn't fit; the
-        # full name is still available as each item's tooltip.
-        self.ray_reaching_combo.setSizeAdjustPolicy(
-            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.ray_reaching_combo.setMinimumContentsLength(12)
+        self.ray_reaching_combo = make_elided_combo()
         self.ray_reaching_combo.addItem("any component", None)
         options_layout.addWidget(self.ray_reaching_combo)
 
@@ -655,62 +585,52 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_color_buttons = {}
         self.ray_size_spins = {}
 
-        rays_line_layout = QtWidgets.QHBoxLayout()
-        self.rays_line_checkbox = QtWidgets.QCheckBox("Show rays")
-        self.rays_line_checkbox.setChecked(True)
-        self.rays_line_checkbox.setToolTip(
+        self.rays_line_checkbox = make_checkbox(
+            "Show rays",
+            True,
             "The ordinary path each ray follows. The colour applies when "
-            "colouring by Uniform."
+            "colouring by Uniform.",
         )
-        rays_line_layout.addWidget(self.rays_line_checkbox)
-        rays_line_layout.addWidget(self._ray_color_button("ray"))
-        rays_line_layout.addStretch()
-        options_layout.addLayout(rays_line_layout)
+        add_row(options_layout, self.rays_line_checkbox, self._ray_color_button("ray"), stretch=True)
 
-        teleport_line_layout = QtWidgets.QHBoxLayout()
-        self.teleport_line_checkbox = QtWidgets.QCheckBox("Show teleports")
-        self.teleport_line_checkbox.setChecked(True)
-        self.teleport_line_checkbox.setToolTip(
+        self.teleport_line_checkbox = make_checkbox(
+            "Show teleports",
+            True,
             "The jump a restore_neutron monitor (e.g. PSD_monitor) causes: "
-            "it detects a ray, then restores its pre-detection state."
+            "it detects a ray, then restores its pre-detection state.",
         )
-        teleport_line_layout.addWidget(self.teleport_line_checkbox)
-        teleport_line_layout.addWidget(self._ray_color_button("teleport"))
-        teleport_line_layout.addStretch()
-        options_layout.addLayout(teleport_line_layout)
+        add_row(
+            options_layout,
+            self.teleport_line_checkbox,
+            self._ray_color_button("teleport"),
+            stretch=True,
+        )
 
-        scatter_layout = QtWidgets.QHBoxLayout()
-        self.scatter_points_checkbox = QtWidgets.QCheckBox("Mark scatterings")
-        self.scatter_points_checkbox.setChecked(True)
-        self.scatter_points_checkbox.setToolTip(
+        self.scatter_points_checkbox = make_checkbox(
+            "Mark scatterings",
+            True,
             "Points where a ray changed direction. Union volume boundary "
-            "crossings are not marked."
+            "crossings are not marked.",
         )
-        scatter_layout.addWidget(self.scatter_points_checkbox)
-        scatter_layout.addWidget(self._ray_color_button("scatter"))
-        scatter_layout.addWidget(self._marker_size_spin("scatter"))
-        scatter_layout.addStretch()
-        options_layout.addLayout(scatter_layout)
+        add_row(
+            options_layout,
+            self.scatter_points_checkbox,
+            self._ray_color_button("scatter"),
+            self._marker_size_spin("scatter"),
+            stretch=True,
+        )
 
-        absorb_layout = QtWidgets.QHBoxLayout()
-        self.absorb_points_checkbox = QtWidgets.QCheckBox("Mark absorptions")
-        self.absorb_points_checkbox.setChecked(True)
-        absorb_layout.addWidget(self.absorb_points_checkbox)
-        absorb_layout.addWidget(self._ray_color_button("absorb"))
-        absorb_layout.addWidget(self._marker_size_spin("absorb"))
-        absorb_layout.addStretch()
-        options_layout.addLayout(absorb_layout)
+        self.absorb_points_checkbox = make_checkbox("Mark absorptions", True)
+        add_row(
+            options_layout,
+            self.absorb_points_checkbox,
+            self._ray_color_button("absorb"),
+            self._marker_size_spin("absorb"),
+            stretch=True,
+        )
 
-        self.ray_info_label = QtWidgets.QLabel("")
-        self.ray_info_label.setWordWrap(True)
-        self.ray_info_label.setStyleSheet("color: gray;")
+        self.ray_info_label = make_note_label()
         options_layout.addWidget(self.ray_info_label)
-
-        rays_layout.addStretch()
-        rays_dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
-        )
 
         self.ray_rerun_timer = QtCore.QTimer(self)
         self.ray_rerun_timer.setSingleShot(True)
@@ -721,45 +641,45 @@ class Viewer(QtWidgets.QMainWindow):
         # Detector counts dock
         # ----------------------------------------------------
 
-        counts_dock, counts_layout = self._add_dock("Detector Counts")
+        counts_layout = self._add_dock("Detector Counts")
         self.counts_options = QtWidgets.QWidget()
         counts_options_layout = QtWidgets.QVBoxLayout(self.counts_options)
         counts_options_layout.setContentsMargins(0, 0, 0, 0)
         counts_layout.addWidget(self.counts_options)
 
-        self.load_counts_button = QtWidgets.QPushButton("Load counts folder...")
-        self.load_counts_button.setToolTip(
+        self.load_counts_button = make_button(
+            "Load counts folder...",
             "A McStas run's output folder (containing mccode.sim). Every "
             "detector in it that can be placed in 3D - a Union logger/"
             "abs_logger, an ordinary monitor (PSD_monitor, Monitor_nD, ...), "
             "or an event-list logger with x/y/z columns - is drawn at its "
             "own position: a colour-mapped plane for 2D data, a coloured "
-            "line for 1D."
+            "line for 1D.",
+            self.load_counts_folder,
         )
-        self.load_counts_button.clicked.connect(self.load_counts_folder)
         counts_options_layout.addWidget(self.load_counts_button)
 
-        self.counts_checkbox = QtWidgets.QCheckBox("Show detector counts")
-        self.counts_checkbox.setChecked(True)
+        self.counts_checkbox = make_checkbox("Show detector counts", True)
         self.counts_checkbox.stateChanged.connect(self.apply_counts_visibility)
         counts_options_layout.addWidget(self.counts_checkbox)
 
-        range_layout = QtWidgets.QHBoxLayout()
-        range_layout.addWidget(QtWidgets.QLabel("Colour range"))
-        self.counts_min_val = QtWidgets.QDoubleSpinBox()
-        self.counts_max_val = QtWidgets.QDoubleSpinBox()
-        for spin in (self.counts_min_val, self.counts_max_val):
-            spin.setRange(-1e12, 1e12)
-            spin.setDecimals(4)
-            spin.setToolTip("Editable - overrides the automatic min/max for every visible logger's plane.")
-            range_layout.addWidget(spin)
-        counts_options_layout.addLayout(range_layout)
+        range_tooltip = "Editable - overrides the automatic min/max for every visible logger's plane."
+        self.counts_min_val = make_double_spin(-1e12, 1e12, 0.0, decimals=4, tooltip=range_tooltip)
+        self.counts_max_val = make_double_spin(-1e12, 1e12, 0.0, decimals=4, tooltip=range_tooltip)
+        add_row(
+            counts_options_layout,
+            QtWidgets.QLabel("Colour range"),
+            self.counts_min_val,
+            self.counts_max_val,
+        )
         self.counts_min_val.valueChanged.connect(self.on_counts_range_changed)
         self.counts_max_val.valueChanged.connect(self.on_counts_range_changed)
 
-        self.counts_auto_range_button = QtWidgets.QPushButton("Auto range")
-        self.counts_auto_range_button.setToolTip("Reset the colour range to the min/max of the currently visible loggers.")
-        self.counts_auto_range_button.clicked.connect(self.reset_counts_range)
+        self.counts_auto_range_button = make_button(
+            "Auto range",
+            "Reset the colour range to the min/max of the currently visible loggers.",
+            self.reset_counts_range,
+        )
         counts_options_layout.addWidget(self.counts_auto_range_button)
 
         self.counts_colorbar = ColorBarWidget()
@@ -769,16 +689,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.counts_panel_layout = QtWidgets.QVBoxLayout()
         counts_options_layout.addLayout(self.counts_panel_layout)
 
-        self.counts_info_label = QtWidgets.QLabel("No counts loaded.")
-        self.counts_info_label.setWordWrap(True)
-        self.counts_info_label.setStyleSheet("color: gray;")
+        self.counts_info_label = make_note_label("No counts loaded.")
         counts_options_layout.addWidget(self.counts_info_label)
-
-        counts_layout.addStretch()
-        counts_dock.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
-        )
 
         # ----------------------------------------------------
         # Geometry visibility dock
@@ -798,18 +710,13 @@ class Viewer(QtWidgets.QMainWindow):
         self.geometry_filter.textChanged.connect(self.on_geometry_filter_changed)
         geometry_dock_layout.addWidget(self.geometry_filter)
 
-        show_hide_layout = QtWidgets.QHBoxLayout()
-        self.show_all_button = QtWidgets.QPushButton("Show all")
-        self.hide_all_button = QtWidgets.QPushButton("Hide all")
-        self.show_all_button.clicked.connect(
-            lambda: self.set_all_geometry_visibility(True)
+        self.show_all_button = make_button(
+            "Show all", on_click=lambda: self.set_all_geometry_visibility(True)
         )
-        self.hide_all_button.clicked.connect(
-            lambda: self.set_all_geometry_visibility(False)
+        self.hide_all_button = make_button(
+            "Hide all", on_click=lambda: self.set_all_geometry_visibility(False)
         )
-        show_hide_layout.addWidget(self.show_all_button)
-        show_hide_layout.addWidget(self.hide_all_button)
-        geometry_dock_layout.addLayout(show_hide_layout)
+        add_row(geometry_dock_layout, self.show_all_button, self.hide_all_button)
 
         self.component_checkboxes = {}
         self.component_color_buttons = {}
@@ -879,23 +786,33 @@ class Viewer(QtWidgets.QMainWindow):
         self.update_mesher_capability_ui()
         self.rays_options.setEnabled(self.rays_checkbox.isChecked())
 
-    def _add_dock(self, title, collapsed=True):
+    def _add_dock(self, title, collapsed=True, stretch=True):
         """Create a collapsible, left-docked QDockWidget titled `title`
-        (collapsed at first unless collapsed=False) and return
-        (dock, layout) for the caller to populate."""
+        (collapsed at first unless collapsed=False) that only takes the
+        height its contents need, and return the layout for the caller to
+        populate. With stretch=True, extra space goes below the contents."""
         dock = QtWidgets.QDockWidget(title, self)
         dock.setAllowedAreas(
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
             | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
         )
         widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
+        outer = QtWidgets.QVBoxLayout(widget)
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(layout)
+        if stretch:
+            outer.addStretch()
         dock.setWidget(widget)
         dock.setTitleBarWidget(
             CollapsibleTitleBar(dock, self.settings, self.rebalance_docks, collapsed)
         )
+        dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
-        return dock, layout
+        return layout
 
     def rebalance_docks(self):
         """Hand the height collapsed docks free up to the expanded ones:
@@ -955,38 +872,21 @@ class Viewer(QtWidgets.QMainWindow):
         self.geometry_visibility[name] = checked
         self.apply_geometry_visibility()
 
-    def _clear_geometry_layout_item(self, item):
-        """Delete whatever a takeAt() handed back: a widget, or a nested
-        row layout of [checkbox, colour button]."""
-        if item.widget():
-            item.widget().deleteLater()
-        elif item.layout():
-            row = item.layout()
-            while row.count():
-                self._clear_geometry_layout_item(row.takeAt(0))
-
     def _add_panel_row(self, layout, name, visible, on_toggled, on_color, color):
         row = QtWidgets.QHBoxLayout()
 
-        cb = QtWidgets.QCheckBox(wrap_label(name))
-        cb.setToolTip(name)
-        cb.setChecked(visible)
+        cb = make_checkbox(wrap_label(name), visible, name)
         cb.toggled.connect(on_toggled)
         row.addWidget(cb, 1)
 
-        color_button = QtWidgets.QPushButton()
-        color_button.setFixedSize(20, 20)
-        color_button.setToolTip(f"Change colour for '{name}'")
-        color_button.clicked.connect(lambda checked=False: on_color())
-        self._set_swatch_color(color_button, color)
+        color_button = make_swatch_button(20, color, f"Change colour for '{name}'", on_color)
         row.addWidget(color_button)
 
         layout.addLayout(row)
         return cb, color_button
 
     def rebuild_geometry_panel(self):
-        while self.geometry_layout.count():
-            self._clear_geometry_layout_item(self.geometry_layout.takeAt(0))
+        clear_layout(self.geometry_layout)
 
         self.geometry_checkboxes.clear()
         self.geometry_color_buttons.clear()
@@ -1011,8 +911,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.on_geometry_filter_changed(self.geometry_filter.text())
 
     def rebuild_component_panel(self):
-        while self.component_layout.count():
-            self._clear_geometry_layout_item(self.component_layout.takeAt(0))
+        clear_layout(self.component_layout)
 
         self.component_checkboxes.clear()
         self.component_color_buttons.clear()
@@ -1077,33 +976,35 @@ class Viewer(QtWidgets.QMainWindow):
                 if getattr(obj, "material", None) is not None:
                     obj.material.clipping_planes = planes
 
+    def _pick_panel_color(self, name, color_key, objects, button):
+        """Ask for a new colour for the panel row `name`, then store it in
+        self.colors[color_key] and apply it to objects' materials and the
+        row's swatch button."""
+        hex_color = ask_color(self, self.colors.get(color_key, "#b6b6b6"), f"Colour for '{name}'")
+        if hex_color is None:
+            return
+        self.colors[color_key] = hex_color
+        for obj in objects:
+            obj.material.color = hex_color
+        if button is not None:
+            set_swatch_color(button, hex_color)
+
     def pick_component_color(self, name):
         if self.trace_group is None or name not in self.trace_group.component_objects:
             return
-        key = component_color_key(name)
-        current = QtGui.QColor(self.colors.get(key, "#b6b6b6"))
-        color = QtWidgets.QColorDialog.getColor(current, self, f"Colour for '{name}'")
-        if not color.isValid():
-            return
-        hex_color = color.name()
-        self.colors[key] = hex_color
-        for obj in self.trace_group.component_objects[name].children:
-            obj.material.color = hex_color
-        button = self.component_color_buttons.get(name)
-        if button is not None:
-            self._set_swatch_color(button, hex_color)
-
-    def _set_swatch_color(self, button, hex_color):
-        button.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #888;")
+        self._pick_panel_color(
+            name,
+            component_color_key(name),
+            self.trace_group.component_objects[name].children,
+            self.component_color_buttons.get(name),
+        )
 
     def _ray_color_button(self, key):
         """A small colour button that picks the colour of one object in the
         Neutron Rays panel ("ray", "teleport", "scatter" or "absorb")."""
-        button = QtWidgets.QPushButton()
-        button.setFixedSize(14, 14)
-        button.setToolTip("Click to change the colour.")
-        self._set_swatch_color(button, self.ray_colors[key])
-        button.clicked.connect(lambda: self.pick_ray_color(key))
+        button = make_swatch_button(
+            14, self.ray_colors[key], "Click to change the colour.", lambda: self.pick_ray_color(key)
+        )
         self.ray_color_buttons[key] = button
         return button
 
@@ -1122,16 +1023,12 @@ class Viewer(QtWidgets.QMainWindow):
     def pick_color(self, key):
         if self.current_group is None or key not in self.current_group.geometry_meshes:
             return
-        current = QtGui.QColor(self.colors.get(key, "#b6b6b6"))
-        color = QtWidgets.QColorDialog.getColor(current, self, f"Colour for '{key}'")
-        if not color.isValid():
-            return
-        hex_color = color.name()
-        self.colors[key] = hex_color
-        self.current_group.geometry_meshes[key].material.color = hex_color
-        button = self.geometry_color_buttons.get(key)
-        if button is not None:
-            self._set_swatch_color(button, hex_color)
+        self._pick_panel_color(
+            key,
+            key,
+            [self.current_group.geometry_meshes[key]],
+            self.geometry_color_buttons.get(key),
+        )
 
     # ========================================================
     # Instrument parameters and clip frame
@@ -1166,20 +1063,10 @@ class Viewer(QtWidgets.QMainWindow):
 
     def rebuild_clip_frame_combo(self):
         names = list(self.world_matrices)
-        current = self.clip_frame_combo.currentData()
-        if names == [self.clip_frame_combo.itemData(i) for i in range(1, self.clip_frame_combo.count())]:
+        combo = self.clip_frame_combo
+        if names == [combo.itemData(i) for i in range(1, combo.count())]:
             return
-        self.clip_frame_combo.blockSignals(True)
-        self.clip_frame_combo.clear()
-        self.clip_frame_combo.addItem("World", None)
-        for name in names:
-            self.clip_frame_combo.addItem(name, name)
-            self.clip_frame_combo.setItemData(
-                self.clip_frame_combo.count() - 1, name, QtCore.Qt.ItemDataRole.ToolTipRole
-            )
-        self.clip_frame_combo.setCurrentIndex(max(self.clip_frame_combo.findData(current), 0))
-        self.clip_frame_combo.blockSignals(False)
-        if self.clip_frame_combo.currentData() != current:
+        if repopulate_combo(combo, "World", names):
             self.on_clip_changed()
 
     def resolved_clip(self):
@@ -1466,18 +1353,11 @@ class Viewer(QtWidgets.QMainWindow):
 
     def set_trace_rays(self, rays):
         self.trace_rays = rays
-        current = self.ray_reaching_combo.currentData()
-        self.ray_reaching_combo.blockSignals(True)
-        self.ray_reaching_combo.clear()
-        self.ray_reaching_combo.addItem("any component", None)
-        for name in [] if rays is None else rays.component_names:
-            self.ray_reaching_combo.addItem(name, name)
-            self.ray_reaching_combo.setItemData(
-                self.ray_reaching_combo.count() - 1, name, QtCore.Qt.ItemDataRole.ToolTipRole
-            )
-        index = self.ray_reaching_combo.findData(current)
-        self.ray_reaching_combo.setCurrentIndex(max(index, 0))
-        self.ray_reaching_combo.blockSignals(False)
+        repopulate_combo(
+            self.ray_reaching_combo,
+            "any component",
+            [] if rays is None else rays.component_names,
+        )
         self.rebuild_ray_group()
 
     def rebuild_ray_group(self):
@@ -1515,13 +1395,11 @@ class Viewer(QtWidgets.QMainWindow):
         self.rebalance_docks()
 
     def pick_ray_color(self, key):
-        color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(self.ray_colors[key]), self, "Colour"
-        )
-        if not color.isValid():
+        hex_color = ask_color(self, self.ray_colors[key], "Colour")
+        if hex_color is None:
             return
-        self.ray_colors[key] = color.name()
-        self._set_swatch_color(self.ray_color_buttons[key], color.name())
+        self.ray_colors[key] = hex_color
+        set_swatch_color(self.ray_color_buttons[key], hex_color)
         group = self.ray_group
         if group is None:
             return
@@ -1534,7 +1412,7 @@ class Viewer(QtWidgets.QMainWindow):
             if self.ray_color_combo.currentText() == "Uniform":
                 self.rebuild_ray_group()
         elif obj is not None:
-            obj.material.color = color.name()
+            obj.material.color = hex_color
 
     def set_ray_marker_size(self, key, size):
         self.ray_marker_sizes[key] = size
@@ -1613,20 +1491,19 @@ class Viewer(QtWidgets.QMainWindow):
         self.load_counts_button.setEnabled(True)
 
     def rebuild_counts_panel(self):
-        while self.counts_panel_layout.count():
-            self._clear_geometry_layout_item(self.counts_panel_layout.takeAt(0))
+        clear_layout(self.counts_panel_layout)
         self.counts_checkboxes.clear()
 
         for name, lc in self.counts.items():
-            row = QtWidgets.QHBoxLayout()
-            cb = QtWidgets.QCheckBox(wrap_label(f"{name} ({lc.kind})"))
             axes = lc.axis1 if lc.axis2 is None else f"{lc.axis1}, {lc.axis2}"
             bins = "x".join(str(n) for n in lc.grid.shape)
-            cb.setToolTip(f"{name}: axes ({axes}), {bins} bins, total {lc.total:.4g}")
-            cb.setChecked(self.counts_visibility.get(name, True))
+            cb = make_checkbox(
+                wrap_label(f"{name} ({lc.kind})"),
+                self.counts_visibility.get(name, True),
+                f"{name}: axes ({axes}), {bins} bins, total {lc.total:.4g}",
+            )
             cb.toggled.connect(lambda checked, n=name: self.on_counts_visibility_changed(n, checked))
-            row.addWidget(cb)
-            self.counts_panel_layout.addLayout(row)
+            add_row(self.counts_panel_layout, cb)
             self.counts_checkboxes[name] = cb
 
     def on_counts_visibility_changed(self, name, checked):
@@ -1805,20 +1682,17 @@ class Viewer(QtWidgets.QMainWindow):
 
     def update_mesher_capability_ui(self):
         caps = MESHER_CAPABILITIES[self.mesher]
-
-        res_used = caps["resolution"]
-        self.res_val.setEnabled(res_used)
-        self.resolution_label.setEnabled(res_used)
-        tip = "" if res_used else f"Not used by the '{self.mesher}' mesher."
-        self.res_val.setToolTip(tip)
-        self.resolution_label.setToolTip(tip)
-
-        deflection_used = caps["deflection"]
-        self.deflection_val.setEnabled(deflection_used)
-        self.deflection_label.setEnabled(deflection_used)
-        tip = DEFLECTION_TOOLTIP if deflection_used else f"Not used by the '{self.mesher}' mesher."
-        self.deflection_val.setToolTip(tip)
-        self.deflection_label.setToolTip(tip)
+        unused_tip = f"Not used by the '{self.mesher}' mesher."
+        set_option_enabled(
+            (self.res_val, self.resolution_label),
+            caps["resolution"],
+            "" if caps["resolution"] else unused_tip,
+        )
+        set_option_enabled(
+            (self.deflection_val, self.deflection_label),
+            caps["deflection"],
+            DEFLECTION_TOOLTIP if caps["deflection"] else unused_tip,
+        )
 
     # ========================================================
     # Reset view

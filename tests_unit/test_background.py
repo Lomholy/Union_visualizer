@@ -1,21 +1,24 @@
 """Tests for background.JobRunner: a job's result or error reaches the
 callbacks on the calling thread, followed by on_idle and any callback
-queued with run_when_idle. Needs a QCoreApplication event loop but no
-display."""
+queued with run_when_idle. Needs a Qt event loop but no display: a
+QApplication on the offscreen platform, so widget tests in the same run
+can share it."""
 
 import math
+import os
 import sys
 import threading
 import time
 import unittest
 from pathlib import Path
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from qtpy import QtCore  # noqa: E402
+from qtpy import QtWidgets  # noqa: E402
 
 from background import JobRunner  # noqa: E402
 
-app = QtCore.QCoreApplication.instance() or QtCore.QCoreApplication([])
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
 def wait_until(predicate, timeout=60):
