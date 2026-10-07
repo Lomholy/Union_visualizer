@@ -4,6 +4,7 @@ floor grid sizing."""
 
 import numpy as np
 import pygfx as gfx
+import trimesh
 from gui_helpers import (
     assign_default_color,
     component_color_key,
@@ -22,10 +23,18 @@ from mcstas_trace import SCATTER, ABSORB, TELEPORT
 import logger_output
 
 
+# How far, in metres, each Union mesh vertex is drawn outward along its
+# normal. A lower-priority volume keeps the surfaces of the components cut
+# out of it as cavity walls, coinciding with those surfaces but facing the
+# other way; drawing both moved outward separates them, with the surface
+# facing the camera in front, so they don't z-fight.
+RENDER_OFFSET = 1e-4
+
+
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
-    """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects.
-    Cheap (no geometry kernel calls) - safe to run on the GUI thread or a
-    plain QThread."""
+    """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects,
+    drawn RENDER_OFFSET outward. Cheap (no geometry kernel calls) - safe to
+    run on the GUI thread or a plain QThread."""
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
@@ -35,8 +44,13 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     for key, mesh in render_meshes.items():
         assign_default_color(colors, key)
 
+        offset = trimesh.Trimesh(
+            vertices=mesh.vertices + mesh.vertex_normals * RENDER_OFFSET,
+            faces=mesh.faces,
+            process=False,
+        )
         gfx_mesh = gfx.Mesh(
-            gfx.geometry_from_trimesh(mesh),
+            gfx.geometry_from_trimesh(offset),
             gfx.MeshStandardMaterial(
                 color=colors[key],
                 metalness=0,

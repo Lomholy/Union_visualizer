@@ -180,5 +180,31 @@ class FitCameraToSceneTest(unittest.TestCase):
         self.assertGreater(camera.depth_range[0], 0)
 
 
+class BuildGfxGroupOffsetTest(unittest.TestCase):
+    def test_vertices_are_drawn_outward_by_the_render_offset(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        drawn = group.geometry_meshes["Al"].geometry.positions.data
+        np.testing.assert_allclose(
+            drawn, mesh.vertices + mesh.vertex_normals * scene_objects.RENDER_OFFSET, atol=1e-7
+        )
+
+    def test_coincident_opposite_faces_are_drawn_apart(self):
+        # A cavity wall and the surface it was cut from: same triangle,
+        # opposite winding. Drawn, they must no longer coincide.
+        import trimesh
+
+        vertices = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        surface = trimesh.Trimesh(vertices, [[0, 1, 2]], process=False)
+        cavity = trimesh.Trimesh(vertices, [[0, 2, 1]], process=False)
+        group = scene_objects.build_gfx_group(
+            {"Al": surface, "Air": cavity}, {"Al": False, "Air": False}, {}
+        )
+        z = {k: group.geometry_meshes[k].geometry.positions.data[:, 2] for k in ("Al", "Air")}
+        np.testing.assert_allclose(z["Al"] - z["Air"], 2 * scene_objects.RENDER_OFFSET, atol=1e-7)
+
+
 if __name__ == "__main__":
     unittest.main()
