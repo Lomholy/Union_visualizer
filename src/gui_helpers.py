@@ -56,39 +56,6 @@ def group_meshes_by_material(union_geometries, meshes):
     return grouped_meshes
 
 
-# Face attribute of a render mesh naming, per triangle, the render key (a
-# component name, or a material when grouping by material) whose own
-# surface that cavity-wall triangle lies on; "" for triangles always drawn
-# with their mesh.
-CARVER_KEY = "carver_key"
-
-
-def render_keys_of(union_geometries, meshes, group_by_material):
-    """{component name: render key} for every component with a mesh: its
-    material if group_by_material, else its own name."""
-    if not group_by_material:
-        return {name: name for name in union_geometries if meshes.get(name) is not None}
-    return {
-        name: material
-        for material, names in group_components_by_material(union_geometries).items()
-        for name in names
-        if meshes.get(name) is not None
-    }
-
-
-def carver_keys(carved_by, render_key_of):
-    """Map per-triangle carver component names (brep.CARVED_BY, "" for a
-    component's own surface) to render keys. A carver without a render
-    key of its own, such as a mask, maps to "", since nothing else is
-    drawn on that cavity wall."""
-    carved_by = np.asarray(carved_by, dtype=str)
-    keys = np.full(len(carved_by), "", dtype=object)
-    for name in np.unique(carved_by):
-        if name:
-            keys[carved_by == name] = render_key_of.get(name, "")
-    return keys.astype(str)
-
-
 # Default colour cycle. The first 11 are the requested starting colours;
 # the rest extend the cycle so it doesn't repeat until ~30 keys are in use.
 DEFAULT_COLOR_CYCLE = [

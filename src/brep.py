@@ -7,8 +7,7 @@ from OCC.Core.BRepPrimAPI import (
 from OCC.Core.gp import gp_Ax2, gp_Pnt, gp_Dir
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.TopExp import TopExp_Explorer
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_ON, TopAbs_REVERSED
-from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pln
@@ -34,53 +33,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
-
-# Face attribute of a brep mesh naming, per triangle, the higher-priority
-# component whose surface that triangle lies on: a cavity wall left by
-# cutting that component out, or a face touching it. That component's
-# volume is on the triangle's outer side. "" for the rest of the surface.
-CARVED_BY = "carved_by"
-
-# How far, in metres, a point may be from a solid's boundary and still be
-# on it when looking for the component a face lies on.
-_ON_SURFACE_TOLERANCE = 1e-6
-
-
-def _face_point(face, triangulation, trsf):
-    """A point on face's surface, inside its first triangle."""
-    nodes = triangulation.Triangle(1).Get()
-    if triangulation.HasUVNodes():
-        uvs = [triangulation.UVNode(i) for i in nodes]
-        u = sum(uv.X() for uv in uvs) / 3
-        v = sum(uv.Y() for uv in uvs) / 3
-        return BRep_Tool.Surface(face).Value(u, v)
-    points = [triangulation.Node(i).Transformed(trsf) for i in nodes]
-    return gp_Pnt(*(sum(c) / 3 for c in zip(*(p.Coord() for p in points))))
-
-
-def _carver_finder(higher_priority, prio_breps, world_bboxes):
-    """A function giving, for a point on a face, the name of the
-    highest-priority component in higher_priority whose boundary the point
-    lies on, or "" if none: the component whose region the face borders."""
-    candidates = sorted(
-        zip(higher_priority, prio_breps), key=lambda pair: pair[0].priority, reverse=True
-    )
-
-    def carver_of(point):
-        xyz = np.array(point.Coord())
-        for comp, shape in candidates:
-            bmin, bmax = world_bboxes[comp.name]
-            outside_bbox = np.any(xyz < bmin - _ON_SURFACE_TOLERANCE) or np.any(
-                xyz > bmax + _ON_SURFACE_TOLERANCE
-            )
-            if outside_bbox:
-                continue
-            state = BRepClass3d_SolidClassifier(shape, point, _ON_SURFACE_TOLERANCE).State()
-            if state == TopAbs_ON:
-                return comp.name
-        return ""
-
-    return carver_of
 
 
 def _mesh_to_brep(mesh, name, verbose=False):
@@ -369,12 +321,9 @@ def build_single_brep_mesh(
     res_comp = intersect_with_masks(res_comp, mask_comps, mask_setting)
     res_comp = clip_component(res_comp, clip)
 
-    carver_of = _carver_finder(higher_priority, prio_breps, world_bboxes)
-
     BRepMesh_IncrementalMesh(res_comp, deflection).Perform()
     vertices = []
     faces = []
-    carvers = []
 
     vertex_offset = 0
 
@@ -391,7 +340,6 @@ def build_single_brep_mesh(
             continue
 
         trsf = loc.Transformation()
-        carver = carver_of(_face_point(face, triangulation, trsf))
 
         for i in range(1, triangulation.NbNodes() + 1):
             p = triangulation.Node(i).Transformed(trsf)
@@ -413,7 +361,6 @@ def build_single_brep_mesh(
                     vertex_offset + n3 - 1,
                 ]
             )
-            carvers.append(carver)
 
         vertex_offset += triangulation.NbNodes()
 
@@ -421,11 +368,7 @@ def build_single_brep_mesh(
     if len(vertices) == 0 or len(faces) == 0:
         print(f"WARNING: empty mesh for {comp.name}")
         return None
-    mesh = trimesh.Trimesh(
-        vertices=vertices,
-        faces=faces,
-        face_attributes={CARVED_BY: np.array(carvers, dtype=str)},
-    )
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
 
     return mesh
 

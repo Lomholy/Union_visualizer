@@ -5,7 +5,6 @@ floor grid sizing."""
 import numpy as np
 import pygfx as gfx
 from gui_helpers import (
-    CARVER_KEY,
     assign_default_color,
     component_color_key,
     ray_segment_indices,
@@ -26,49 +25,27 @@ import logger_output
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects.
     Cheap (no geometry kernel calls) - safe to run on the GUI thread or a
-    plain QThread.
-
-    group.geometry_meshes[key] is a Group of Meshes sharing one material:
-    the surface always drawn for key, plus one Mesh per other key whose own
-    surface some of key's cavity walls lie on (see gui_helpers.CARVER_KEY),
-    also listed in group.cavity_meshes[key][carver_key]. Drawing both a
-    cavity wall and the surface it lies on makes them z-fight, so the
-    viewer shows a cavity Mesh only while its carver key is hidden. Cavity
-    walls carved by key itself are left out: key's own surface is always
-    drawn there."""
+    plain QThread."""
     print("Defining group")
     group = gfx.Group()
     group.geometry_meshes = {}
-    group.cavity_meshes = {}
     group.geometry_is_vacuum = geometry_is_vacuum
     group.geometry_trimeshes = render_meshes
 
     for key, mesh in render_meshes.items():
         assign_default_color(colors, key)
-        material = gfx.MeshStandardMaterial(
-            color=colors[key],
-            metalness=0,
-            roughness=0.8,
+
+        gfx_mesh = gfx.Mesh(
+            gfx.geometry_from_trimesh(mesh),
+            gfx.MeshStandardMaterial(
+                color=colors[key],
+                metalness=0,
+                roughness=0.8,
+            ),
         )
 
-        obj = gfx.Group()
-        cavities = {}
-        carver_keys = mesh.face_attributes.get(CARVER_KEY)
-        if carver_keys is None or not np.any(carver_keys != ""):
-            obj.add(gfx.Mesh(gfx.geometry_from_trimesh(mesh), material))
-        else:
-            for carver_key in np.unique(carver_keys):
-                if carver_key == key:
-                    continue
-                part = mesh.submesh([np.flatnonzero(carver_keys == carver_key)], append=True)
-                part_mesh = gfx.Mesh(gfx.geometry_from_trimesh(part), material)
-                obj.add(part_mesh)
-                if carver_key:
-                    cavities[str(carver_key)] = part_mesh
-
-        group.add(obj)
-        group.geometry_meshes[key] = obj
-        group.cavity_meshes[key] = cavities
+        group.add(gfx_mesh)
+        group.geometry_meshes[key] = gfx_mesh
 
     return group
 
