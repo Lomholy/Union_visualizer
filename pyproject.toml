@@ -19,6 +19,7 @@ unviz = "cli:main"
 [tool.setuptools]
 package-dir = { "" = "src" }
 py-modules = [
+    "background",
     "bounding_box",
     "brep",
     "camera",
