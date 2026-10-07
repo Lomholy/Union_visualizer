@@ -1,3 +1,4 @@
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -40,7 +41,6 @@ from gui_helpers import (
 )
 from mcstas_trace import trace_instrument, component_types, SCATTER, ABSORB, TELEPORT
 import logger_output
-import argparse
 
 # The meshers offered in the dock, in display order.
 MESHER_KEYS = ("mc", "dc", "brep")
@@ -72,34 +72,6 @@ DEFLECTION_TOOLTIP = (
 # ============================================================
 
 
-def rebuild_mesh(
-    meshes,
-    name,
-    union_geometries,
-    world_matrices,
-    sdfs,
-    final_sdfs,
-    res,
-    clip,
-    mesher,
-    deflection=DEFAULT_BREP_DEFLECTION,
-    world_bboxes=None,
-):
-    meshes[name] = build_mesh(
-        union_geometries[name],
-        union_geometries,
-        world_matrices,
-        sdfs,
-        final_sdfs,
-        res,
-        clip,
-        mesher=mesher,
-        deflection=deflection,
-        world_bboxes=world_bboxes,
-    )
-    return meshes
-
-
 def compute_mesh_data(
     input_file,
     clip,
@@ -114,7 +86,7 @@ def compute_mesh_data(
     force_pygen=False,
     param_values=None,
 ):
-    """Everything generate_group() needs to do that doesn't touch pygfx/Qt:
+    """Everything a mesh reload needs to do that doesn't touch pygfx/Qt:
     preprocessing, SDF/BREP mesh building (with dependency-based incremental
     rebuild), and material grouping/vacuum tagging. Returns plain,
     picklable data (trimesh objects + dicts), so this is safe to run in a
@@ -178,16 +150,15 @@ def compute_mesh_data(
             )
         else:
             for name in changed_names:
-                meshes = rebuild_mesh(
-                    meshes,
-                    name,
+                meshes[name] = build_mesh(
+                    union_geometries[name],
                     union_geometries,
                     world_matrices,
                     sdfs,
                     final_sdfs,
                     res,
                     clip,
-                    mesher,
+                    mesher=mesher,
                     deflection=deflection,
                     world_bboxes=world_bboxes,
                 )
@@ -450,39 +421,6 @@ def build_counts_group(counts, world_matrices, vmin, vmax):
     return group, meshes, textures
 
 
-def generate_group(
-    input_file,
-    clip,
-    colors={},
-    meshes=None,
-    dependencies=None,
-    mesher="brep",
-    force_remesh=False,
-    res=64,
-    verbose=True,
-    group_by_material=False,
-    deflection=DEFAULT_BREP_DEFLECTION,
-    force_pygen=False,
-    param_values=None,
-):
-    render_meshes, geometry_is_vacuum, meshes, dependencies, _ = compute_mesh_data(
-        input_file,
-        clip,
-        meshes=meshes,
-        dependencies=dependencies,
-        mesher=mesher,
-        force_remesh=force_remesh,
-        res=res,
-        verbose=verbose,
-        group_by_material=group_by_material,
-        deflection=deflection,
-        force_pygen=force_pygen,
-        param_values=param_values,
-    )
-    group = build_gfx_group(render_meshes, geometry_is_vacuum, colors)
-    return (group, meshes, dependencies)
-
-
 def make_coordinate_axes(
     length=10.0,
     tick_spacing=1.0,
@@ -584,9 +522,7 @@ def update_camera_depth_range(camera, target):
         camera.depth_range = (near, CAMERA_FAR)
 
 
-
 def fit_camera_to_scene(camera, controller, scene, scale=2.0):
-    print(scene)
     bbox = scene.get_world_bounding_box()
 
     if bbox is None:
@@ -960,7 +896,7 @@ class Viewer(QtWidgets.QMainWindow):
         key.look_at((0, 0, 0))
         self.scene.add(key)
 
-        # main light (like sun)
+        # second main light from the opposite side
         key2 = gfx.DirectionalLight(intensity=1.5)
         key2.local.position = (-1, -1, -1)
         key2.look_at((0, 0, 0))
@@ -1062,15 +998,11 @@ class Viewer(QtWidgets.QMainWindow):
         # Clipping state
         # ----------------------------------------------------
 
-        self.clip_enable = False
-        self.clip_axis = "Z"
-        self.clip_mode = "Above"
-        self.clip_position = 0.0
         self.clip = {
-            "enable": self.clip_enable,
-            "axis": self.clip_axis,
-            "mode": self.clip_mode,
-            "position": self.clip_position,
+            "enable": False,
+            "axis": "Z",
+            "mode": "Above",
+            "position": 0.0,
             "frame": None,
         }
         self.world_matrices = {}
@@ -1683,7 +1615,7 @@ class Viewer(QtWidgets.QMainWindow):
                 visible = False
             mesh.visible = visible
 
-    def on_geometry_visibility_changed(self, name, mesh, checked):
+    def on_geometry_visibility_changed(self, name, checked):
         self.geometry_visibility[name] = checked
         self.apply_geometry_visibility()
 
@@ -1728,14 +1660,12 @@ class Viewer(QtWidgets.QMainWindow):
             return
 
         self.union_header.setVisible(bool(self.current_group.geometry_meshes))
-        for name, mesh in self.current_group.geometry_meshes.items():
+        for name in self.current_group.geometry_meshes:
             cb, color_button = self._add_panel_row(
                 self.geometry_layout,
                 name,
                 self.geometry_visibility.get(name, True),
-                lambda checked, n=name, m=mesh: self.on_geometry_visibility_changed(
-                    n, m, checked
-                ),
+                lambda checked, n=name: self.on_geometry_visibility_changed(n, checked),
                 lambda n=name: self.pick_color(n),
                 self.colors.get(name, "#b6b6b6"),
             )
@@ -1868,7 +1798,7 @@ class Viewer(QtWidgets.QMainWindow):
             self._set_swatch_color(button, hex_color)
 
     # ========================================================
-    # Export STL
+    # Instrument parameters and clip frame
     # ========================================================
 
     def rebuild_params_form(self, parameters):
@@ -1925,6 +1855,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.param_values[name] = text.strip()
         self.reload_meshes()
         self.reload_trace()
+
+    # ========================================================
+    # Export STL
+    # ========================================================
 
     def _export_parts(self):
         """(Union meshes, McStas component meshes, names that failed) for
@@ -2621,7 +2555,7 @@ class Viewer(QtWidgets.QMainWindow):
     def animate(self):
         self.gizmo.local.rotation = self.camera.local.rotation
         self.renderer.render(self.scene, self.camera)
-        w, h = self.canvas.get_logical_size()
+        _, h = self.canvas.get_logical_size()
         s = 160
         self.gizmo_viewport.rect = (10, h - s - 10, s, s)
         self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera)
