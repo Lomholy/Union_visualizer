@@ -22,7 +22,12 @@ import pipeline  # noqa: E402
 import scene_objects  # noqa: E402
 import gui_helpers  # noqa: E402
 import pygfx as gfx  # noqa: E402
-from camera import fit_camera_to_scene  # noqa: E402
+from camera import (  # noqa: E402
+    CAMERA_FAR,
+    CAMERA_NEAR,
+    fit_camera_to_scene,
+    update_camera_depth_range,
+)
 from logger_output import LoggerCounts  # noqa: E402
 
 
@@ -171,13 +176,53 @@ class FitCameraToSceneTest(unittest.TestCase):
         target = None
 
     def fit(self, bbox):
+        """Fit a camera to bbox, then set its depth range the way the
+        viewer's render loop does every frame."""
         camera = self.FakeCamera()
-        fit_camera_to_scene(camera, self.FakeController(), self.FakeScene(np.array(bbox, dtype=float)))
+        controller = self.FakeController()
+        fit_camera_to_scene(camera, controller, self.FakeScene(np.array(bbox, dtype=float)))
+        update_camera_depth_range(camera, controller.target)
         return camera
 
     def test_near_plane_is_positive(self):
         camera = self.fit([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
         self.assertGreater(camera.depth_range[0], 0)
+        self.assertEqual(camera.depth_range[1], CAMERA_FAR)
+
+    def test_near_plane_grows_with_distance_to_the_target(self):
+        camera = self.FakeCamera()
+        camera.local.position = np.array([0.0, 0.0, 1.0])
+        update_camera_depth_range(camera, np.zeros(3))
+        self.assertEqual(camera.depth_range[0], CAMERA_NEAR)
+        camera.local.position = np.array([0.0, 0.0, 1000.0])
+        update_camera_depth_range(camera, np.zeros(3))
+        self.assertAlmostEqual(camera.depth_range[0], 10.0)
+
+
+class BuildGfxGroupOffsetTest(unittest.TestCase):
+    def test_vertices_are_drawn_outward_by_the_render_offset(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        drawn = group.geometry_meshes["Al"].geometry.positions.data
+        np.testing.assert_allclose(
+            drawn, mesh.vertices + mesh.vertex_normals * scene_objects.RENDER_OFFSET, atol=1e-7
+        )
+
+    def test_coincident_opposite_faces_are_drawn_apart(self):
+        # A cavity wall and the surface it was cut from: same triangle,
+        # opposite winding. Drawn, they must no longer coincide.
+        import trimesh
+
+        vertices = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        surface = trimesh.Trimesh(vertices, [[0, 1, 2]], process=False)
+        cavity = trimesh.Trimesh(vertices, [[0, 2, 1]], process=False)
+        group = scene_objects.build_gfx_group(
+            {"Al": surface, "Air": cavity}, {"Al": False, "Air": False}, {}
+        )
+        z = {k: group.geometry_meshes[k].geometry.positions.data[:, 2] for k in ("Al", "Air")}
+        np.testing.assert_allclose(z["Al"] - z["Air"], 2 * scene_objects.RENDER_OFFSET, atol=1e-7)
 
 
 if __name__ == "__main__":
