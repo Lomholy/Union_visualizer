@@ -1,5 +1,6 @@
-"""Tests for union_viewer.py's non-GUI logic: compute_trace_data, the
-worker-process side of the trace pool, needs no display to run.
+"""Tests for the viewer's non-GUI logic (pipeline.py, scene_objects.py,
+camera.py): compute_trace_data, the worker-process side of the trace pool,
+needs no display to run.
 
 The GUI itself is not unit-testable without a display, so its own wiring
 was exercised interactively with QT_QPA_PLATFORM=offscreen against real
@@ -17,7 +18,11 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-import union_viewer as uv  # noqa: E402
+import pipeline  # noqa: E402
+import scene_objects  # noqa: E402
+import gui_helpers  # noqa: E402
+import pygfx as gfx  # noqa: E402
+from camera import fit_camera_to_scene  # noqa: E402
 from logger_output import LoggerCounts  # noqa: E402
 
 
@@ -35,7 +40,7 @@ class BuildRayGroupStylingTest(unittest.TestCase):
         )
 
     def test_custom_colors_and_sizes_are_applied(self):
-        group, _ = uv.build_ray_group(
+        group, _ = scene_objects.build_ray_group(
             self._rays(), np.array([0]), "Uniform",
             colors={"scatter": "#112233", "absorb": "#445566"},
             marker_sizes={"scatter": 11, "absorb": 13},
@@ -46,9 +51,9 @@ class BuildRayGroupStylingTest(unittest.TestCase):
         self.assertEqual(group.absorb_points.material.color.hex, "#445566")
 
     def test_defaults_when_unspecified(self):
-        group, _ = uv.build_ray_group(self._rays(), np.array([0]), "Uniform")
-        self.assertEqual(group.scatter_points.material.size, uv.SCATTER_MARKER_SIZE)
-        self.assertEqual(group.absorb_points.material.size, uv.ABSORB_MARKER_SIZE)
+        group, _ = scene_objects.build_ray_group(self._rays(), np.array([0]), "Uniform")
+        self.assertEqual(group.scatter_points.material.size, gui_helpers.SCATTER_MARKER_SIZE)
+        self.assertEqual(group.absorb_points.material.size, gui_helpers.ABSORB_MARKER_SIZE)
 
 
 @unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")
@@ -62,7 +67,7 @@ class ComputeTraceDataTest(unittest.TestCase):
             instr = os.path.join(tmp, "simple_test.instr")
             shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
             try:
-                _, rays = uv.compute_trace_data(instr, False, [], 1200, 7)
+                _, rays = pipeline.compute_trace_data(instr, False, [], 1200, 7)
             except Exception as e:
                 self.skipTest(f"mcrun could not compile here: {e}")
         self.assertEqual(rays.n_rays, 1200)
@@ -76,7 +81,7 @@ class BuildCountsGroupTest(unittest.TestCase):
         }
         world_matrices = {"logger_a": np.eye(4), "logger_b": np.eye(4)}
 
-        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
+        group, meshes, textures = scene_objects.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
 
         self.assertEqual(set(meshes), {"logger_a", "logger_b"})
         self.assertEqual(set(textures), {"logger_a", "logger_b"})
@@ -93,7 +98,7 @@ class BuildCountsGroupTest(unittest.TestCase):
         }
         world_matrices = {"matched": np.eye(4)}
 
-        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
+        group, meshes, textures = scene_objects.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
 
         self.assertEqual(set(meshes), {"matched"})
         self.assertEqual(len(group.children), 1)
@@ -104,7 +109,7 @@ class BuildCountsGroupTest(unittest.TestCase):
         }
         world_matrix = np.eye(4)
         world_matrix[:3, 3] = (10, 20, 30)  # pure translation
-        _, meshes, _ = uv.build_counts_group(counts, {"logger_a": world_matrix}, vmin=0, vmax=1)
+        _, meshes, _ = scene_objects.build_counts_group(counts, {"logger_a": world_matrix}, vmin=0, vmax=1)
 
         positions = meshes["logger_a"].geometry.positions.data
         # x in [-1, 1] -> world x in [9, 11]; y in [-2, 2] -> world y in
@@ -119,12 +124,12 @@ class BuildCountsGroupTest(unittest.TestCase):
         counts = {
             "strip": LoggerCounts("strip", "Monitor_nD", "y", None, (-1, 1), np.array([1.0, 2.0, 3.0])),
         }
-        group, meshes, textures = uv.build_counts_group(counts, {"strip": np.eye(4)}, vmin=0, vmax=3)
+        group, meshes, textures = scene_objects.build_counts_group(counts, {"strip": np.eye(4)}, vmin=0, vmax=3)
 
         self.assertEqual(set(meshes), {"strip"})
         self.assertNotIn("strip", textures)  # a line has no texture to restyle
         line = meshes["strip"]
-        self.assertIsInstance(line, uv.gfx.Line)
+        self.assertIsInstance(line, gfx.Line)
         positions = line.geometry.positions.data
         self.assertEqual(len(positions), 6)  # 3 bins -> 3 segments -> 6 endpoints
         np.testing.assert_allclose(positions[:, 1].min(), -1.0)
@@ -139,7 +144,7 @@ class BuildCountsGroupTest(unittest.TestCase):
             "line": LoggerCounts("line", "Monitor_nD", "x", None, (-1, 1), np.ones(2)),
         }
         world_matrices = {"plane": np.eye(4), "line": np.eye(4)}
-        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
+        group, meshes, textures = scene_objects.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
 
         self.assertEqual(set(meshes), {"plane", "line"})
         self.assertEqual(set(textures), {"plane"})
@@ -167,7 +172,7 @@ class FitCameraToSceneTest(unittest.TestCase):
 
     def fit(self, bbox):
         camera = self.FakeCamera()
-        uv.fit_camera_to_scene(camera, self.FakeController(), self.FakeScene(np.array(bbox, dtype=float)))
+        fit_camera_to_scene(camera, self.FakeController(), self.FakeScene(np.array(bbox, dtype=float)))
         return camera
 
     def test_near_plane_is_positive(self):
