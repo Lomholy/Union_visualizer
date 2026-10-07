@@ -21,6 +21,7 @@ package-dir = { "" = "src" }
 py-modules = [
     "bounding_box",
     "brep",
+    "camera",
     "cli",
     "clipping",
     "dual_cont",
@@ -28,8 +29,10 @@ py-modules = [
     "logger_output",
     "mcstas_trace",
     "meshing",
+    "pipeline",
     "plot_union_cloud",
     "preprocess",
+    "scene_objects",
     "signed_distance_functions",
     "union_viewer",
 ]
