@@ -6,9 +6,15 @@ from preprocess import preprocess, instrument_parameters
 from clipping import resolve_clip_frame
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, DEFAULT_BREP_DEFLECTION
-from brep import build_many_brep_meshes
+from brep import CARVED_BY, build_many_brep_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
-from gui_helpers import group_meshes_by_material, is_vacuum_material
+from gui_helpers import (
+    CARVER_KEY,
+    carver_keys,
+    group_meshes_by_material,
+    is_vacuum_material,
+    render_keys_of,
+)
 from mcstas_trace import trace_instrument, component_types
 import logger_output
 
@@ -121,6 +127,14 @@ def compute_mesh_data(
             name: is_vacuum_material(getattr(union_geometries[name], "material_string", None))
             for name in render_meshes
         }
+
+    # Tag each brep cavity wall with the render key whose own surface lies
+    # on it, so the viewer can draw it only while that key is hidden.
+    render_key_of = render_keys_of(union_geometries, meshes, group_by_material)
+    for mesh in render_meshes.values():
+        carved_by = mesh.face_attributes.get(CARVED_BY)
+        if carved_by is not None:
+            mesh.face_attributes[CARVER_KEY] = carver_keys(carved_by, render_key_of)
 
     instrument_info = {
         "parameters": instrument_parameters(instr),

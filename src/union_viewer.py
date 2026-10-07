@@ -291,17 +291,23 @@ class Viewer(QtWidgets.QMainWindow):
 
     def apply_geometry_visibility(self):
         """Recompute mesh.visible for every row from the per-row checkbox
-        state and the "Hide vacuum" filter. Never rebuilds geometry - safe
-        to call on its own whenever either input changes."""
+        state and the "Hide vacuum" filter, and show each cavity wall only
+        while the row whose surface it lies on is hidden. Never rebuilds
+        geometry - safe to call on its own whenever either input changes."""
         if self.current_group is None:
             return
         hide_vacuum = self.settings_panel.vacuum_checkbox.isChecked()
         is_vacuum = self.current_group.geometry_is_vacuum
+        shown = {}
         for key, mesh in self.current_group.geometry_meshes.items():
             visible = self.geometry_panel.union_visibility.get(key, True)
             if hide_vacuum and is_vacuum.get(key, False):
                 visible = False
             mesh.visible = visible
+            shown[key] = visible
+        for cavities in self.current_group.cavity_meshes.values():
+            for carver_key, cavity in cavities.items():
+                cavity.visible = not shown.get(carver_key, False)
 
     def on_geometry_visibility_changed(self, name, checked):
         self.apply_geometry_visibility()
@@ -364,7 +370,7 @@ class Viewer(QtWidgets.QMainWindow):
     def pick_color(self, key):
         if self.current_group is None or key not in self.current_group.geometry_meshes:
             return
-        self._pick_panel_color(key, key, [self.current_group.geometry_meshes[key]])
+        self._pick_panel_color(key, key, self.current_group.geometry_meshes[key].children)
 
     # ========================================================
     # Instrument parameters and clip frame
