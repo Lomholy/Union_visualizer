@@ -5,6 +5,7 @@ import traceback
 import numpy as np
 import trimesh
 import pygfx as gfx
+import pylinalg as la
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
@@ -902,7 +903,7 @@ class Viewer(QtWidgets.QMainWindow):
     # ========================================================
 
     def animate(self):
-        self.gizmo.local.rotation = self.camera.local.rotation
+        self.gizmo.local.rotation = la.quat_inv(self.camera.local.rotation)
         self.renderer.render(self.scene, self.camera, flush=False)
         _, h = self.canvas.get_logical_size()
         s = 160
