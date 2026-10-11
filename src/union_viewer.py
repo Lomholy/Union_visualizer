@@ -5,6 +5,7 @@ import traceback
 import numpy as np
 import trimesh
 import pygfx as gfx
+import pylinalg as la
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
@@ -118,7 +119,8 @@ class Viewer(QtWidgets.QMainWindow):
         )
         self.controller.target = (0, 0, 0)
 
-        self.scene.add(make_coordinate_axes(length=1000, tick_spacing=1000))
+        self.axes = make_coordinate_axes(length=1000, tick_spacing=1000)
+        self.scene.add(self.axes)
 
         self.grid = None
         self._resize_grid(None)
@@ -193,6 +195,14 @@ class Viewer(QtWidgets.QMainWindow):
         settings.components_checkbox.stateChanged.connect(self.on_components_changed)
         settings.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
+        for checkbox, attr in (
+            (settings.grid_checkbox, "grid"),
+            (settings.gizmo_checkbox, "gizmo"),
+            (settings.axes_checkbox, "axes"),
+        ):
+            checkbox.toggled.connect(
+                lambda on, attr=attr: setattr(getattr(self, attr), "visible", on)
+            )
 
         self.params_panel.edited.connect(self.on_params_edited)
         self.mesher_panel.changed.connect(self.on_mesher_options_changed)
@@ -515,9 +525,12 @@ class Viewer(QtWidgets.QMainWindow):
         bbox = group.get_world_bounding_box() if group is not None else None
         size = grid_size_for_bbox(bbox)
         divisions = min(MAX_GRID_DIVISIONS, max(10, round(size / GRID_SPACING)))
+        visible = True
         if self.grid is not None:
+            visible = self.grid.visible
             self.scene.remove(self.grid)
         self.grid = gfx.GridHelper(size=size, divisions=divisions, thickness=1)
+        self.grid.visible = visible
         self.scene.add(self.grid)
 
     def _on_reload_finished(self, result, elapsed):
@@ -890,12 +903,12 @@ class Viewer(QtWidgets.QMainWindow):
     # ========================================================
 
     def animate(self):
-        self.gizmo.local.rotation = self.camera.local.rotation
-        self.renderer.render(self.scene, self.camera)
+        self.gizmo.local.rotation = la.quat_inv(self.camera.local.rotation)
+        self.renderer.render(self.scene, self.camera, flush=False)
         _, h = self.canvas.get_logical_size()
         s = 160
         self.gizmo_viewport.rect = (10, h - s - 10, s, s)
-        self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera)
+        self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera, flush=True)
         update_camera_depth_range(self.camera, self.controller.target)
 
         self.canvas.request_draw()
