@@ -118,7 +118,8 @@ class Viewer(QtWidgets.QMainWindow):
         )
         self.controller.target = (0, 0, 0)
 
-        self.scene.add(make_coordinate_axes(length=1000, tick_spacing=1000))
+        self.axes = make_coordinate_axes(length=1000, tick_spacing=1000)
+        self.scene.add(self.axes)
 
         self.grid = None
         self._resize_grid(None)
@@ -193,6 +194,14 @@ class Viewer(QtWidgets.QMainWindow):
         settings.components_checkbox.stateChanged.connect(self.on_components_changed)
         settings.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
+        for checkbox, attr in (
+            (settings.grid_checkbox, "grid"),
+            (settings.gizmo_checkbox, "gizmo"),
+            (settings.axes_checkbox, "axes"),
+        ):
+            checkbox.toggled.connect(
+                lambda on, attr=attr: setattr(getattr(self, attr), "visible", on)
+            )
 
         self.params_panel.edited.connect(self.on_params_edited)
         self.mesher_panel.changed.connect(self.on_mesher_options_changed)
@@ -515,9 +524,12 @@ class Viewer(QtWidgets.QMainWindow):
         bbox = group.get_world_bounding_box() if group is not None else None
         size = grid_size_for_bbox(bbox)
         divisions = min(MAX_GRID_DIVISIONS, max(10, round(size / GRID_SPACING)))
+        visible = True
         if self.grid is not None:
+            visible = self.grid.visible
             self.scene.remove(self.grid)
         self.grid = gfx.GridHelper(size=size, divisions=divisions, thickness=1)
+        self.grid.visible = visible
         self.scene.add(self.grid)
 
     def _on_reload_finished(self, result, elapsed):

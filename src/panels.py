@@ -111,6 +111,9 @@ class SettingsPanel(QtWidgets.QWidget):
             "Trace neutrons through the instrument with mcrun --trace and "
             "draw their paths. Options are in the Neutron Rays panel.",
         )
+        self.grid_checkbox = make_checkbox("Show grid", True)
+        self.gizmo_checkbox = make_checkbox("Show gizmo", True)
+        self.axes_checkbox = make_checkbox("Show xyz axes", True)
         self.trace_status_label = make_note_label()
         self.reset_view_button = make_button("Reset view", "Refit the camera (shortcut: R)")
         self.fit_instrument_button = make_button(
@@ -133,6 +136,9 @@ class SettingsPanel(QtWidgets.QWidget):
             self.components_checkbox,
             self.arms_checkbox,
             self.rays_checkbox,
+            self.grid_checkbox,
+            self.gizmo_checkbox,
+            self.axes_checkbox,
             self.trace_status_label,
             self.reset_view_button,
             self.fit_instrument_button,
