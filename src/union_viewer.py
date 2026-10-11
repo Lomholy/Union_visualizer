@@ -903,11 +903,11 @@ class Viewer(QtWidgets.QMainWindow):
 
     def animate(self):
         self.gizmo.local.rotation = self.camera.local.rotation
-        self.renderer.render(self.scene, self.camera)
+        self.renderer.render(self.scene, self.camera, flush=False)
         _, h = self.canvas.get_logical_size()
         s = 160
         self.gizmo_viewport.rect = (10, h - s - 10, s, s)
-        self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera)
+        self.gizmo_viewport.render(self.gizmo_scene, self.gizmo_camera, flush=True)
         update_camera_depth_range(self.camera, self.controller.target)
 
         self.canvas.request_draw()
