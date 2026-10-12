@@ -293,39 +293,23 @@ def make_coordinate_axes(
     return group
 
 
-# Lighting copied from FreeCAD's defaults (src/Gui/View3DSettings.{h,cpp}):
-# a headlight and a fill light that turn with the camera, a backlight fixed in
-# the world, and a dim ambient light. Each is (intensity, direction), the
-# direction being where the light travels; camera lights use camera
-# coordinates (x right, y up, looking down -z). Coin's intensities are
-# multiplied by pi because pygfx's Lambert term divides by pi.
-CAMERA_LIGHTS = (
-    (0.90 * np.pi, (0.6841049, -0.12062616, -0.7193398)),  # headlight
-    (0.40 * np.pi, (-0.6403416, 0.7631294, 0.087155744)),  # fill light
+# (intensity, position) of each directional light, all aimed at the origin:
+# two main lights from opposite corners and a soft fill light.
+DIRECTIONAL_LIGHTS = (
+    (1.5, (1, 1, 1)),
+    (1.5, (-1, -1, -1)),
+    (0.5, (-1, 1, -1)),
 )
-WORLD_LIGHTS = (
-    (0.60 * np.pi, (-0.7544065, -0.63302225, -0.17364818)),  # backlight
-)
-# FreeCAD's 20 % ambient light acts on its default material's ambient colour,
-# about 0.4 times its diffuse colour; pygfx's acts on the diffuse colour.
-AMBIENT_INTENSITY = 0.20 * 0.4 * np.pi
 
 
-def add_default_lights(scene, camera):
-    """AMBIENT_INTENSITY, CAMERA_LIGHTS on camera and WORLD_LIGHTS, as in
-    FreeCAD. camera is added to scene."""
-    scene.add(gfx.AmbientLight(intensity=AMBIENT_INTENSITY))
-    for intensity, direction in CAMERA_LIGHTS:
-        # A light on a camera shines at the point 1 m in front of it.
+def add_default_lights(scene):
+    """A soft ambient light plus DIRECTIONAL_LIGHTS."""
+    scene.add(gfx.AmbientLight(intensity=0.6))
+    for intensity, position in DIRECTIONAL_LIGHTS:
         light = gfx.DirectionalLight(intensity=intensity)
-        light.local.position = np.array((0, 0, -1)) - direction
-        camera.add(light)
-    for intensity, direction in WORLD_LIGHTS:
-        # Without a target in the scene, a light shines at the origin.
-        light = gfx.DirectionalLight(intensity=intensity)
-        light.local.position = -np.array(direction)
+        light.local.position = position
+        light.look_at((0, 0, 0))
         scene.add(light)
-    scene.add(camera)
 
 
 # ============================================================
