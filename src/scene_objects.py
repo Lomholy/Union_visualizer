@@ -320,20 +320,18 @@ def make_coordinate_axes(
     return group
 
 
-AMBIENT_INTENSITY = 2.0
-
 # (intensity, position) of each directional light, all aimed at the origin:
 # two main lights from opposite corners and a soft fill light.
 DIRECTIONAL_LIGHTS = (
-    (0.5, (1, 1, 1)),
-    (0.5, (-1, -1, -1)),
-    (0.17, (-1, 1, -1)),
+    (1.5, (1, 1, 1)),
+    (1.5, (-1, -1, -1)),
+    (0.5, (-1, 1, -1)),
 )
 
 
 def add_default_lights(scene):
-    """An ambient light plus DIRECTIONAL_LIGHTS."""
-    scene.add(gfx.AmbientLight(intensity=AMBIENT_INTENSITY))
+    """A soft ambient light plus DIRECTIONAL_LIGHTS."""
+    scene.add(gfx.AmbientLight(intensity=0.6))
     for intensity, position in DIRECTIONAL_LIGHTS:
         light = gfx.DirectionalLight(intensity=intensity)
         light.local.position = position
