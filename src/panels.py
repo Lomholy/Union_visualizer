@@ -2,6 +2,7 @@
 widgets and the state that only it needs; the Viewer connects to their
 widgets and signals and applies the results to the scene."""
 
+import numpy as np
 from qtpy import QtCore, QtWidgets
 
 from gui_helpers import RAY_COLOR_MODES, wrap_label
@@ -157,6 +158,48 @@ class SettingsPanel(QtWidgets.QWidget):
             text = "\n".join(text.strip().splitlines()[-6:])
         self.trace_status_label.setStyleSheet("color: #c0392b;" if error else "color: gray;")
         self.trace_status_label.setText(text)
+
+
+def format_ruler_text(points):
+    """The ruler readout for zero, one or two picked world points."""
+    if not points:
+        return "Tick Measure distances, then click two points on the geometry."
+    lines = [
+        f"Point {i + 1}: ({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f}) m" for i, p in enumerate(points)
+    ]
+    if len(points) == 1:
+        return "\n".join(lines + ["Click a second point."])
+    delta = np.asarray(points[1]) - np.asarray(points[0])
+    lines.append(f"Distance: {np.linalg.norm(delta):.4f} m")
+    lines.append(f"dx, dy, dz: ({delta[0]:.4f}, {delta[1]:.4f}, {delta[2]:.4f}) m")
+    return "\n".join(lines)
+
+
+class RulerPanel(QtWidgets.QWidget):
+    """Measures the distance between two points clicked on the geometry.
+    While measure_checkbox is checked the Viewer turns clicks into points;
+    a third click starts a new measurement."""
+
+    def __init__(self):
+        super().__init__()
+        self.measure_checkbox = make_checkbox(
+            "Measure distances",
+            False,
+            "Click two points on the geometry to measure the distance "
+            "between them. Dragging still rotates the view.",
+        )
+        self.readout_label = make_note_label()
+        self.readout_label.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.clear_button = make_button("Clear", "Remove the measured points")
+
+        layout = _panel_layout(self)
+        layout.addWidget(self.measure_checkbox)
+        layout.addWidget(self.readout_label)
+        add_row(layout, self.clear_button, stretch=True)
+        self.show_points([])
+
+    def show_points(self, points):
+        self.readout_label.setText(format_ruler_text(points))
 
 
 class ParametersPanel(QtWidgets.QWidget):

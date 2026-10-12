@@ -292,5 +292,76 @@ class FeatureEdgesTest(unittest.TestCase):
         self.assertGreater(scene_objects.EDGE_OFFSET, scene_objects.RENDER_OFFSET)
 
 
+
+class RulerTest(unittest.TestCase):
+    def _box_pick(self, target):
+        """A unit box viewed down -z and a pick at the pixel showing target
+        (a point on its +z face), as renderer.get_pick_info would give."""
+        import trimesh
+
+        mesh = gfx.Mesh(gfx.geometry_from_trimesh(trimesh.creation.box()), gfx.MeshBasicMaterial())
+        camera = gfx.PerspectiveCamera(50)
+        camera.local.position = (0.3, -0.2, 4)
+        camera.look_at((0, 0, 0))
+        camera.set_view_size(400, 300)
+        clip = camera.camera_matrix @ np.array([*target, 1.0])
+        ndc = clip[:3] / clip[3]
+        indices = mesh.geometry.indices.data
+        corners = mesh.geometry.positions.data[indices]
+        for face_index, tri in enumerate(corners):
+            if np.allclose(tri[:, 2], 0.5):
+                coord = np.linalg.lstsq(np.vstack([tri[:, :2].T, np.ones(3)]), [*target[:2], 1.0], rcond=None)[0]
+                if np.all(coord >= -1e-9):
+                    break
+        pick = {"world_object": mesh, "face_index": face_index, "face_coord": tuple(np.round(coord * 511) / 511)}
+        return pick, camera, ndc[:2]
+
+    def test_pick_lands_exactly_on_the_surface(self):
+        target = np.array([0.123, -0.271, 0.5])
+        pick, camera, ndc = self._box_pick(target)
+        point = scene_objects.pick_world_point(pick, camera, ndc)
+        np.testing.assert_allclose(point, target, atol=1e-6)
+
+    def test_pick_snaps_to_the_undrawn_surface(self):
+        import trimesh
+
+        target = np.array([0.123, -0.271, 0.5])
+        pick, camera, ndc = self._box_pick(target)
+        smaller = trimesh.creation.box((0.9, 0.9, 0.9))
+        point = scene_objects.pick_world_point(pick, camera, ndc, (smaller.vertices, smaller.faces))
+        self.assertAlmostEqual(point[2], 0.45, places=9)
+        origin, direction = scene_objects.view_ray(camera, ndc)
+        np.testing.assert_allclose(np.cross(point - origin, direction), 0, atol=1e-9)
+
+    def test_pick_follows_the_mesh_transform(self):
+        target = np.array([0.2, 0.1, 0.5])
+        pick, camera, ndc = self._box_pick(target)
+        pick["world_object"].local.position = (0, 0, 0)  # identity: same answer
+        point = scene_objects.pick_world_point(pick, camera, ndc)
+        np.testing.assert_allclose(point, target, atol=1e-6)
+
+    def test_non_mesh_pick_is_ignored(self):
+        self.assertIsNone(scene_objects.pick_world_point({"world_object": None}, gfx.PerspectiveCamera(), (0, 0)))
+
+    def test_ruler_group_for_one_and_two_points(self):
+        one = scene_objects.build_ruler_group([(0, 0, 0)])
+        self.assertEqual([type(c) for c in one.children], [gfx.Points])
+        two = scene_objects.build_ruler_group([(0, 0, 0), (0.3, 0.4, 0)])
+        points, line, label = two.children
+        self.assertIsInstance(line, gfx.Line)
+        self.assertIsInstance(label, gfx.Text)
+        np.testing.assert_allclose(label.local.position, (0.15, 0.2, 0))
+        self.assertFalse(line.material.depth_test)
+
+    def test_readout_text(self):
+        from panels import format_ruler_text
+
+        self.assertIn("click two points", format_ruler_text([]))
+        self.assertIn("Click a second point", format_ruler_text([(1, 2, 3)]))
+        text = format_ruler_text([(0, 0, 0), (0.3, 0.4, 0)])
+        self.assertIn("Distance: 0.5000 m", text)
+        self.assertIn("(0.3000, 0.4000, 0.0000)", text)
+
+
 if __name__ == "__main__":
     unittest.main()

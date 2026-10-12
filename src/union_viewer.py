@@ -29,8 +29,10 @@ from scene_objects import (
     build_counts_group,
     build_gfx_group,
     build_ray_group,
+    build_ruler_group,
     grid_size_for_bbox,
     make_coordinate_axes,
+    pick_world_point,
 )
 from background import JobRunner
 from qt_helpers import ask_color
@@ -43,6 +45,7 @@ from panels import (
     MesherPanel,
     ParametersPanel,
     RaysPanel,
+    RulerPanel,
     SettingsPanel,
 )
 
@@ -125,6 +128,11 @@ class Viewer(QtWidgets.QMainWindow):
         self.grid = None
         self._resize_grid(None)
 
+        self.ruler_points = []
+        self.ruler_group = None
+        self._ruler_press = None
+        self.renderer.add_event_handler(self.on_ruler_pointer, "pointer_down", "pointer_up")
+
         self.gizmo_viewport = Viewport(self.renderer, (0, 0, 120, 120))
         self.gizmo_scene = gfx.Scene()
         self.gizmo = make_coordinate_axes(length=1.0, tick_spacing=0.5, tick_size=0.05)
@@ -167,6 +175,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.params_panel = ParametersPanel()
         self.mesher_panel = MesherPanel()
         self.clipping_panel = ClippingPanel()
+        self.ruler_panel = RulerPanel()
         self.rays_panel = RaysPanel()
         self.counts_panel = CountsPanel()
         self.geometry_panel = GeometryPanel()
@@ -175,6 +184,7 @@ class Viewer(QtWidgets.QMainWindow):
         self._add_dock("Instrument Parameters", self.params_panel, stretch=False)
         self._add_dock("Mesher Options", self.mesher_panel)
         self._add_dock("Clipping", self.clipping_panel)
+        self._add_dock("Ruler", self.ruler_panel)
         self._add_dock("Neutron Rays", self.rays_panel)
         self._add_dock("Detector Counts", self.counts_panel)
         self.geometry_dock = self._add_dock("Visible Geometries", self.geometry_panel)
@@ -208,6 +218,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.params_panel.edited.connect(self.on_params_edited)
         self.mesher_panel.changed.connect(self.on_mesher_options_changed)
         self.clipping_panel.changed.connect(self.apply_clipping)
+        self.ruler_panel.clear_button.clicked.connect(self.clear_ruler)
 
         rays = self.rays_panel
         rays.rerun_requested.connect(self.rerun_rays)
@@ -898,6 +909,54 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_vacuum_changed(self):
         self.apply_geometry_visibility()
+
+    # ========================================================
+    # Ruler
+    # ========================================================
+
+    def on_ruler_pointer(self, event):
+        """While measuring, a left click (press and release without
+        dragging) on a mesh adds a ruler point."""
+        if not self.ruler_panel.measure_checkbox.isChecked() or event.button != 1:
+            return
+        if event.type == "pointer_down":
+            self._ruler_press = (event.x, event.y)
+            return
+        press, self._ruler_press = self._ruler_press, None
+        if press is None or np.hypot(event.x - press[0], event.y - press[1]) > 4:
+            return
+        pick_info = self.renderer.get_pick_info((event.x, event.y))
+        w, h = self.renderer.logical_size
+        ndc = (2 * event.x / w - 1, 1 - 2 * event.y / h)
+        point = pick_world_point(pick_info, self.camera, ndc, self._union_surface(pick_info))
+        if point is None:
+            return
+        points = [] if len(self.ruler_points) == 2 else self.ruler_points
+        self.set_ruler_points(points + [point])
+
+    def _union_surface(self, pick_info):
+        """(vertices, faces) of the Union mesh a pick hit, which is drawn
+        RENDER_OFFSET outward from it, or None for anything else."""
+        if self.current_group is None:
+            return None
+        for key, mesh in self.current_group.geometry_meshes.items():
+            if pick_info.get("world_object") is mesh:
+                source = self.current_group.geometry_trimeshes[key]
+                return source.vertices, source.faces
+        return None
+
+    def set_ruler_points(self, points):
+        self.ruler_points = list(points)
+        if self.ruler_group is not None:
+            self.scene.remove(self.ruler_group)
+            self.ruler_group = None
+        if self.ruler_points:
+            self.ruler_group = build_ruler_group(self.ruler_points)
+            self.scene.add(self.ruler_group)
+        self.ruler_panel.show_points(self.ruler_points)
+
+    def clear_ruler(self):
+        self.set_ruler_points([])
 
     # ========================================================
     # Reset view
