@@ -280,6 +280,17 @@ class FeatureEdgesTest(unittest.TestCase):
         self.assertIs(lines.parent, group.geometry_meshes["Al"])
         self.assertEqual(len(lines.geometry.positions.data), 24)
 
+    def test_edge_lines_are_drawn_outside_the_surface(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        (lines,) = group.edge_lines
+        expected = mesh.vertices + mesh.vertex_normals * scene_objects.EDGE_OFFSET
+        edges = scene_objects.feature_edges(mesh)
+        np.testing.assert_allclose(lines.geometry.positions.data, expected[edges].reshape(-1, 3), atol=1e-7)
+        self.assertGreater(scene_objects.EDGE_OFFSET, scene_objects.RENDER_OFFSET)
+
 
 if __name__ == "__main__":
     unittest.main()

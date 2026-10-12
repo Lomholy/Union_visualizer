@@ -34,6 +34,9 @@ RENDER_OFFSET = 2e-4
 # lines, like FreeCAD's edges. Open boundaries are always drawn.
 FEATURE_EDGE_ANGLE = np.radians(30)
 EDGE_COLOR = "#000000"
+# How far, in metres, edge lines are drawn outward along the vertex normals,
+# beyond the surface's RENDER_OFFSET, so they don't z-fight with it.
+EDGE_OFFSET = 1e-3
 
 
 def feature_edges(mesh, angle=FEATURE_EDGE_ANGLE):
@@ -82,7 +85,7 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
 
         edges = feature_edges(mesh)
         if len(edges):
-            lines = build_edge_lines(offset.vertices, edges)
+            lines = build_edge_lines(mesh.vertices + mesh.vertex_normals * EDGE_OFFSET, edges)
             gfx_mesh.add(lines)
             group.edge_lines.append(lines)
 
