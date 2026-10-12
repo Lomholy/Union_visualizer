@@ -320,23 +320,17 @@ def make_coordinate_axes(
     return group
 
 
-# (intensity, position) of each directional light, all aimed at the origin:
-# two main lights from opposite corners and a soft fill light.
-DIRECTIONAL_LIGHTS = (
-    (1.5, (1, 1, 1)),
-    (1.5, (-1, -1, -1)),
-    (0.5, (-1, 1, -1)),
-)
+AMBIENT_INTENSITY = 0.6
+# A directional light attached to the camera, shining along the view
+# direction, so the faces being looked at are always lit.
+HEADLIGHT_INTENSITY = 2.0
 
 
-def add_default_lights(scene):
-    """A soft ambient light plus DIRECTIONAL_LIGHTS."""
-    scene.add(gfx.AmbientLight(intensity=0.6))
-    for intensity, position in DIRECTIONAL_LIGHTS:
-        light = gfx.DirectionalLight(intensity=intensity)
-        light.local.position = position
-        light.look_at((0, 0, 0))
-        scene.add(light)
+def add_default_lights(scene, camera):
+    """An ambient light plus a headlight on camera (which is added to scene)."""
+    scene.add(gfx.AmbientLight(intensity=AMBIENT_INTENSITY))
+    camera.add(gfx.DirectionalLight(intensity=HEADLIGHT_INTENSITY))
+    scene.add(camera)
 
 
 # ============================================================

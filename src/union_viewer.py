@@ -106,13 +106,13 @@ class Viewer(QtWidgets.QMainWindow):
         # Scene
         # ----------------------------------------------------
         self.scene = gfx.Scene()
-        add_default_lights(self.scene)
         # ----------------------------------------------------
         # Camera
         # ----------------------------------------------------
         self.camera = gfx.PerspectiveCamera(35)
         self.camera.local.position = (0, 1, 10)
         self.camera.look_at((0, 0, 0))
+        add_default_lights(self.scene, self.camera)
         self.controller = gfx.OrbitController(
             self.camera,
             register_events=self.renderer,
