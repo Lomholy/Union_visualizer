@@ -49,8 +49,10 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
             faces=mesh.faces,
             process=False,
         )
+        # Split vertices at sharp edges so flat faces aren't shaded with
+        # normals averaged across them.
         gfx_mesh = gfx.Mesh(
-            gfx.geometry_from_trimesh(offset),
+            gfx.geometry_from_trimesh(offset.smooth_shaded),
             gfx.MeshStandardMaterial(
                 color=colors[key],
                 metalness=0,
