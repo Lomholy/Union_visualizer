@@ -321,15 +321,20 @@ def make_coordinate_axes(
 
 
 AMBIENT_INTENSITY = 0.6
-# A directional light attached to the camera, shining along the view
-# direction, so the faces being looked at are always lit.
+# A directional light attached to the camera, so the faces being looked at
+# are always lit. It sits at HEADLIGHT_OFFSET in camera coordinates (x right,
+# y up) and shines at the point 1 m in front of the camera, so it comes from
+# the upper left, about 25 degrees off the view axis.
 HEADLIGHT_INTENSITY = 2.0
+HEADLIGHT_OFFSET = (-0.33, 0.33, 0)
 
 
 def add_default_lights(scene, camera):
     """An ambient light plus a headlight on camera (which is added to scene)."""
     scene.add(gfx.AmbientLight(intensity=AMBIENT_INTENSITY))
-    camera.add(gfx.DirectionalLight(intensity=HEADLIGHT_INTENSITY))
+    headlight = gfx.DirectionalLight(intensity=HEADLIGHT_INTENSITY)
+    headlight.local.position = HEADLIGHT_OFFSET
+    camera.add(headlight)
     scene.add(camera)
 
 
