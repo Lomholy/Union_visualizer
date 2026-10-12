@@ -80,6 +80,7 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
                 color=colors[key],
                 metalness=0,
                 roughness=0.8,
+                pick_write=True,
             ),
         )
 
@@ -122,6 +123,7 @@ def build_component_group(components, colors):
                         alpha_mode="blend",
                         side="both",
                         roughness=0.8,
+                        pick_write=True,
                     ),
                 )
             )
@@ -365,3 +367,106 @@ def grid_size_for_bbox(bbox, minimum=DEFAULT_GRID_SIZE, margin=1.2):
     extent = bmax - bmin
     footprint = max(extent[0], extent[2])
     return max(minimum, footprint * margin)
+
+
+# ============================================================
+# Ruler
+# ============================================================
+
+RULER_COLOR = "#ffffff"
+# Drawn after everything else and without depth testing, so the ruler stays
+# visible through geometry.
+RULER_RENDER_QUEUE = 4000
+
+
+def view_ray(camera, ndc):
+    """Origin and direction (not normalized) of the view ray through ndc,
+    a pixel's (x, y) in normalized device coordinates."""
+    inverse = np.linalg.inv(camera.camera_matrix)
+    near, far = (inverse @ (ndc[0], ndc[1], z, 1.0) for z in (0.0, 1.0))
+    near, far = near[:3] / near[3], far[:3] / far[3]
+    return near, far - near
+
+
+def ray_triangle_hits(origin, direction, triangles):
+    """Points where the ray hits any of triangles (n x 3 x 3), in front of
+    its origin (Moller-Trumbore)."""
+    edge1 = triangles[:, 1] - triangles[:, 0]
+    edge2 = triangles[:, 2] - triangles[:, 0]
+    p = np.cross(direction, edge2)
+    det = np.einsum("ij,ij->i", edge1, p)
+    ok = np.abs(det) > 1e-15
+    inv_det = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+    s = origin - triangles[:, 0]
+    u = np.einsum("ij,ij->i", s, p) * inv_det
+    q = np.cross(s, edge1)
+    v = (q @ direction) * inv_det
+    t = np.einsum("ij,ij->i", edge2, q) * inv_det
+    hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
+    return origin + t[hit, None] * direction
+
+
+def pick_world_point(pick_info, camera, ndc, surface=None):
+    """World position on the mesh under a pick from
+    renderer.get_pick_info(), or None if no mesh was hit. ndc is the picked
+    pixel's (x, y) in normalized device coordinates. The pick identifies
+    the drawn triangle, and the point is where the view ray meets its
+    plane. surface, the (vertices, faces) of the exact surface a mesh is
+    drawn slightly offset from, moves the point to the ray's hit on it
+    nearest to that."""
+    obj = pick_info.get("world_object")
+    if not isinstance(obj, gfx.Mesh) or "face_index" not in pick_info:
+        return None
+    face = obj.geometry.indices.data[pick_info["face_index"]]
+    local = obj.geometry.positions.data[face].astype(float)
+    matrix = obj.world.matrix
+    corners = local @ matrix[:3, :3].T + matrix[:3, 3]
+    normal = np.cross(corners[1] - corners[0], corners[2] - corners[0])
+
+    origin, direction = view_ray(camera, ndc)
+    denominator = normal @ direction
+    if abs(denominator) < 1e-15:
+        point = np.asarray(pick_info["face_coord"]) @ corners
+    else:
+        point = origin + direction * (normal @ (corners[0] - origin)) / denominator
+
+    if surface is not None:
+        vertices, faces = surface
+        hits = ray_triangle_hits(origin, direction, np.asarray(vertices, dtype=float)[faces])
+        if len(hits):
+            point = hits[np.argmin(np.linalg.norm(hits - point, axis=1))]
+    return point
+
+
+def build_ruler_group(points):
+    """Markers at points (one or two world positions) and, for two, the
+    line between them labelled with its length in metres."""
+    group = gfx.Group()
+    positions = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+    overlay = {"depth_test": False, "render_queue": RULER_RENDER_QUEUE}
+    group.add(
+        gfx.Points(
+            gfx.Geometry(positions=positions),
+            gfx.PointsMaterial(size=8, color=RULER_COLOR, **overlay),
+        )
+    )
+    if len(positions) == 2:
+        group.add(
+            gfx.Line(
+                gfx.Geometry(positions=positions),
+                gfx.LineMaterial(thickness=2, color=RULER_COLOR, **overlay),
+            )
+        )
+        label = gfx.Text(
+            text=f"{np.linalg.norm(positions[1] - positions[0]):.4f} m",
+            font_size=16,
+            screen_space=True,
+            anchor="bottom-center",
+            material=gfx.TextMaterial(
+                color=RULER_COLOR, outline_color="#000", outline_thickness=0.3, **overlay
+            ),
+        )
+        label.local.position = positions.mean(axis=0)
+        group.add(label)
+    return group
+
