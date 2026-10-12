@@ -205,9 +205,31 @@ class BuildGfxGroupOffsetTest(unittest.TestCase):
 
         mesh = trimesh.creation.box()
         group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
-        drawn = group.geometry_meshes["Al"].geometry.positions.data
+        geometry = group.geometry_meshes["Al"].geometry
+        offset = mesh.vertices + mesh.vertex_normals * scene_objects.RENDER_OFFSET
+
+        def sorted_triangles(triangles):
+            return sorted(tuple(np.round(t, 6).ravel()) for t in triangles)
+
         np.testing.assert_allclose(
-            drawn, mesh.vertices + mesh.vertex_normals * scene_objects.RENDER_OFFSET, atol=1e-7
+            sorted_triangles(geometry.positions.data[geometry.indices.data]),
+            sorted_triangles(offset[mesh.faces]),
+            atol=1e-6,
+        )
+
+    def test_flat_faces_are_shaded_with_their_face_normal(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        geometry = group.geometry_meshes["Al"].geometry
+        corners = geometry.positions.data[geometry.indices.data]
+        face_normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True)
+        np.testing.assert_allclose(
+            geometry.normals.data[geometry.indices.data],
+            np.repeat(face_normals[:, None, :], 3, axis=1),
+            atol=1e-6,
         )
 
     def test_coincident_opposite_faces_are_drawn_apart(self):
