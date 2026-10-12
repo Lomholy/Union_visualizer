@@ -75,11 +75,7 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
         )
         gfx_mesh = gfx.Mesh(
             gfx.geometry_from_trimesh(offset),
-            gfx.MeshStandardMaterial(
-                color=colors[key],
-                metalness=0,
-                roughness=0.8,
-            ),
+            gfx.MeshBasicMaterial(color=colors[key]),
         )
 
         overlay = build_face_overlay(offset)
