@@ -30,6 +30,25 @@ import logger_output
 # facing the camera in front, so they don't z-fight.
 RENDER_OFFSET = 2e-4
 
+# Edges between faces meeting at more than this angle (radians) are drawn as
+# lines, like FreeCAD's edges. Open boundaries are always drawn.
+FEATURE_EDGE_ANGLE = np.radians(30)
+EDGE_COLOR = "#000000"
+
+
+def feature_edges(mesh, angle=FEATURE_EDGE_ANGLE):
+    """Vertex index pairs of mesh's sharp edges and open boundary edges."""
+    sharp = mesh.face_adjacency_edges[mesh.face_adjacency_angles > angle]
+    boundary = mesh.edges_sorted[trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1)]
+    return np.concatenate([sharp, boundary.reshape(-1, 2)])
+
+
+def build_edge_lines(vertices, edges):
+    return gfx.Line(
+        gfx.Geometry(positions=vertices[edges].reshape(-1, 3).astype(np.float32)),
+        gfx.LineSegmentMaterial(thickness=1, color=EDGE_COLOR),
+    )
+
 
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects,
@@ -40,6 +59,7 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     group.geometry_meshes = {}
     group.geometry_is_vacuum = geometry_is_vacuum
     group.geometry_trimeshes = render_meshes
+    group.edge_lines = []
 
     for key, mesh in render_meshes.items():
         assign_default_color(colors, key)
@@ -59,6 +79,12 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
                 roughness=0.8,
             ),
         )
+
+        edges = feature_edges(mesh)
+        if len(edges):
+            lines = build_edge_lines(offset.vertices, edges)
+            gfx_mesh.add(lines)
+            group.edge_lines.append(lines)
 
         group.add(gfx_mesh)
         group.geometry_meshes[key] = gfx_mesh
