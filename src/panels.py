@@ -114,9 +114,6 @@ class SettingsPanel(QtWidgets.QWidget):
         self.grid_checkbox = make_checkbox("Show grid", True)
         self.gizmo_checkbox = make_checkbox("Show gizmo", True)
         self.axes_checkbox = make_checkbox("Show xyz axes", True)
-        self.normals_checkbox = make_checkbox(
-            "Show face normals", False, "Draw each Union mesh face's normal vector and triangle edges."
-        )
         self.trace_status_label = make_note_label()
         self.reset_view_button = make_button("Reset view", "Refit the camera (shortcut: R)")
         self.fit_instrument_button = make_button(
@@ -142,7 +139,6 @@ class SettingsPanel(QtWidgets.QWidget):
             self.grid_checkbox,
             self.gizmo_checkbox,
             self.axes_checkbox,
-            self.normals_checkbox,
             self.trace_status_label,
             self.reset_view_button,
             self.fit_instrument_button,

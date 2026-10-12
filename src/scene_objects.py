@@ -30,29 +30,6 @@ import logger_output
 # facing the camera in front, so they don't z-fight.
 RENDER_OFFSET = 2e-4
 
-# Length, in metres, of the drawn face normals (the size of an Arm's axes).
-NORMAL_LENGTH = 0.2
-NORMAL_COLOR = "#ff00ff"
-EDGE_COLOR = "#000000"
-
-
-def _segment_line(segments, color):
-    return gfx.Line(
-        gfx.Geometry(positions=segments.reshape(-1, 3).astype(np.float32)),
-        gfx.LineSegmentMaterial(thickness=1, color=color),
-    )
-
-
-def build_face_overlay(mesh, length=NORMAL_LENGTH):
-    """A Group with every triangle edge and one segment per face from its
-    centre along its normal."""
-    starts = mesh.triangles_center
-    normals = np.stack([starts, starts + mesh.face_normals * length], axis=1)
-    overlay = gfx.Group()
-    overlay.add(_segment_line(mesh.vertices[mesh.edges_unique], EDGE_COLOR))
-    overlay.add(_segment_line(normals, NORMAL_COLOR))
-    return overlay
-
 
 def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects,
@@ -63,7 +40,6 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
     group.geometry_meshes = {}
     group.geometry_is_vacuum = geometry_is_vacuum
     group.geometry_trimeshes = render_meshes
-    group.face_overlays = []
 
     for key, mesh in render_meshes.items():
         assign_default_color(colors, key)
@@ -81,11 +57,6 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
                 roughness=0.8,
             ),
         )
-
-        overlay = build_face_overlay(offset)
-        overlay.visible = False
-        gfx_mesh.add(overlay)
-        group.face_overlays.append(overlay)
 
         group.add(gfx_mesh)
         group.geometry_meshes[key] = gfx_mesh
