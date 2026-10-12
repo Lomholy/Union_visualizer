@@ -317,8 +317,8 @@ class Viewer(QtWidgets.QMainWindow):
         if self.current_group is None:
             return
         show = self.settings_panel.normals_checkbox.isChecked()
-        for normals in self.current_group.normal_lines:
-            normals.visible = show
+        for overlay in self.current_group.face_overlays:
+            overlay.visible = show
 
     def on_geometry_visibility_changed(self, name, checked):
         self.apply_geometry_visibility()
