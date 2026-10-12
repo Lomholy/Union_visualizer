@@ -114,6 +114,9 @@ class SettingsPanel(QtWidgets.QWidget):
         self.grid_checkbox = make_checkbox("Show grid", True)
         self.gizmo_checkbox = make_checkbox("Show gizmo", True)
         self.axes_checkbox = make_checkbox("Show xyz axes", True)
+        self.edges_checkbox = make_checkbox(
+            "Show edges", True, "Draw the sharp edges of the Union meshes as lines."
+        )
         self.trace_status_label = make_note_label()
         self.reset_view_button = make_button("Reset view", "Refit the camera (shortcut: R)")
         self.fit_instrument_button = make_button(
@@ -139,6 +142,7 @@ class SettingsPanel(QtWidgets.QWidget):
             self.grid_checkbox,
             self.gizmo_checkbox,
             self.axes_checkbox,
+            self.edges_checkbox,
             self.trace_status_label,
             self.reset_view_button,
             self.fit_instrument_button,

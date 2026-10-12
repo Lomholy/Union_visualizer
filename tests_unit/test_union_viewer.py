@@ -247,5 +247,50 @@ class BuildGfxGroupOffsetTest(unittest.TestCase):
         np.testing.assert_allclose(z["Al"] - z["Air"], 2 * scene_objects.RENDER_OFFSET, atol=1e-7)
 
 
+
+class FeatureEdgesTest(unittest.TestCase):
+    def test_box_has_its_twelve_edges(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        edges = scene_objects.feature_edges(mesh)
+        self.assertEqual(len(edges), 12)
+        lengths = np.linalg.norm(np.diff(mesh.vertices[edges], axis=1)[:, 0], axis=1)
+        np.testing.assert_allclose(lengths, 1.0)
+
+    def test_smooth_sphere_has_none_and_draws_no_lines(self):
+        import trimesh
+
+        mesh = trimesh.creation.icosphere(subdivisions=3)
+        self.assertEqual(len(scene_objects.feature_edges(mesh)), 0)
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        self.assertEqual(group.edge_lines, [])
+
+    def test_open_boundary_is_drawn(self):
+        import trimesh
+
+        triangle = trimesh.Trimesh([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]], process=False)
+        self.assertEqual(len(scene_objects.feature_edges(triangle)), 3)
+
+    def test_edge_lines_are_children_of_their_mesh(self):
+        import trimesh
+
+        group = scene_objects.build_gfx_group({"Al": trimesh.creation.box()}, {"Al": False}, {})
+        (lines,) = group.edge_lines
+        self.assertIs(lines.parent, group.geometry_meshes["Al"])
+        self.assertEqual(len(lines.geometry.positions.data), 24)
+
+    def test_edge_lines_are_drawn_outside_the_surface(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        (lines,) = group.edge_lines
+        expected = mesh.vertices + mesh.vertex_normals * scene_objects.EDGE_OFFSET
+        edges = scene_objects.feature_edges(mesh)
+        np.testing.assert_allclose(lines.geometry.positions.data, expected[edges].reshape(-1, 3), atol=1e-7)
+        self.assertGreater(scene_objects.EDGE_OFFSET, scene_objects.RENDER_OFFSET)
+
+
 if __name__ == "__main__":
     unittest.main()

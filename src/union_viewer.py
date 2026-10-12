@@ -195,6 +195,7 @@ class Viewer(QtWidgets.QMainWindow):
         settings.components_checkbox.stateChanged.connect(self.on_components_changed)
         settings.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
+        settings.edges_checkbox.stateChanged.connect(self.apply_edges_visibility)
         for checkbox, attr in (
             (settings.grid_checkbox, "grid"),
             (settings.gizmo_checkbox, "gizmo"),
@@ -311,6 +312,13 @@ class Viewer(QtWidgets.QMainWindow):
             if hide_vacuum and is_vacuum.get(key, False):
                 visible = False
             mesh.visible = visible
+
+    def apply_edges_visibility(self):
+        if self.current_group is None:
+            return
+        show = self.settings_panel.edges_checkbox.isChecked()
+        for edges in self.current_group.edge_lines:
+            edges.visible = show
 
     def on_geometry_visibility_changed(self, name, checked):
         self.apply_geometry_visibility()
@@ -552,6 +560,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.rebuild_geometry_panel()
         self.apply_geometry_visibility()
+        self.apply_edges_visibility()
         self._resize_grid(self.current_group)
         recentre_controller(self.controller, self.current_group)
         if self.counts:
