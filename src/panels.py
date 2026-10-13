@@ -196,7 +196,7 @@ class RulerPanel(QtWidgets.QWidget):
         )
         self.point_spins = [
             [
-                make_double_spin(-1e4, 1e4, 0.0, decimals=5, step=0.001, tooltip=f"Point {i + 1} {axis} (m)")
+                make_double_spin(-1e3, 1e3, 0.0, decimals=5, step=0.001, tooltip=f"Point {i + 1} {axis} (m)")
                 for axis in "xyz"
             ]
             for i in range(2)
@@ -208,13 +208,15 @@ class RulerPanel(QtWidgets.QWidget):
 
         layout = _panel_layout(self)
         layout.addWidget(self.measure_checkbox)
+        # One column per point, its x, y and z stacked like a vector.
         grid = QtWidgets.QGridLayout()
-        for column, axis in enumerate("xyz", 1):
-            grid.addWidget(QtWidgets.QLabel(f"{axis} (m)"), 0, column, QtCore.Qt.AlignmentFlag.AlignCenter)
+        for row, axis in enumerate("xyz", 1):
+            grid.addWidget(QtWidgets.QLabel(f"{axis} (m)"), row, 0)
         for i, spins in enumerate(self.point_spins):
-            grid.addWidget(QtWidgets.QLabel(f"Point {i + 1}"), i + 1, 0)
-            for column, spin in enumerate(spins, 1):
-                grid.addWidget(spin, i + 1, column)
+            grid.addWidget(QtWidgets.QLabel(f"Point {i + 1}"), 0, i + 1, QtCore.Qt.AlignmentFlag.AlignCenter)
+            for row, spin in enumerate(spins, 1):
+                spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons)
+                grid.addWidget(spin, row, i + 1)
                 spin.valueChanged.connect(lambda _value, i=i: self._on_point_typed(i))
         layout.addLayout(grid)
         layout.addWidget(self.readout_label)
