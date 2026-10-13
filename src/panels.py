@@ -22,7 +22,7 @@ from qt_helpers import (
     set_option_enabled,
     set_swatch_color,
 )
-from scene_objects import DEFAULT_MARKER_SIZES, DEFAULT_RAY_COLORS
+from scene_objects import DEFAULT_MARKER_SIZES, DEFAULT_RAY_COLORS, RULER_COLOR
 from widgets import ColorBarWidget
 
 # The meshers offered in the dock, in display order.
@@ -161,45 +161,110 @@ class SettingsPanel(QtWidgets.QWidget):
 
 
 def format_ruler_text(points):
-    """The ruler readout for zero, one or two picked world points."""
+    """The ruler readout below the point coordinates, for zero, one or two
+    world points."""
     if not points:
-        return "Tick Measure distances, then click two points on the geometry."
-    lines = [
-        f"Point {i + 1}: ({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f}) m" for i, p in enumerate(points)
-    ]
+        return "Tick Measure distances and click two points on the geometry, or type their coordinates."
     if len(points) == 1:
-        return "\n".join(lines + ["Click a second point."])
+        return "Click or type a second point."
     delta = np.asarray(points[1]) - np.asarray(points[0])
-    lines.append(f"Distance: {np.linalg.norm(delta):.4f} m")
-    lines.append(f"dx, dy, dz: ({delta[0]:.4f}, {delta[1]:.4f}, {delta[2]:.4f}) m")
-    return "\n".join(lines)
+    return (
+        f"Distance: {np.linalg.norm(delta):.4f} m\n"
+        f"dx, dy, dz: ({delta[0]:.4f}, {delta[1]:.4f}, {delta[2]:.4f}) m"
+    )
 
 
 class RulerPanel(QtWidgets.QWidget):
-    """Measures the distance between two points clicked on the geometry.
-    While measure_checkbox is checked the Viewer turns clicks into points;
-    a third click starts a new measurement."""
+    """Measures the distance between two points, given in world coordinates
+    (m). While measure_checkbox is checked the Viewer adds clicked points
+    with add_point; a third click starts a new measurement. The coordinates
+    can also be typed or adjusted by hand. points_edited() is emitted
+    whenever the points change, color_changed(hex) when the colour does."""
+
+    points_edited = QtCore.Signal()
+    color_changed = QtCore.Signal(str)
 
     def __init__(self):
         super().__init__()
+        self.color = RULER_COLOR
+        self.point_set = [False, False]
         self.measure_checkbox = make_checkbox(
             "Measure distances",
             False,
             "Click two points on the geometry to measure the distance "
             "between them. Dragging still rotates the view.",
         )
+        self.point_spins = [
+            [
+                make_double_spin(-1e4, 1e4, 0.0, decimals=5, step=0.001, tooltip=f"Point {i + 1} {axis} (m)")
+                for axis in "xyz"
+            ]
+            for i in range(2)
+        ]
         self.readout_label = make_note_label()
         self.readout_label.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         self.clear_button = make_button("Clear", "Remove the measured points")
+        self.color_button = make_swatch_button(14, self.color, "Click to change the ruler's colour.", self._pick_color)
 
         layout = _panel_layout(self)
         layout.addWidget(self.measure_checkbox)
+        grid = QtWidgets.QGridLayout()
+        for column, axis in enumerate("xyz", 1):
+            grid.addWidget(QtWidgets.QLabel(f"{axis} (m)"), 0, column, QtCore.Qt.AlignmentFlag.AlignCenter)
+        for i, spins in enumerate(self.point_spins):
+            grid.addWidget(QtWidgets.QLabel(f"Point {i + 1}"), i + 1, 0)
+            for column, spin in enumerate(spins, 1):
+                grid.addWidget(spin, i + 1, column)
+                spin.valueChanged.connect(lambda _value, i=i: self._on_point_typed(i))
+        layout.addLayout(grid)
         layout.addWidget(self.readout_label)
-        add_row(layout, self.clear_button, stretch=True)
+        add_row(layout, self.clear_button, QtWidgets.QLabel("Colour"), self.color_button, stretch=True)
         self.show_points([])
+
+    def points(self):
+        """The points that are set, Point 1 first."""
+        return [
+            np.array([spin.value() for spin in spins])
+            for spins, is_set in zip(self.point_spins, self.point_set)
+            if is_set
+        ]
+
+    def add_point(self, point):
+        """Fill the first point that isn't set, or start a new measurement
+        at Point 1 if both are."""
+        index = self.point_set.index(False) if False in self.point_set else 0
+        if index == 0:
+            self.point_set = [False, False]
+        self._set_spins(index, point)
+        self.point_set[index] = True
+        self.points_edited.emit()
+
+    def clear(self):
+        self.point_set = [False, False]
+        for i in range(2):
+            self._set_spins(i, (0.0, 0.0, 0.0))
+        self.points_edited.emit()
 
     def show_points(self, points):
         self.readout_label.setText(format_ruler_text(points))
+
+    def _set_spins(self, index, point):
+        for spin, value in zip(self.point_spins[index], point):
+            spin.blockSignals(True)
+            spin.setValue(float(value))
+            spin.blockSignals(False)
+
+    def _on_point_typed(self, index):
+        self.point_set[index] = True
+        self.points_edited.emit()
+
+    def _pick_color(self):
+        hex_color = ask_color(self, self.color, "Ruler colour")
+        if hex_color is None:
+            return
+        self.color = hex_color
+        set_swatch_color(self.color_button, hex_color)
+        self.color_changed.emit(hex_color)
 
 
 class ParametersPanel(QtWidgets.QWidget):

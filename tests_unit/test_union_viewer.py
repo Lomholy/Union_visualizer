@@ -353,11 +353,16 @@ class RulerTest(unittest.TestCase):
         np.testing.assert_allclose(label.local.position, (0.15, 0.2, 0))
         self.assertFalse(line.material.depth_test)
 
+    def test_ruler_group_uses_the_given_colour(self):
+        group = scene_objects.build_ruler_group([(0, 0, 0), (1, 0, 0)], "#ff0000")
+        for child in group.children:
+            self.assertEqual(child.material.color.hex, "#ff0000")
+
     def test_readout_text(self):
         from panels import format_ruler_text
 
         self.assertIn("click two points", format_ruler_text([]))
-        self.assertIn("Click a second point", format_ruler_text([(1, 2, 3)]))
+        self.assertIn("type a second point", format_ruler_text([(1, 2, 3)]))
         text = format_ruler_text([(0, 0, 0), (0.3, 0.4, 0)])
         self.assertIn("Distance: 0.5000 m", text)
         self.assertIn("(0.3000, 0.4000, 0.0000)", text)

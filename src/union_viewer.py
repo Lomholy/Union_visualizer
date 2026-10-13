@@ -219,6 +219,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.mesher_panel.changed.connect(self.on_mesher_options_changed)
         self.clipping_panel.changed.connect(self.apply_clipping)
         self.ruler_panel.clear_button.clicked.connect(self.clear_ruler)
+        self.ruler_panel.points_edited.connect(self.on_ruler_points_edited)
+        self.ruler_panel.color_changed.connect(lambda _color: self.on_ruler_points_edited())
 
         rays = self.rays_panel
         rays.rerun_requested.connect(self.rerun_rays)
@@ -931,8 +933,7 @@ class Viewer(QtWidgets.QMainWindow):
         point = pick_world_point(pick_info, self.camera, ndc, self._union_surface(pick_info))
         if point is None:
             return
-        points = [] if len(self.ruler_points) == 2 else self.ruler_points
-        self.set_ruler_points(points + [point])
+        self.ruler_panel.add_point(point)
 
     def _union_surface(self, pick_info):
         """(vertices, faces) of the Union mesh a pick hit, which is drawn
@@ -951,12 +952,15 @@ class Viewer(QtWidgets.QMainWindow):
             self.scene.remove(self.ruler_group)
             self.ruler_group = None
         if self.ruler_points:
-            self.ruler_group = build_ruler_group(self.ruler_points)
+            self.ruler_group = build_ruler_group(self.ruler_points, self.ruler_panel.color)
             self.scene.add(self.ruler_group)
         self.ruler_panel.show_points(self.ruler_points)
 
+    def on_ruler_points_edited(self):
+        self.set_ruler_points(self.ruler_panel.points())
+
     def clear_ruler(self):
-        self.set_ruler_points([])
+        self.ruler_panel.clear()
 
     # ========================================================
     # Reset view
