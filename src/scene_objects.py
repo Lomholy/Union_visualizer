@@ -36,7 +36,7 @@ FEATURE_EDGE_ANGLE = np.radians(30)
 EDGE_COLOR = "#000000"
 # How far, in metres, edge lines are drawn outward along the vertex normals,
 # beyond the surface's RENDER_OFFSET, so they don't z-fight with it.
-EDGE_OFFSET = 2e-4
+EDGE_OFFSET = 3e-4
 
 
 def feature_edges(mesh, angle=FEATURE_EDGE_ANGLE):
