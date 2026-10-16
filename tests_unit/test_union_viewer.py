@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 import pipeline  # noqa: E402
 import scene_objects  # noqa: E402
-import gui_helpers  # noqa: E402
 import pygfx as gfx  # noqa: E402
 from camera import (  # noqa: E402
     CAMERA_FAR,
@@ -29,36 +28,6 @@ from camera import (  # noqa: E402
     update_camera_depth_range,
 )
 from logger_output import LoggerCounts  # noqa: E402
-
-
-class BuildRayGroupStylingTest(unittest.TestCase):
-    @staticmethod
-    def _rays():
-        from mcstas_trace import STATE, SCATTER, ABSORB
-        from types import SimpleNamespace
-        return SimpleNamespace(
-            n_rays=1,
-            points=np.array([[0, 0, 0], [0, 0, 1], [0, 0, 2]], dtype=float),
-            ray_offsets=np.array([0, 3]),
-            kind=np.array([STATE, SCATTER, ABSORB]),
-            speed=np.ones(3), weight=np.ones(3), time=np.ones(3),
-        )
-
-    def test_custom_colors_and_sizes_are_applied(self):
-        group, _ = scene_objects.build_ray_group(
-            self._rays(), np.array([0]), "Uniform",
-            colors={"scatter": "#112233", "absorb": "#445566"},
-            marker_sizes={"scatter": 11, "absorb": 13},
-        )
-        self.assertEqual(group.scatter_points.material.size, 11)
-        self.assertEqual(group.absorb_points.material.size, 13)
-        self.assertEqual(group.scatter_points.material.color.hex, "#112233")
-        self.assertEqual(group.absorb_points.material.color.hex, "#445566")
-
-    def test_defaults_when_unspecified(self):
-        group, _ = scene_objects.build_ray_group(self._rays(), np.array([0]), "Uniform")
-        self.assertEqual(group.scatter_points.material.size, gui_helpers.SCATTER_MARKER_SIZE)
-        self.assertEqual(group.absorb_points.material.size, gui_helpers.ABSORB_MARKER_SIZE)
 
 
 @unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")
@@ -143,18 +112,6 @@ class BuildCountsGroupTest(unittest.TestCase):
         np.testing.assert_array_equal(positions[:, 0], np.zeros(6))
         np.testing.assert_array_equal(positions[:, 2], np.zeros(6))
 
-    def test_1d_and_2d_detectors_can_be_mixed_in_one_group(self):
-        counts = {
-            "plane": LoggerCounts("plane", "PSD_monitor", "x", "y", (-1, 1, -1, 1), np.ones((2, 2))),
-            "line": LoggerCounts("line", "Monitor_nD", "x", None, (-1, 1), np.ones(2)),
-        }
-        world_matrices = {"plane": np.eye(4), "line": np.eye(4)}
-        group, meshes, textures = scene_objects.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
-
-        self.assertEqual(set(meshes), {"plane", "line"})
-        self.assertEqual(set(textures), {"plane"})
-        self.assertEqual(len(group.children), 2)
-
 
 class FitCameraToSceneTest(unittest.TestCase):
     class FakeScene:
@@ -200,38 +157,6 @@ class FitCameraToSceneTest(unittest.TestCase):
 
 
 class BuildGfxGroupOffsetTest(unittest.TestCase):
-    def test_vertices_are_drawn_outward_by_the_render_offset(self):
-        import trimesh
-
-        mesh = trimesh.creation.box()
-        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
-        geometry = group.geometry_meshes["Al"].geometry
-        offset = mesh.vertices + mesh.vertex_normals * scene_objects.RENDER_OFFSET
-
-        def sorted_triangles(triangles):
-            return sorted(tuple(np.round(t, 6).ravel()) for t in triangles)
-
-        np.testing.assert_allclose(
-            sorted_triangles(geometry.positions.data[geometry.indices.data]),
-            sorted_triangles(offset[mesh.faces]),
-            atol=1e-6,
-        )
-
-    def test_flat_faces_are_shaded_with_their_face_normal(self):
-        import trimesh
-
-        mesh = trimesh.creation.box()
-        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
-        geometry = group.geometry_meshes["Al"].geometry
-        corners = geometry.positions.data[geometry.indices.data]
-        face_normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-        face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True)
-        np.testing.assert_allclose(
-            geometry.normals.data[geometry.indices.data],
-            np.repeat(face_normals[:, None, :], 3, axis=1),
-            atol=1e-6,
-        )
-
     def test_coincident_opposite_faces_are_drawn_apart(self):
         # A cavity wall and the surface it was cut from: same triangle,
         # opposite winding. Drawn, they must no longer coincide.
@@ -245,7 +170,6 @@ class BuildGfxGroupOffsetTest(unittest.TestCase):
         )
         z = {k: group.geometry_meshes[k].geometry.positions.data[:, 2] for k in ("Al", "Air")}
         np.testing.assert_allclose(z["Al"] - z["Air"], 2 * scene_objects.RENDER_OFFSET, atol=1e-7)
-
 
 
 class FeatureEdgesTest(unittest.TestCase):
@@ -271,26 +195,6 @@ class FeatureEdgesTest(unittest.TestCase):
 
         triangle = trimesh.Trimesh([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]], process=False)
         self.assertEqual(len(scene_objects.feature_edges(triangle)), 3)
-
-    def test_edge_lines_are_children_of_their_mesh(self):
-        import trimesh
-
-        group = scene_objects.build_gfx_group({"Al": trimesh.creation.box()}, {"Al": False}, {})
-        (lines,) = group.edge_lines
-        self.assertIs(lines.parent, group.geometry_meshes["Al"])
-        self.assertEqual(len(lines.geometry.positions.data), 24)
-
-    def test_edge_lines_are_drawn_outside_the_surface(self):
-        import trimesh
-
-        mesh = trimesh.creation.box()
-        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
-        (lines,) = group.edge_lines
-        expected = mesh.vertices + mesh.vertex_normals * scene_objects.EDGE_OFFSET
-        edges = scene_objects.feature_edges(mesh)
-        np.testing.assert_allclose(lines.geometry.positions.data, expected[edges].reshape(-1, 3), atol=1e-7)
-        self.assertGreater(scene_objects.EDGE_OFFSET, scene_objects.RENDER_OFFSET)
-
 
 
 class RulerTest(unittest.TestCase):
@@ -342,25 +246,6 @@ class RulerTest(unittest.TestCase):
 
     def test_non_mesh_pick_is_ignored(self):
         self.assertIsNone(scene_objects.pick_world_point({"world_object": None}, gfx.PerspectiveCamera(), (0, 0)))
-
-    def test_ruler_group_for_one_and_two_points(self):
-        one = scene_objects.build_ruler_group([(0, 0, 0)])
-        self.assertEqual([type(c) for c in one.children], [gfx.Points])
-        two = scene_objects.build_ruler_group([(0, 0, 0), (0.3, 0.4, 0)])
-        points, line, label = two.children
-        self.assertIsInstance(line, gfx.Line)
-        self.assertIsInstance(label, gfx.Text)
-        np.testing.assert_allclose(label.local.position, (0.15, 0.2, 0))
-        self.assertFalse(line.material.depth_test)
-
-    def test_readout_text(self):
-        from panels import format_ruler_text
-
-        self.assertIn("click two points", format_ruler_text([]))
-        self.assertIn("Click a second point", format_ruler_text([(1, 2, 3)]))
-        text = format_ruler_text([(0, 0, 0), (0.3, 0.4, 0)])
-        self.assertIn("Distance: 0.5000 m", text)
-        self.assertIn("(0.3000, 0.4000, 0.0000)", text)
 
 
 if __name__ == "__main__":

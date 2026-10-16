@@ -36,7 +36,7 @@ FEATURE_EDGE_ANGLE = np.radians(30)
 EDGE_COLOR = "#000000"
 # How far, in metres, edge lines are drawn outward along the vertex normals,
 # beyond the surface's RENDER_OFFSET, so they don't z-fight with it.
-EDGE_OFFSET = 1e-3
+EDGE_OFFSET = 3e-4
 
 
 def feature_edges(mesh, angle=FEATURE_EDGE_ANGLE):
@@ -438,23 +438,23 @@ def pick_world_point(pick_info, camera, ndc, surface=None):
     return point
 
 
-def build_ruler_group(points):
+def build_ruler_group(points, color=RULER_COLOR):
     """Markers at points (one or two world positions) and, for two, the
-    line between them labelled with its length in metres."""
+    line between them labelled with its length in metres, all in color."""
     group = gfx.Group()
     positions = np.asarray(points, dtype=np.float32).reshape(-1, 3)
     overlay = {"depth_test": False, "render_queue": RULER_RENDER_QUEUE}
     group.add(
         gfx.Points(
             gfx.Geometry(positions=positions),
-            gfx.PointsMaterial(size=8, color=RULER_COLOR, **overlay),
+            gfx.PointsMaterial(size=8, color=color, **overlay),
         )
     )
     if len(positions) == 2:
         group.add(
             gfx.Line(
                 gfx.Geometry(positions=positions),
-                gfx.LineMaterial(thickness=2, color=RULER_COLOR, **overlay),
+                gfx.LineMaterial(thickness=2, color=color, **overlay),
             )
         )
         label = gfx.Text(
@@ -463,7 +463,7 @@ def build_ruler_group(points):
             screen_space=True,
             anchor="bottom-center",
             material=gfx.TextMaterial(
-                color=RULER_COLOR, outline_color="#000", outline_thickness=0.3, **overlay
+                color=color, outline_color="#000", outline_thickness=0.3, **overlay
             ),
         )
         label.local.position = positions.mean(axis=0)
