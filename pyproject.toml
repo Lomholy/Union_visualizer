@@ -19,8 +19,10 @@ unviz = "cli:main"
 [tool.setuptools]
 package-dir = { "" = "src" }
 py-modules = [
+    "background",
     "bounding_box",
     "brep",
+    "camera",
     "cli",
     "clipping",
     "dual_cont",
@@ -28,8 +30,13 @@ py-modules = [
     "logger_output",
     "mcstas_trace",
     "meshing",
+    "panels",
+    "pipeline",
     "plot_union_cloud",
     "preprocess",
+    "qt_helpers",
+    "scene_objects",
     "signed_distance_functions",
     "union_viewer",
+    "widgets",
 ]

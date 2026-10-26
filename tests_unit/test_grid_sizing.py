@@ -1,4 +1,4 @@
-"""Tests for union_viewer.grid_size_for_bbox: the floor grid's footprint
+"""Tests for scene_objects.grid_size_for_bbox: the floor grid's footprint
 should grow to cover instruments larger than the default grid, and stay at
 the default for anything smaller.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from union_viewer import DEFAULT_GRID_SIZE, grid_size_for_bbox  # noqa: E402
+from scene_objects import DEFAULT_GRID_SIZE, grid_size_for_bbox  # noqa: E402
 
 
 class TestGridSizeForBbox(unittest.TestCase):

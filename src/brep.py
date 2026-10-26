@@ -369,6 +369,10 @@ def build_single_brep_mesh(
         print(f"WARNING: empty mesh for {comp.name}")
         return None
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    # OCC leaves zero-area triangles at the poles of spheres; they make an
+    # otherwise closed mesh non-watertight, so clipped exports can't be capped.
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.remove_unreferenced_vertices()
 
     return mesh
 

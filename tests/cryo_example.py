@@ -328,21 +328,24 @@ spot_dir = instrument.add_component("spot_dir", "Arm",
                                     RELATIVE="orange")
 spot_dir.set_ROTATED([0, "tag_angle", 0], RELATIVE="orange")
 
-# Set up a conditional component targeting all our loggers
-PSD_conditional = instrument.add_component("space_all_PSD_conditional", "Union_conditional_PSD")
-
+# Set up conditional components targeting all our loggers. Union_conditional_PSD
+# crashes on target_loggers longer than 511 characters (mccode-dev/McCode#2788),
+# so the loggers are split over several conditionals of 14 each.
 target_loggers = []
 for comp in instrument.component_list:
     if "_con_" in comp.name:
         target_loggers.append(comp.name)
 
-PSD_conditional.target_loggers = '"' + ",".join(target_loggers) + '"'
-PSD_conditional.xwidth = instrument.add_parameter("double", "conditional_xwidth", value=0.05)
-PSD_conditional.yheight = 0.2
-PSD_conditional.time_min = "tag_time-0.5*tag_interval"
-PSD_conditional.time_max = "tag_time+0.5*tag_interval"
-# Ensure the position of the conditional rectangle is on the detector surface
-PSD_conditional.set_AT([0, 0, 0.5], RELATIVE=spot_dir) 
+conditional_xwidth = instrument.add_parameter("double", "conditional_xwidth", value=0.05)
+for index, start in enumerate(range(0, len(target_loggers), 14), 1):
+    PSD_conditional = instrument.add_component(f"space_all_PSD_conditional_{index}", "Union_conditional_PSD")
+    PSD_conditional.target_loggers = '"' + ",".join(target_loggers[start:start + 14]) + '"'
+    PSD_conditional.xwidth = conditional_xwidth
+    PSD_conditional.yheight = 0.2
+    PSD_conditional.time_min = "tag_time-0.5*tag_interval"
+    PSD_conditional.time_max = "tag_time+0.5*tag_interval"
+    # Ensure the position of the conditional rectangle is on the detector surface
+    PSD_conditional.set_AT([0, 0, 0.5], RELATIVE=spot_dir) 
 
 
 master = instrument.add_component("master", "Union_master")

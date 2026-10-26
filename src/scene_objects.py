@@ -1,0 +1,554 @@
+"""pygfx objects for the viewer's scene: Union meshes, McStas
+components, neutron rays, detector counts, coordinate axes and the
+floor grid sizing."""
+
+import numpy as np
+import pygfx as gfx
+import trimesh
+from gui_helpers import (
+    assign_default_color,
+    component_color_key,
+    ray_segment_indices,
+    ray_color_values,
+    colormap,
+    hex_to_rgba,
+    UNIFORM_RAY_COLOR,
+    SCATTER_MARKER_COLOR,
+    ABSORB_MARKER_COLOR,
+    TELEPORT_COLOR,
+    SCATTER_MARKER_SIZE,
+    ABSORB_MARKER_SIZE,
+)
+from mcstas_trace import SCATTER, ABSORB, TELEPORT
+import logger_output
+
+
+# How far, in metres, each Union mesh vertex is drawn outward along its
+# normal. A lower-priority volume keeps the surfaces of the components cut
+# out of it as cavity walls, coinciding with those surfaces but facing the
+# other way; drawing both moved outward separates them, with the surface
+# facing the camera in front, so they don't z-fight.
+RENDER_OFFSET = 2e-4
+
+# Edges between faces meeting at more than this angle (radians) are drawn as
+# lines, like FreeCAD's edges. Open boundaries are always drawn.
+FEATURE_EDGE_ANGLE = np.radians(30)
+EDGE_COLOR = "#000000"
+# How far, in metres, edge lines are drawn outward along the vertex normals,
+# beyond the surface's RENDER_OFFSET, so they don't z-fight with it.
+EDGE_OFFSET = 3e-4
+
+
+def feature_edges(mesh, angle=FEATURE_EDGE_ANGLE):
+    """Vertex index pairs of mesh's sharp edges and open boundary edges."""
+    sharp = mesh.face_adjacency_edges[mesh.face_adjacency_angles > angle]
+    boundary = mesh.edges_sorted[trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1)]
+    return np.concatenate([sharp, boundary.reshape(-1, 2)])
+
+
+def build_edge_lines(vertices, edges):
+    return gfx.Line(
+        gfx.Geometry(positions=vertices[edges].reshape(-1, 3).astype(np.float32)),
+        gfx.LineSegmentMaterial(thickness=1, color=EDGE_COLOR),
+    )
+
+
+def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
+    """Wrap compute_mesh_data()'s plain trimesh output into pygfx objects,
+    drawn RENDER_OFFSET outward. Cheap (no geometry kernel calls) - safe to
+    run on the GUI thread or a plain QThread."""
+    print("Defining group")
+    group = gfx.Group()
+    group.geometry_meshes = {}
+    group.geometry_is_vacuum = geometry_is_vacuum
+    group.geometry_trimeshes = render_meshes
+    group.edge_lines = []
+
+    for key, mesh in render_meshes.items():
+        assign_default_color(colors, key)
+
+        offset = trimesh.Trimesh(
+            vertices=mesh.vertices + mesh.vertex_normals * RENDER_OFFSET,
+            faces=mesh.faces,
+            process=False,
+        )
+        # Split vertices at sharp edges so flat faces aren't shaded with
+        # normals averaged across them.
+        gfx_mesh = gfx.Mesh(
+            gfx.geometry_from_trimesh(offset.smooth_shaded),
+            gfx.MeshStandardMaterial(
+                color=colors[key],
+                metalness=0,
+                roughness=0.8,
+                pick_write=True,
+            ),
+        )
+
+        edges = feature_edges(mesh)
+        if len(edges):
+            lines = build_edge_lines(mesh.vertices + mesh.vertex_normals * EDGE_OFFSET, edges)
+            gfx_mesh.add(lines)
+            group.edge_lines.append(lines)
+
+        group.add(gfx_mesh)
+        group.geometry_meshes[key] = gfx_mesh
+
+    return group
+
+
+def build_component_group(components, colors):
+    """pygfx objects for every McStas component: one Line for all of its
+    MCDISPLAY lines and one translucent Mesh for all of its solids."""
+    group = gfx.Group()
+    group.components = components
+    group.component_objects = {}
+    group.component_is_arm = {}
+    for name, comp in components.items():
+        color = assign_default_color(colors, component_color_key(name))
+        comp_group = gfx.Group()
+        if len(comp.segments):
+            comp_group.add(
+                gfx.Line(
+                    gfx.Geometry(positions=comp.segments.reshape(-1, 3).astype(np.float32)),
+                    gfx.LineSegmentMaterial(thickness=1.5, color=color),
+                )
+            )
+        if comp.solid is not None:
+            comp_group.add(
+                gfx.Mesh(
+                    gfx.geometry_from_trimesh(comp.solid),
+                    gfx.MeshStandardMaterial(
+                        color=color,
+                        opacity=0.5,
+                        alpha_mode="blend",
+                        side="both",
+                        roughness=0.8,
+                        pick_write=True,
+                    ),
+                )
+            )
+        group.add(comp_group)
+        group.component_objects[name] = comp_group
+        group.component_is_arm[name] = comp.is_arm
+    return group
+
+
+DEFAULT_RAY_COLORS = {
+    "ray": UNIFORM_RAY_COLOR,
+    "teleport": TELEPORT_COLOR,
+    "scatter": SCATTER_MARKER_COLOR,
+    "absorb": ABSORB_MARKER_COLOR,
+}
+DEFAULT_MARKER_SIZES = {
+    "scatter": SCATTER_MARKER_SIZE,
+    "absorb": ABSORB_MARKER_SIZE,
+}
+# Dash and gap lengths, in line thicknesses, of a ray segment that crosses a
+# collapsed gap.
+CUT_DASH_PATTERN = (4, 3)
+
+
+def build_ray_group(
+    rays, ray_indices, color_mode, colors=None, marker_sizes=None, cut_mask=None
+):
+    """Two separate Lines for the chosen rays, so the ordinary path and the
+    restore_neutron jumps can be shown/hidden independently:
+    group.ray_line for ordinary segments (vertex-coloured unless color_mode
+    is "Uniform") and group.teleport_line for a segment whose end point is
+    a TELEPORT. Plus Points marking scatterings and absorptions.
+    colors maps "ray", "teleport", "scatter" and "absorb" to a hex colour,
+    marker_sizes maps "scatter" and "absorb" to a point size; missing keys
+    fall back to the gui_helpers defaults. cut_mask (per point, see
+    gui_helpers.cut_rays) marks the points moved by a collapsed gap; a
+    segment joining a moved and an unmoved point crosses the gap and is
+    drawn dashed instead, as group.cut_line. Returns
+    (group, (vmin, vmax) or None)."""
+    colors = {**DEFAULT_RAY_COLORS, **(colors or {})}
+    marker_sizes = {**DEFAULT_MARKER_SIZES, **(marker_sizes or {})}
+    group = gfx.Group()
+    pairs = ray_segment_indices(rays, ray_indices)
+    # A segment "teleports" if the point it ends on is a restore_neutron
+    # duplicate.
+    is_teleport = rays.kind[pairs[:, 1]] == TELEPORT
+    crosses_cut = (
+        np.zeros(len(pairs), dtype=bool) if cut_mask is None
+        else cut_mask[pairs[:, 0]] != cut_mask[pairs[:, 1]]
+    )
+    regular_pairs = pairs[~is_teleport & ~crosses_cut]
+    teleport_pairs = pairs[is_teleport & ~crosses_cut]
+    cut_pairs = pairs[crosses_cut]
+
+    values = ray_color_values(rays, color_mode)
+    value_range = None
+    coloured_pairs = np.concatenate([regular_pairs, cut_pairs])
+    if values is not None and len(coloured_pairs):
+        used = values[coloured_pairs.ravel()]
+        value_range = (float(used.min()), float(used.max()))
+
+    def coloured_line(line_pairs, **material_kwargs):
+        positions = rays.points[line_pairs].reshape(-1, 3).astype(np.float32)
+        if value_range is None:
+            vertex_colors = np.tile(hex_to_rgba(colors["ray"]), (len(positions), 1))
+        else:
+            vertex_colors = colormap(values[line_pairs.ravel()], *value_range)
+        return gfx.Line(
+            gfx.Geometry(positions=positions, colors=vertex_colors),
+            gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex", **material_kwargs),
+        )
+
+    group.ray_line = group.cut_line = None
+    if len(regular_pairs):
+        group.ray_line = coloured_line(regular_pairs)
+        group.add(group.ray_line)
+    if len(cut_pairs):
+        group.cut_line = coloured_line(cut_pairs, dash_pattern=CUT_DASH_PATTERN)
+        group.add(group.cut_line)
+
+    group.teleport_line = None
+    if len(teleport_pairs):
+        positions = rays.points[teleport_pairs].reshape(-1, 3).astype(np.float32)
+        group.teleport_line = gfx.Line(
+            gfx.Geometry(positions=positions),
+            gfx.LineSegmentMaterial(thickness=1.5, color=colors["teleport"]),
+        )
+        group.add(group.teleport_line)
+
+    in_chosen = np.zeros(len(rays.points), dtype=bool)
+    for i in ray_indices:
+        in_chosen[rays.ray_offsets[i]:rays.ray_offsets[i + 1]] = True
+    group.scatter_points = group.absorb_points = None
+    for attr, kind, key in (
+        ("scatter_points", SCATTER, "scatter"),
+        ("absorb_points", ABSORB, "absorb"),
+    ):
+        points = rays.points[in_chosen & (rays.kind == kind)]
+        if len(points):
+            obj = gfx.Points(
+                gfx.Geometry(positions=points.astype(np.float32)),
+                gfx.PointsMaterial(size=marker_sizes[key], color=colors[key]),
+            )
+            group.add(obj)
+            setattr(group, attr, obj)
+    return group, value_range
+
+
+def _build_counts_plane(lc, world_matrix, vmin, vmax):
+    """A textured quad for a 2D LoggerCounts. Returns (mesh, texture)."""
+    local_pts = logger_output.local_corners(lc.axis1, lc.axis2, lc.limits)
+    world_pts = logger_output.world_points(local_pts, world_matrix).astype(np.float32)
+    texture = gfx.Texture(logger_output.texture_image(lc.grid, vmin, vmax), dim=2)
+    mesh = gfx.Mesh(
+        gfx.Geometry(
+            positions=world_pts,
+            indices=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
+            texcoords=np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32),
+        ),
+        # side="both": a logger's own local-frame winding has no meaningful
+        # "outward" direction to get right (same reasoning as MCDISPLAY-drawn
+        # components; see build_component_group).
+        gfx.MeshBasicMaterial(map=gfx.TextureMap(texture), color_mode="vertex_map", side="both"),
+    )
+    return mesh, texture
+
+
+def _build_counts_line(lc, world_matrix, vmin, vmax):
+    """A coloured line for a 1D LoggerCounts: one segment per bin, its two
+    endpoints both coloured by that bin's value."""
+    n_bins = len(lc.grid)
+    local_edges = logger_output.local_line_points(lc.axis1, lc.limits, n_bins)
+    world_edges = logger_output.world_points(local_edges, world_matrix).astype(np.float32)
+    positions = np.empty((2 * n_bins, 3), dtype=np.float32)
+    positions[0::2] = world_edges[:-1]
+    positions[1::2] = world_edges[1:]
+    colors = logger_output.line_vertex_colors(lc.grid, vmin, vmax)
+    return gfx.Line(
+        gfx.Geometry(positions=positions, colors=colors),
+        gfx.LineSegmentMaterial(thickness=4, color_mode="vertex"),
+    )
+
+
+def build_counts_group(counts, world_matrices, vmin, vmax):
+    """One plane (2D LoggerCounts) or coloured line (1D LoggerCounts) per
+    entry in counts (see logger_output.py), placed with world_matrices[name]
+    - skipping any detector not found there (the loaded instrument doesn't
+    match the run the counts came from). Returns (group, meshes, textures):
+    meshes/textures are {name: obj} (textures only has an entry for the 2D,
+    plane-shaped ones), so a colour-range change can restyle in place -
+    texture.set_data() for a plane, geometry.colors.set_data() for a line -
+    instead of rebuilding."""
+    group = gfx.Group()
+    meshes = {}
+    textures = {}
+    for name, lc in counts.items():
+        world_matrix = world_matrices.get(name)
+        if world_matrix is None:
+            print(f"Warning: logger '{name}' not found in the loaded instrument - skipping.")
+            continue
+        if lc.axis2 is None:
+            obj = _build_counts_line(lc, world_matrix, vmin, vmax)
+        else:
+            obj, texture = _build_counts_plane(lc, world_matrix, vmin, vmax)
+            textures[name] = texture
+        group.add(obj)
+        meshes[name] = obj
+    return group, meshes, textures
+
+
+CUT_MARKER_COLOR = "#808080"
+CUT_MARKER_MIN_SIZE = 0.2
+CUT_MARKER_TEETH = 6
+
+
+def build_cut_marker(center, direction, size, label):
+    """The break mark of a collapsed gap: a translucent square sheet of side
+    size, centred on center and facing direction, folded into a zigzag of
+    CUT_MARKER_TEETH teeth with right-angled corners, its folded edges
+    outlined and label written above it."""
+    direction = direction / np.linalg.norm(direction)
+    across = np.cross(direction, (0.0, 1.0, 0.0))
+    if np.linalg.norm(across) < 1e-6:
+        across = np.cross(direction, (1.0, 0.0, 0.0))
+    across /= np.linalg.norm(across)
+    up = np.cross(direction, across)
+
+    n = 2 * CUT_MARKER_TEETH + 1
+    step = size / (n - 1)
+    fold = np.where(np.arange(n) % 2, 0.5, -0.5) * step
+    edge = (
+        center
+        + np.linspace(-size / 2, size / 2, n)[:, None] * across
+        + fold[:, None] * direction
+    )
+    top, bottom = edge + up * size / 2, edge - up * size / 2
+    i = np.arange(n - 1)
+    faces = np.concatenate([
+        np.stack([i, i + 1, n + i], axis=1),
+        np.stack([i + 1, n + i + 1, n + i], axis=1),
+    ])
+
+    group = gfx.Group()
+    group.add(gfx.Mesh(
+        gfx.Geometry(
+            positions=np.concatenate([top, bottom]).astype(np.float32),
+            indices=faces.astype(np.int32),
+        ),
+        gfx.MeshBasicMaterial(
+            color=CUT_MARKER_COLOR, opacity=0.4, alpha_mode="blend", side="both"
+        ),
+    ))
+    for outline in (top, bottom):
+        group.add(gfx.Line(
+            gfx.Geometry(positions=outline.astype(np.float32)),
+            gfx.LineMaterial(thickness=2.0, color=CUT_MARKER_COLOR),
+        ))
+    text = gfx.Text(
+        text=label,
+        font_size=14,
+        screen_space=True,
+        anchor="bottom-center",
+        material=gfx.TextMaterial(color=CUT_MARKER_COLOR),
+    )
+    text.local.position = center + up * size * 0.6
+    group.add(text)
+    return group
+
+
+def make_coordinate_axes(
+    length=10.0,
+    tick_spacing=1.0,
+    tick_size=0.1,
+    show_labels=True,
+):
+    group = gfx.Group()
+
+    axes = [
+        ("X", (1, 0, 0), np.array([1, 0, 0])),
+        ("Y", (0, 1, 0), np.array([0, 1, 0])),
+        ("Z", (0, 0, 1), np.array([0, 0, 1])),
+    ]
+
+    for label, color, axis in axes:
+        # main axis line
+        positions = np.array([[0, 0, 0], axis * length], dtype=np.float32)
+        line = gfx.Line(
+            gfx.Geometry(positions=positions),
+            gfx.LineMaterial(thickness=2.0, color=color),
+        )
+        group.add(line)
+
+        # ticks
+        n_ticks = int(length / tick_spacing)
+        for i in range(1, n_ticks + 1):
+            p = axis * i * tick_spacing
+            perp = np.array([0, 1, 0]) if axis[0] else np.array([1, 0, 0])
+
+            tick = gfx.Line(
+                gfx.Geometry(
+                    positions=np.array(
+                        [p - perp * tick_size, p + perp * tick_size],
+                        dtype=np.float32,
+                    )
+                ),
+                gfx.LineMaterial(thickness=1.0, color=color),
+            )
+            group.add(tick)
+
+        # label
+        if show_labels:
+            text = gfx.Text(
+                text=label,
+                font_size=0.5,
+                material=gfx.materials.TextMaterial(color=color),
+            )
+            text.local.position = axis * (length + tick_size * 4)
+            group.add(text)
+
+    return group
+
+
+# (intensity, position) of each directional light, all aimed at the origin:
+# two main lights from opposite corners and a soft fill light.
+DIRECTIONAL_LIGHTS = (
+    (1.5, (1, 1, 1)),
+    (1.5, (-1, -1, -1)),
+    (0.5, (-1, 1, -1)),
+)
+
+
+def add_default_lights(scene):
+    """A soft ambient light plus DIRECTIONAL_LIGHTS."""
+    scene.add(gfx.AmbientLight(intensity=0.6))
+    for intensity, position in DIRECTIONAL_LIGHTS:
+        light = gfx.DirectionalLight(intensity=intensity)
+        light.local.position = position
+        light.look_at((0, 0, 0))
+        scene.add(light)
+
+
+# ============================================================
+# Floor grid
+# ============================================================
+
+# The floor grid defaults to this footprint (with unit-spaced divisions)
+# when nothing is loaded yet, or the loaded geometry is smaller than it.
+DEFAULT_GRID_SIZE = 100.0
+GRID_SPACING = 1.0
+MAX_GRID_DIVISIONS = 500
+
+
+def grid_size_for_bbox(bbox, minimum=DEFAULT_GRID_SIZE, margin=1.2):
+    """Pick a floor-grid size that comfortably covers a scene's footprint.
+
+    The grid lives in the xz-plane, so only the x and z extents of the
+    bounding box matter; instruments taller than the default grid (e.g. a
+    tall detector tank) don't need a larger footprint on their own.
+    """
+    if bbox is None:
+        return minimum
+    bmin, bmax = bbox
+    extent = bmax - bmin
+    footprint = max(extent[0], extent[2])
+    return max(minimum, footprint * margin)
+
+
+# ============================================================
+# Ruler
+# ============================================================
+
+RULER_COLOR = "#ffffff"
+# Drawn after everything else and without depth testing, so the ruler stays
+# visible through geometry.
+RULER_RENDER_QUEUE = 4000
+
+
+def view_ray(camera, ndc):
+    """Origin and direction (not normalized) of the view ray through ndc,
+    a pixel's (x, y) in normalized device coordinates."""
+    inverse = np.linalg.inv(camera.camera_matrix)
+    near, far = (inverse @ (ndc[0], ndc[1], z, 1.0) for z in (0.0, 1.0))
+    near, far = near[:3] / near[3], far[:3] / far[3]
+    return near, far - near
+
+
+def ray_triangle_hits(origin, direction, triangles):
+    """Points where the ray hits any of triangles (n x 3 x 3), in front of
+    its origin (Moller-Trumbore)."""
+    edge1 = triangles[:, 1] - triangles[:, 0]
+    edge2 = triangles[:, 2] - triangles[:, 0]
+    p = np.cross(direction, edge2)
+    det = np.einsum("ij,ij->i", edge1, p)
+    ok = np.abs(det) > 1e-15
+    inv_det = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+    s = origin - triangles[:, 0]
+    u = np.einsum("ij,ij->i", s, p) * inv_det
+    q = np.cross(s, edge1)
+    v = (q @ direction) * inv_det
+    t = np.einsum("ij,ij->i", edge2, q) * inv_det
+    hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
+    return origin + t[hit, None] * direction
+
+
+def pick_world_point(pick_info, camera, ndc, surface=None):
+    """World position on the mesh under a pick from
+    renderer.get_pick_info(), or None if no mesh was hit. ndc is the picked
+    pixel's (x, y) in normalized device coordinates. The pick identifies
+    the drawn triangle, and the point is where the view ray meets its
+    plane. surface, the (vertices, faces) of the exact surface a mesh is
+    drawn slightly offset from, moves the point to the ray's hit on it
+    nearest to that."""
+    obj = pick_info.get("world_object")
+    if not isinstance(obj, gfx.Mesh) or "face_index" not in pick_info:
+        return None
+    face = obj.geometry.indices.data[pick_info["face_index"]]
+    local = obj.geometry.positions.data[face].astype(float)
+    matrix = obj.world.matrix
+    corners = local @ matrix[:3, :3].T + matrix[:3, 3]
+    normal = np.cross(corners[1] - corners[0], corners[2] - corners[0])
+
+    origin, direction = view_ray(camera, ndc)
+    denominator = normal @ direction
+    if abs(denominator) < 1e-15:
+        point = np.asarray(pick_info["face_coord"]) @ corners
+    else:
+        point = origin + direction * (normal @ (corners[0] - origin)) / denominator
+
+    if surface is not None:
+        vertices, faces = surface
+        hits = ray_triangle_hits(origin, direction, np.asarray(vertices, dtype=float)[faces])
+        if len(hits):
+            point = hits[np.argmin(np.linalg.norm(hits - point, axis=1))]
+    return point
+
+
+def build_ruler_group(points, color=RULER_COLOR):
+    """Markers at points (one or two world positions) and, for two, the
+    line between them labelled with its length in metres, all in color."""
+    group = gfx.Group()
+    positions = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+    overlay = {"depth_test": False, "render_queue": RULER_RENDER_QUEUE}
+    group.add(
+        gfx.Points(
+            gfx.Geometry(positions=positions),
+            gfx.PointsMaterial(size=8, color=color, **overlay),
+        )
+    )
+    if len(positions) == 2:
+        group.add(
+            gfx.Line(
+                gfx.Geometry(positions=positions),
+                gfx.LineMaterial(thickness=2, color=color, **overlay),
+            )
+        )
+        label = gfx.Text(
+            text=f"{np.linalg.norm(positions[1] - positions[0]):.4f} m",
+            font_size=16,
+            screen_space=True,
+            anchor="bottom-center",
+            material=gfx.TextMaterial(
+                color=color, outline_color="#000", outline_thickness=0.3, **overlay
+            ),
+        )
+        label.local.position = positions.mean(axis=0)
+        group.add(label)
+    return group
+
