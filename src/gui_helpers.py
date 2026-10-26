@@ -2,6 +2,7 @@
 normalisation/grouping, vacuum detection, default colour assignment, and
 neutron ray selection/colouring."""
 
+import dataclasses
 import importlib.util
 
 import numpy as np
@@ -274,3 +275,61 @@ def colormap(values, vmin=None, vmax=None):
     stops = np.arange(len(VIRIDIS_STOPS))
     rgb = np.stack([np.interp(t, stops, VIRIDIS_STOPS[:, c]) for c in range(3)], axis=1)
     return np.concatenate([rgb, np.ones((len(values), 1))], axis=1).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Collapsing a gap between two components
+# ---------------------------------------------------------------------------
+
+BEFORE, GAP, AFTER = "before", "gap", "after"
+
+
+def cut_sides(order, from_name, to_name):
+    """{name: BEFORE | GAP | AFTER} for every component in order (instrument
+    order): up to and including from_name, strictly between the two, and
+    from to_name on."""
+    i, j = order.index(from_name), order.index(to_name)
+    return {
+        name: BEFORE if k <= i else AFTER if k >= j else GAP
+        for k, name in enumerate(order)
+    }
+
+
+def cut_shift(world_matrices, from_name, to_name, keep):
+    """Translation that moves from_name's origin along the line to to_name's
+    origin until only keep metres separate them. Zero if they are already
+    that close."""
+    start = np.asarray(world_matrices[from_name])[:3, 3]
+    end = np.asarray(world_matrices[to_name])[:3, 3]
+    gap = end - start
+    length = np.linalg.norm(gap)
+    if length <= keep:
+        return np.zeros(3)
+    return gap * (1 - keep / length)
+
+
+def cut_rays(rays, sides, shift):
+    """(rays, before) with every point in a GAP component dropped and every
+    point in a BEFORE component moved by shift. before is the per-point mask
+    of moved points, so a segment joining the two sides can be told apart.
+    Points whose component is unknown count as AFTER."""
+    names = rays.component_names
+    point_sides = np.array([
+        sides.get(names[c], AFTER) if c >= 0 else AFTER for c in rays.component
+    ])
+    keep = point_sides != GAP
+    before = point_sides[keep] == BEFORE
+    kept_so_far = np.concatenate([[0], np.cumsum(keep)])
+    points = rays.points[keep].copy()
+    points[before] += shift
+    cut = dataclasses.replace(
+        rays,
+        points=points,
+        ray_offsets=kept_so_far[rays.ray_offsets],
+        speed=rays.speed[keep],
+        time=rays.time[keep],
+        weight=rays.weight[keep],
+        component=rays.component[keep],
+        kind=rays.kind[keep],
+    )
+    return cut, before

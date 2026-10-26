@@ -374,5 +374,50 @@ class RayHelpersTest(unittest.TestCase):
         np.testing.assert_allclose(gui_helpers.colormap([2.0, 2.0])[0], gui_helpers.colormap([2.0, 2.0])[1])
 
 
+class CutHelpersTest(unittest.TestCase):
+    def setUp(self):
+        from mcstas_trace import TraceRays
+
+        # source at z=0, guide at z=1, sample at z=100.
+        self.order = ["source", "guide", "sample"]
+        self.matrices = {
+            name: np.eye(4) for name in self.order
+        }
+        for name, z in (("source", 0.0), ("guide", 1.0), ("sample", 100.0)):
+            self.matrices[name][2, 3] = z
+        # Ray 0: source, guide, sample. Ray 1: guide only.
+        self.rays = TraceRays(
+            points=np.array([[0, 0, 0], [0, 0, 1], [0, 0, 100], [0, 0, 1]], dtype=float),
+            ray_offsets=np.array([0, 3, 4]),
+            speed=np.ones(4),
+            time=np.arange(4.0),
+            weight=np.ones(4),
+            component=np.array([0, 1, 2, 1]),
+            kind=np.zeros(4, dtype=int),
+            component_names=list(self.order),
+        )
+
+    def test_sides(self):
+        sides = gui_helpers.cut_sides(self.order, "source", "sample")
+        self.assertEqual(sides, {"source": "before", "guide": "gap", "sample": "after"})
+
+    def test_shift_leaves_keep_metres(self):
+        shift = gui_helpers.cut_shift(self.matrices, "source", "sample", 2.0)
+        np.testing.assert_allclose(shift, [0, 0, 98])
+        np.testing.assert_allclose(
+            gui_helpers.cut_shift(self.matrices, "source", "guide", 5.0), [0, 0, 0]
+        )
+
+    def test_cut_rays(self):
+        sides = gui_helpers.cut_sides(self.order, "source", "sample")
+        shift = np.array([0.0, 0.0, 98.0])
+        cut, before = gui_helpers.cut_rays(self.rays, sides, shift)
+        np.testing.assert_allclose(cut.points, [[0, 0, 98], [0, 0, 100]])
+        self.assertEqual(cut.ray_offsets.tolist(), [0, 2, 2])
+        self.assertEqual(before.tolist(), [True, False])
+        self.assertEqual(cut.time.tolist(), [0.0, 2.0])
+        self.assertEqual(gui_helpers.ray_segment_indices(cut, [0, 1]).tolist(), [[0, 1]])
+
+
 if __name__ == "__main__":
     unittest.main()

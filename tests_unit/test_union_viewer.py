@@ -148,8 +148,13 @@ class BuildCountsGroupTest(unittest.TestCase):
 
 class FitCameraToSceneTest(unittest.TestCase):
     class FakeScene:
+        geometry = "fake"
+
         def __init__(self, bbox):
             self.bbox = bbox
+
+        def iter(self, skip_invisible=False):
+            yield self
 
         def get_world_bounding_box(self):
             return self.bbox

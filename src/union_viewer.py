@@ -17,6 +17,7 @@ from brep import build_many_brep_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
 from gui_helpers import (
     group_meshes_by_material,
+    group_components_by_material,
     is_vacuum_material,
     assign_default_color,
     component_color_key,
@@ -37,6 +38,11 @@ from gui_helpers import (
     TELEPORT_COLOR,
     SCATTER_MARKER_SIZE,
     ABSORB_MARKER_SIZE,
+    BEFORE,
+    GAP,
+    cut_sides,
+    cut_shift,
+    cut_rays,
 )
 from mcstas_trace import trace_instrument, component_types, SCATTER, ABSORB, TELEPORT
 import logger_output
@@ -199,6 +205,11 @@ def compute_mesh_data(
     if group_by_material:
         render_meshes = group_meshes_by_material(union_geometries, meshes)
         geometry_is_vacuum = {material: is_vacuum_material(material) for material in render_meshes}
+        geometry_members = {
+            material: names
+            for material, names in group_components_by_material(union_geometries).items()
+            if material in render_meshes
+        }
     else:
         render_meshes = {
             name: meshes[name]
@@ -209,10 +220,13 @@ def compute_mesh_data(
             name: is_vacuum_material(getattr(union_geometries[name], "material_string", None))
             for name in render_meshes
         }
+        geometry_members = {name: [name] for name in render_meshes}
 
     instrument_info = {
         "parameters": instrument_parameters(instr),
         "world_matrices": {name: M.tolist() for name, M in world_matrices.items()},
+        "component_order": [comp.name for comp in instr.component_list],
+        "geometry_members": geometry_members,
     }
     return (render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info)
 
@@ -322,9 +336,14 @@ DEFAULT_MARKER_SIZES = {
     "scatter": SCATTER_MARKER_SIZE,
     "absorb": ABSORB_MARKER_SIZE,
 }
+# Dash and gap lengths, in line thicknesses, of a ray segment that crosses a
+# collapsed gap.
+CUT_DASH_PATTERN = (4, 3)
 
 
-def build_ray_group(rays, ray_indices, color_mode, colors=None, marker_sizes=None):
+def build_ray_group(
+    rays, ray_indices, color_mode, colors=None, marker_sizes=None, cut_mask=None
+):
     """Two separate Lines for the chosen rays, so the ordinary path and the
     restore_neutron jumps can be shown/hidden independently:
     group.ray_line for ordinary segments (vertex-coloured unless color_mode
@@ -332,7 +351,10 @@ def build_ray_group(rays, ray_indices, color_mode, colors=None, marker_sizes=Non
     a TELEPORT. Plus Points marking scatterings and absorptions.
     colors maps "ray", "teleport", "scatter" and "absorb" to a hex colour,
     marker_sizes maps "scatter" and "absorb" to a point size; missing keys
-    fall back to the gui_helpers defaults. Returns
+    fall back to the gui_helpers defaults. cut_mask (per point, see
+    gui_helpers.cut_rays) marks the points moved by a collapsed gap; a
+    segment joining a moved and an unmoved point crosses the gap and is
+    drawn dashed instead, as group.cut_line. Returns
     (group, (vmin, vmax) or None)."""
     colors = {**DEFAULT_RAY_COLORS, **(colors or {})}
     marker_sizes = {**DEFAULT_MARKER_SIZES, **(marker_sizes or {})}
@@ -341,24 +363,39 @@ def build_ray_group(rays, ray_indices, color_mode, colors=None, marker_sizes=Non
     # A segment "teleports" if the point it ends on is a restore_neutron
     # duplicate.
     is_teleport = rays.kind[pairs[:, 1]] == TELEPORT
-    regular_pairs, teleport_pairs = pairs[~is_teleport], pairs[is_teleport]
+    crosses_cut = (
+        np.zeros(len(pairs), dtype=bool) if cut_mask is None
+        else cut_mask[pairs[:, 0]] != cut_mask[pairs[:, 1]]
+    )
+    regular_pairs = pairs[~is_teleport & ~crosses_cut]
+    teleport_pairs = pairs[is_teleport & ~crosses_cut]
+    cut_pairs = pairs[crosses_cut]
 
     values = ray_color_values(rays, color_mode)
     value_range = None
-    group.ray_line = None
-    if len(regular_pairs):
-        positions = rays.points[regular_pairs].reshape(-1, 3).astype(np.float32)
-        if values is None:
+    coloured_pairs = np.concatenate([regular_pairs, cut_pairs])
+    if values is not None and len(coloured_pairs):
+        used = values[coloured_pairs.ravel()]
+        value_range = (float(used.min()), float(used.max()))
+
+    def coloured_line(line_pairs, **material_kwargs):
+        positions = rays.points[line_pairs].reshape(-1, 3).astype(np.float32)
+        if value_range is None:
             vertex_colors = np.tile(hex_to_rgba(colors["ray"]), (len(positions), 1))
         else:
-            used = values[regular_pairs.ravel()]
-            value_range = (float(used.min()), float(used.max()))
-            vertex_colors = colormap(used, *value_range)
-        group.ray_line = gfx.Line(
+            vertex_colors = colormap(values[line_pairs.ravel()], *value_range)
+        return gfx.Line(
             gfx.Geometry(positions=positions, colors=vertex_colors),
-            gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex"),
+            gfx.LineSegmentMaterial(thickness=1.5, color_mode="vertex", **material_kwargs),
         )
+
+    group.ray_line = group.cut_line = None
+    if len(regular_pairs):
+        group.ray_line = coloured_line(regular_pairs)
         group.add(group.ray_line)
+    if len(cut_pairs):
+        group.cut_line = coloured_line(cut_pairs, dash_pattern=CUT_DASH_PATTERN)
+        group.add(group.cut_line)
 
     group.teleport_line = None
     if len(teleport_pairs):
@@ -448,6 +485,65 @@ def build_counts_group(counts, world_matrices, vmin, vmax):
         group.add(obj)
         meshes[name] = obj
     return group, meshes, textures
+
+
+CUT_MARKER_COLOR = "#808080"
+CUT_MARKER_MIN_SIZE = 0.2
+CUT_MARKER_TEETH = 6
+
+
+def build_cut_marker(center, direction, size, label):
+    """The break mark of a collapsed gap: a translucent square sheet of side
+    size, centred on center and facing direction, folded into a zigzag of
+    CUT_MARKER_TEETH teeth with right-angled corners, its folded edges
+    outlined and label written above it."""
+    direction = direction / np.linalg.norm(direction)
+    across = np.cross(direction, (0.0, 1.0, 0.0))
+    if np.linalg.norm(across) < 1e-6:
+        across = np.cross(direction, (1.0, 0.0, 0.0))
+    across /= np.linalg.norm(across)
+    up = np.cross(direction, across)
+
+    n = 2 * CUT_MARKER_TEETH + 1
+    step = size / (n - 1)
+    fold = np.where(np.arange(n) % 2, 0.5, -0.5) * step
+    edge = (
+        center
+        + np.linspace(-size / 2, size / 2, n)[:, None] * across
+        + fold[:, None] * direction
+    )
+    top, bottom = edge + up * size / 2, edge - up * size / 2
+    i = np.arange(n - 1)
+    faces = np.concatenate([
+        np.stack([i, i + 1, n + i], axis=1),
+        np.stack([i + 1, n + i + 1, n + i], axis=1),
+    ])
+
+    group = gfx.Group()
+    group.add(gfx.Mesh(
+        gfx.Geometry(
+            positions=np.concatenate([top, bottom]).astype(np.float32),
+            indices=faces.astype(np.int32),
+        ),
+        gfx.MeshBasicMaterial(
+            color=CUT_MARKER_COLOR, opacity=0.4, alpha_mode="blend", side="both"
+        ),
+    ))
+    for outline in (top, bottom):
+        group.add(gfx.Line(
+            gfx.Geometry(positions=outline.astype(np.float32)),
+            gfx.LineMaterial(thickness=2.0, color=CUT_MARKER_COLOR),
+        ))
+    text = gfx.Text(
+        text=label,
+        font_size=14,
+        screen_space=True,
+        anchor="bottom-center",
+        material=gfx.TextMaterial(color=CUT_MARKER_COLOR),
+    )
+    text.local.position = center + up * size * 0.6
+    group.add(text)
+    return group
 
 
 def generate_group(
@@ -585,9 +681,24 @@ def update_camera_depth_range(camera, target):
 
 
 
+def visible_world_bounding_box(obj):
+    """World bounding box of obj's visible geometry, or None if there is
+    none. pygfx's own get_world_bounding_box counts hidden objects too."""
+    boxes = [
+        o.get_world_bounding_box()
+        for o in obj.iter(skip_invisible=True)
+        if o.geometry is not None
+    ]
+    boxes = [box for box in boxes if box is not None]
+    if not boxes:
+        return None
+    boxes = np.stack(boxes)
+    return np.stack([boxes[:, 0].min(axis=0), boxes[:, 1].max(axis=0)])
+
+
 def fit_camera_to_scene(camera, controller, scene, scale=2.0):
     print(scene)
-    bbox = scene.get_world_bounding_box()
+    bbox = visible_world_bounding_box(scene)
 
     if bbox is None:
         return
@@ -897,6 +1008,12 @@ class Viewer(QtWidgets.QMainWindow):
         self.dependencies = None
         self.meshes = None
         self.mesher = "brep"
+
+        # Collapsed gap: (sides, shift) while active (see apply_cut), else None.
+        self.cut = None
+        self.cut_marker = None
+        self.component_order = []
+        self.geometry_members = {}
 
         # ----------------------------------------------------
         # Async mesh rebuild state
@@ -1319,6 +1436,58 @@ class Viewer(QtWidgets.QMainWindow):
         )
 
         # ----------------------------------------------------
+        # Collapse gap dock
+        # ----------------------------------------------------
+
+        cut_dock, cut_layout = self._add_dock("Collapse Gap")
+
+        self.cut_checkbox = QtWidgets.QCheckBox("Collapse gap")
+        self.cut_checkbox.setToolTip(
+            "Move every component up to and including 'From' along the line "
+            "to 'To' until only 'Keep' metres separate them, and hide the "
+            "components in between. Shapes and angles on each side stay "
+            "true; only rays crossing the gap (drawn dashed) are shortened. "
+            "STL export keeps true positions but leaves the hidden "
+            "components out."
+        )
+        cut_layout.addWidget(self.cut_checkbox)
+
+        self.cut_combos = {}
+        for key in ("From", "To"):
+            cut_layout.addWidget(QtWidgets.QLabel(key))
+            combo = QtWidgets.QComboBox()
+            # Fixed width with elided text, like the clipping frame combo.
+            combo.setSizeAdjustPolicy(
+                QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(12)
+            cut_layout.addWidget(combo)
+            self.cut_combos[key] = combo
+
+        keep_layout = QtWidgets.QHBoxLayout()
+        keep_layout.addWidget(QtWidgets.QLabel("Keep"))
+        self.cut_keep_val = QtWidgets.QDoubleSpinBox()
+        self.cut_keep_val.setDecimals(3)
+        self.cut_keep_val.setRange(0.0, 1e6)
+        self.cut_keep_val.setSingleStep(0.1)
+        self.cut_keep_val.setValue(2.0)
+        self.cut_keep_val.setSuffix(" m")
+        self.cut_keep_val.setToolTip("Distance left between 'From' and 'To'.")
+        keep_layout.addWidget(self.cut_keep_val)
+        cut_layout.addLayout(keep_layout)
+
+        self.cut_info_label = QtWidgets.QLabel("")
+        self.cut_info_label.setWordWrap(True)
+        self.cut_info_label.setStyleSheet("color: gray;")
+        cut_layout.addWidget(self.cut_info_label)
+
+        cut_layout.addStretch()
+        cut_dock.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+
+        # ----------------------------------------------------
         # Neutron rays dock
         # ----------------------------------------------------
 
@@ -1607,6 +1776,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.slice_val.valueChanged.connect(self.on_clip_changed)
         self.res_val.currentIndexChanged.connect(self.on_res_changed)
         self.deflection_val.valueChanged.connect(self.on_deflection_changed)
+        self.cut_checkbox.stateChanged.connect(self.apply_cut)
+        for combo in self.cut_combos.values():
+            combo.currentIndexChanged.connect(self.apply_cut)
+        self.cut_keep_val.valueChanged.connect(self.apply_cut)
 
         self.update_mesher_capability_ui()
         self.rays_options.setEnabled(self.rays_checkbox.isChecked())
@@ -1680,6 +1853,8 @@ class Viewer(QtWidgets.QMainWindow):
         for key, mesh in self.current_group.geometry_meshes.items():
             visible = self.geometry_visibility.get(key, True)
             if hide_vacuum and is_vacuum.get(key, False):
+                visible = False
+            if self.in_gap(self.geometry_owner(key)):
                 visible = False
             mesh.visible = visible
 
@@ -1800,6 +1975,8 @@ class Viewer(QtWidgets.QMainWindow):
             visible = self.component_visibility.get(name, True)
             if self.trace_group.component_is_arm[name] and not show_arms:
                 visible = False
+            if self.in_gap(name):
+                visible = False
             obj.visible = visible
 
     def apply_clipping(self):
@@ -1809,7 +1986,16 @@ class Viewer(QtWidgets.QMainWindow):
                 continue
             for obj in group.iter():
                 if getattr(obj, "material", None) is not None:
-                    obj.material.clipping_planes = planes
+                    # Planes are in world space: shift each one with its
+                    # object, so a component moved by a collapsed gap is cut
+                    # where its true geometry is.
+                    # ponytail: rays before a collapsed gap are moved per
+                    # point, so they are still cut by the unshifted plane.
+                    offset = np.asarray(obj.world.position)
+                    obj.material.clipping_planes = [
+                        (a, b, c, d - float(np.dot((a, b, c), offset)))
+                        for a, b, c, d in planes
+                    ]
 
     def pick_component_color(self, name):
         if self.trace_group is None or name not in self.trace_group.component_objects:
@@ -2075,6 +2261,7 @@ class Viewer(QtWidgets.QMainWindow):
         if self.grid is not None:
             self.scene.remove(self.grid)
         self.grid = gfx.GridHelper(size=size, divisions=divisions, thickness=1)
+        self.grid.visible = self.cut is None
         self.scene.add(self.grid)
 
     def _on_reload_finished(self, new_group, meshes, dependencies, instrument_info):
@@ -2082,7 +2269,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.world_matrices = {
             name: np.array(M) for name, M in instrument_info["world_matrices"].items()
         }
+        self.component_order = instrument_info["component_order"]
+        self.geometry_members = instrument_info["geometry_members"]
         self.rebuild_clip_frame_combo()
+        self.rebuild_cut_combos()
         if self.current_group is not None:
             self.scene.remove(self.current_group)
         self.dependencies = dependencies
@@ -2099,6 +2289,7 @@ class Viewer(QtWidgets.QMainWindow):
         recentre_controller(self.controller, self.current_group)
         if self.counts:
             self.rebuild_counts_group()
+        self.apply_cut()
         print("Reload complete")
 
         if self._pending_fit_camera:
@@ -2178,6 +2369,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.trace_group = group
         self.scene.add(group)
         self.rebuild_component_panel()
+        self.place_cut_objects()
         self.apply_component_visibility()
         status = f"{len(group.component_objects)} McStas components"
         self.set_trace_rays(rays)
@@ -2263,8 +2455,11 @@ class Viewer(QtWidgets.QMainWindow):
             return
         chosen = rays_reaching(rays, self.ray_reaching_combo.currentData())
         mode = self.ray_color_combo.currentText()
+        cut_mask = None
+        if self.cut is not None:
+            rays, cut_mask = cut_rays(rays, *self.cut)
         self.ray_group, value_range = build_ray_group(
-            rays, chosen, mode, self.ray_colors, self.ray_marker_sizes
+            rays, chosen, mode, self.ray_colors, self.ray_marker_sizes, cut_mask
         )
         self.scene.add(self.ray_group)
         self.apply_ray_visibility()
@@ -2319,6 +2514,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.ray_group.visible = self.rays_checkbox.isChecked()
         for obj, checkbox in (
             (self.ray_group.ray_line, self.rays_line_checkbox),
+            (self.ray_group.cut_line, self.rays_line_checkbox),
             (self.ray_group.teleport_line, self.teleport_line_checkbox),
             (self.ray_group.scatter_points, self.scatter_points_checkbox),
             (self.ray_group.absorb_points, self.absorb_points_checkbox),
@@ -2417,16 +2613,14 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_counts_visibility_changed(self, name, checked):
         self.counts_visibility[name] = checked
-        mesh = self.counts_meshes.get(name)
-        if mesh is not None:
-            mesh.visible = checked
+        self.apply_counts_visibility()
 
     def apply_counts_visibility(self):
         if self.counts_group is None:
             return
         self.counts_group.visible = self.counts_checkbox.isChecked()
         for name, mesh in self.counts_meshes.items():
-            mesh.visible = self.counts_visibility.get(name, True)
+            mesh.visible = self.counts_visibility.get(name, True) and not self.in_gap(name)
 
     def reset_counts_range(self):
         """Set the colour range to the min/max of the currently visible
@@ -2476,11 +2670,106 @@ class Viewer(QtWidgets.QMainWindow):
             self.counts, self.world_matrices, vmin, vmax
         )
         self.scene.add(self.counts_group)
+        self.place_cut_objects()
         self.apply_counts_visibility()
         self.apply_clipping()
         self.counts_colorbar.set_range(f"{vmin:.4g}", f"{vmax:.4g}")
         self.counts_colorbar.show()
         self.rebalance_docks()
+
+    # ========================================================
+    # Collapse gap
+    # ========================================================
+
+    def rebuild_cut_combos(self):
+        names = self.component_order
+        for key, combo in self.cut_combos.items():
+            current = combo.currentData()
+            if names == [combo.itemData(i) for i in range(combo.count())]:
+                continue
+            combo.blockSignals(True)
+            combo.clear()
+            for name in names:
+                combo.addItem(name, name)
+                combo.setItemData(combo.count() - 1, name, QtCore.Qt.ItemDataRole.ToolTipRole)
+            index = combo.findData(current)
+            if index < 0:
+                index = 0 if key == "From" else combo.count() - 1
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
+    def in_gap(self, name):
+        return self.cut is not None and self.cut[0].get(name) == GAP
+
+    def cut_offset(self, name):
+        if self.cut is not None and self.cut[0].get(name) == BEFORE:
+            return self.cut[1]
+        return np.zeros(3)
+
+    def geometry_owner(self, key):
+        """The Union component a geometry-panel row (a component, or a
+        material grouping several) is placed with."""
+        return self.geometry_members.get(key, [key])[0]
+
+    def place_cut_objects(self):
+        """Move every Union mesh, McStas component and detector plane by
+        its collapsed-gap offset (zero when no gap is collapsed)."""
+        if self.current_group is not None:
+            for key, mesh in self.current_group.geometry_meshes.items():
+                mesh.local.position = self.cut_offset(self.geometry_owner(key))
+        if self.trace_group is not None:
+            for name, obj in self.trace_group.component_objects.items():
+                obj.local.position = self.cut_offset(name)
+        for name, mesh in self.counts_meshes.items():
+            mesh.local.position = self.cut_offset(name)
+
+    def apply_cut(self):
+        start = self.cut_combos["From"].currentData()
+        end = self.cut_combos["To"].currentData()
+        keep = self.cut_keep_val.value()
+        self.cut = None
+        info = ""
+        if self.cut_checkbox.isChecked() and start is not None and end is not None:
+            order = self.component_order
+            if order.index(start) >= order.index(end):
+                info = "'To' must come after 'From'."
+            elif start not in self.world_matrices or end not in self.world_matrices:
+                info = "Could not place 'From' or 'To'."
+            else:
+                shift = cut_shift(self.world_matrices, start, end, keep)
+                self.cut = (cut_sides(order, start, end), shift)
+                info = f"Removed {np.linalg.norm(shift):.4g} m."
+
+        self.place_cut_objects()
+        self.apply_geometry_visibility()
+        self.apply_component_visibility()
+        self.apply_counts_visibility()
+        self.rebuild_ray_group()
+        self.rebuild_cut_marker(end, keep)
+        self.grid.visible = self.cut is None
+        self.apply_clipping()
+        self.cut_info_label.setText(info)
+
+    def rebuild_cut_marker(self, end, keep):
+        if self.cut_marker is not None:
+            self.scene.remove(self.cut_marker)
+            self.cut_marker = None
+        if self.cut is None:
+            return
+        shift = self.cut[1]
+        removed = np.linalg.norm(shift)
+        if removed == 0:
+            return
+        direction = shift / removed
+        end_position = self.world_matrices[end][:3, 3]
+        # ponytail: marker sized by keep, not by the geometry around it.
+        self.cut_marker = build_cut_marker(
+            end_position - direction * keep / 2,
+            direction,
+            max(keep, CUT_MARKER_MIN_SIZE),
+            f"-{removed:.4g} m",
+        )
+        self.scene.add(self.cut_marker)
 
     def fit_whole_instrument(self):
         if self.trace_group is None or not self.trace_group.visible:
