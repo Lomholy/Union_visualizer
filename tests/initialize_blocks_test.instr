@@ -1,0 +1,97 @@
+/*******************************************************************************
+* Instrument: INITIALIZE_BLOCKS_TEST
+*
+* %Identification
+* Written by: Union_visualizer
+* Origin: tests
+*
+* %Description
+* The string parameter sample selects a setup in a braced
+* if / else if / else chain of strcmp conditions in INITIALIZE, as in McCode's
+* Test_inhomogeneous_process.instr. Only the transmission setups rotate the
+* sample arm, and with it the box, by 90 degrees about y.
+*
+* %Parameters
+* sample: [string] Setup: thin, inc_trans or gauss_heavy
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT INITIALIZE_BLOCKS_TEST (
+    string sample="thin"
+)
+
+DECLARE
+%{
+double rot_samples;
+double width;
+int is_thin;
+int activate_gauss;
+%}
+
+INITIALIZE
+%{
+rot_samples = 0;
+width = 0.03;
+if (!strcmp("thin", sample)){
+  is_thin = 1;
+} else if (!strcmp("inc_trans", sample)) {
+  rot_samples = 90;
+  width = 0.01;
+} else if (!strcmp("gauss_heavy", sample)){
+  rot_samples = 90;
+  activate_gauss = 1;
+  width = 0.01;
+} else {
+  fprintf (stderr, "Unsupported instrument parameter value sample=\"%s\".\n", sample);
+  exit (-1);
+}
+%}
+
+TRACE
+
+COMPONENT Origin = Progress_bar(
+)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT arm_sample = Arm(
+)
+AT (0,0,10) RELATIVE Origin
+ROTATED (0, rot_samples, 0) RELATIVE Origin
+
+COMPONENT init = Union_init(
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT non = Non_process(
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT mat = Union_make_material(
+    my_absorption = 100, process_string="non"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT box = Union_box(
+    priority = 10,
+    xwidth = width,
+    yheight = 0.03,
+    zdepth = 0.01,
+    material_string = "mat"
+)
+AT (0,0,0) RELATIVE arm_sample
+ROTATED (0,0,0) RELATIVE arm_sample
+
+COMPONENT master = Union_master(
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT stop = Union_stop(
+)
+AT (0,0,0) RELATIVE arm_sample
+
+FINALLY
+%{
+%}
+
+END
