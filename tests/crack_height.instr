@@ -241,12 +241,12 @@ AT (0, 0, 0) RELATIVE sample_position
 
 COMPONENT mask_cryst = Union_mesh(
  filename = "./crack_cryst.stl", material_string = sample,
- priority = 53, skip_convex_check = 1)
+ priority = 53)
 AT (0,crack_height, 0) RELATIVE sample_position
 
 COMPONENT cryst = Union_mesh(
  filename = "./crack_cryst.stl", material_string = "gas",
- priority = 52, skip_convex_check = 1,
+ priority = 52,
  coordinate_scale = 0.0009997390124560307)
 AT (0, 0, 0) RELATIVE sample_position
 
