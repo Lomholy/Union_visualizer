@@ -296,59 +296,48 @@ def build_counts_group(counts, world_matrices, vmin, vmax):
 
 CUT_MARKER_COLOR = "#808080"
 CUT_MARKER_MIN_SIZE = 0.2
-CUT_MARKER_TEETH = 6
+# Distance between the marker's two planes, as a fraction of their size.
+CUT_MARKER_SPACING = 0.25
 
 
 def build_cut_marker(center, direction, size, label):
-    """The break mark of a collapsed gap: a translucent square sheet of side
-    size, centred on center and facing direction, folded into a zigzag of
-    CUT_MARKER_TEETH teeth with right-angled corners, its folded edges
-    outlined and label written above it."""
+    """The break mark of a collapsed gap: two parallel, translucent square
+    planes of side size facing direction, either side of center, with label
+    written between them."""
     direction = direction / np.linalg.norm(direction)
     across = np.cross(direction, (0.0, 1.0, 0.0))
     if np.linalg.norm(across) < 1e-6:
         across = np.cross(direction, (1.0, 0.0, 0.0))
     across /= np.linalg.norm(across)
     up = np.cross(direction, across)
-
-    n = 2 * CUT_MARKER_TEETH + 1
-    step = size / (n - 1)
-    fold = np.where(np.arange(n) % 2, 0.5, -0.5) * step
-    edge = (
-        center
-        + np.linspace(-size / 2, size / 2, n)[:, None] * across
-        + fold[:, None] * direction
-    )
-    top, bottom = edge + up * size / 2, edge - up * size / 2
-    i = np.arange(n - 1)
-    faces = np.concatenate([
-        np.stack([i, i + 1, n + i], axis=1),
-        np.stack([i + 1, n + i + 1, n + i], axis=1),
-    ])
+    corners = np.array([across + up, -across + up, -across - up, across - up]) * size / 2
 
     group = gfx.Group()
-    group.add(gfx.Mesh(
-        gfx.Geometry(
-            positions=np.concatenate([top, bottom]).astype(np.float32),
-            indices=faces.astype(np.int32),
-        ),
-        gfx.MeshBasicMaterial(
-            color=CUT_MARKER_COLOR, opacity=0.4, alpha_mode="blend", side="both"
-        ),
-    ))
-    for outline in (top, bottom):
+    for side in (-0.5, 0.5):
+        square = (center + side * CUT_MARKER_SPACING * size * direction + corners).astype(np.float32)
+        group.add(gfx.Mesh(
+            gfx.Geometry(positions=square, indices=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)),
+            gfx.MeshBasicMaterial(
+                color=CUT_MARKER_COLOR, opacity=0.4, alpha_mode="blend", side="both"
+            ),
+        ))
         group.add(gfx.Line(
-            gfx.Geometry(positions=outline.astype(np.float32)),
+            gfx.Geometry(positions=np.concatenate([square, square[:1]])),
             gfx.LineMaterial(thickness=2.0, color=CUT_MARKER_COLOR),
         ))
+    # Drawn last and without depth testing, so the planes never hide or
+    # tint it; the outline keeps it readable on any background.
     text = gfx.Text(
         text=label,
-        font_size=14,
+        font_size=16,
         screen_space=True,
-        anchor="bottom-center",
-        material=gfx.TextMaterial(color=CUT_MARKER_COLOR),
+        anchor="middle-center",
+        render_order=1,
+        material=gfx.TextMaterial(
+            color="#ffffff", outline_color="#000000", outline_thickness=0.25, depth_test=False
+        ),
     )
-    text.local.position = center + up * size * 0.6
+    text.local.position = center
     group.add(text)
     return group
 
