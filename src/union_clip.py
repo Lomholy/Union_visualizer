@@ -30,43 +30,68 @@ CLIP_BOX_SIZE = 10000.0
 # ------------------------------- shapes ---------------------------------------
 
 
-class Grid:
-    """Boxes binned once into cells of size h; query() pairs other boxes with them."""
+class BVH:
+    """Bounding volume hierarchy over triangle boxes. candidates() returns the
+    (ray, triangle) pairs whose boxes a batch of rays passes through."""
 
-    def __init__(self, lo, hi, h):
-        self.lo, self.hi, self.h = lo, hi, h
-        self.origin = lo.min(0) - h
-        box, key = self._cells(lo, hi)
-        order = np.argsort(key, kind="stable")
-        self.key, self.box = key[order], box[order]
+    LEAF_SIZE = 8
 
-    def _cells(self, lo, hi):
-        i0 = np.floor((lo - self.origin) / self.h).astype(np.int64)
-        i1 = np.floor((hi - self.origin) / self.h).astype(np.int64)
-        ext = i1 - i0 + 1
-        n = ext.prod(1)
-        box = np.repeat(np.arange(len(lo)), n)
-        k = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
-        key = np.zeros(len(box), np.int64)
-        for d in range(lo.shape[1] - 1, -1, -1):
-            e = ext[box, d]
-            key += (i0[box, d] + k % e) * 1_000_003 ** (lo.shape[1] - 1 - d)
-            k //= e
-        return box, key
+    def __init__(self, lo, hi):
+        pad = 1e-9 * (np.abs(lo).max() + np.abs(hi).max() + 1e-300)
+        centre = 0.5 * (lo + hi)
+        order = np.arange(len(lo))
+        nodes = []  # [lo, hi, first child or -1, second child or -1, start, stop]
 
-    def query(self, lo, hi):
-        box, key = self._cells(lo, hi)
-        start = np.searchsorted(self.key, key, "left")
-        n = np.searchsorted(self.key, key, "right") - start
-        i = np.repeat(box, n)
-        j = self.box[np.repeat(start, n) + np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)]
-        if len(i) == 0:
-            return i, j
-        nb = len(self.lo)
-        pair = np.unique(i * nb + j)
-        i, j = pair // nb, pair % nb
-        keep = np.all((lo[i] <= self.hi[j]) & (self.lo[j] <= hi[i]), axis=1)
-        return i[keep], j[keep]
+        def build(start, stop):
+            index = len(nodes)
+            ids = order[start:stop]
+            nodes.append([lo[ids].min(0) - pad, hi[ids].max(0) + pad, -1, -1, start, stop])
+            if stop - start > self.LEAF_SIZE:
+                axis = int(np.argmax(centre[ids].max(0) - centre[ids].min(0)))
+                mid = (stop - start) // 2
+                order[start:stop] = ids[np.argpartition(centre[ids, axis], mid)]
+                nodes[index][2] = build(start, start + mid)
+                nodes[index][3] = build(start + mid, stop)
+            return index
+
+        build(0, len(lo))
+        self.lo = np.array([n[0] for n in nodes])
+        self.hi = np.array([n[1] for n in nodes])
+        self.child = np.array([n[2] for n in nodes])
+        self.second = np.array([n[3] for n in nodes])
+        self.start = np.array([n[4] for n in nodes])
+        self.stop = np.array([n[5] for n in nodes])
+        self.order = order
+
+    def candidates(self, origin, direction, t_max):
+        q = np.arange(len(origin))
+        node = np.zeros(len(origin), np.int64)
+        found_q, found_tri = [], []
+        with np.errstate(divide="ignore", invalid="ignore"):
+            inv = 1.0 / direction
+        while len(q):
+            o, d, iv = origin[q], direction[q], inv[q]
+            t1 = (self.lo[node] - o) * iv
+            t2 = (self.hi[node] - o) * iv
+            # a ray parallel to a slab is inside it or misses the box
+            flat = d == 0
+            inside = (self.lo[node] <= o) & (o <= self.hi[node])
+            t_near = np.where(flat, np.where(inside, -np.inf, np.inf), np.minimum(t1, t2)).max(1)
+            t_far = np.where(flat, np.where(inside, np.inf, -np.inf), np.maximum(t1, t2)).min(1)
+            hit = (t_near <= t_far) & (t_far >= 0) & (t_near <= t_max)
+            q, node = q[hit], node[hit]
+            leaf = self.child[node] < 0
+            if leaf.any():
+                lq, ln = q[leaf], node[leaf]
+                count = self.stop[ln] - self.start[ln]
+                found_q.append(np.repeat(lq, count))
+                offset = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+                found_tri.append(self.order[np.repeat(self.start[ln], count) + offset])
+            q, node = q[~leaf], node[~leaf]
+            q, node = np.concatenate([q, q]), np.concatenate([self.child[node], self.second[node]])
+        if not found_q:
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+        return np.concatenate(found_q), np.concatenate(found_tri)
 
 
 def ray_triangle(origin, direction, tri, t_max):
@@ -119,26 +144,31 @@ class MeshShape(Shape):
         super().__init__(np.eye(4))
         self.mesh = mesh
         self.tri = mesh.triangles
-        lo, hi = self.tri.min(1), self.tri.max(1)
-        h = 2 * np.median(hi - lo) + 1e-12
-        self.grid3 = Grid(lo, hi, h)
-        self.grid_yz = Grid(lo[:, 1:], hi[:, 1:], h)
+        self.bvh = BVH(self.tri.min(1), self.tri.max(1))
 
     def triangles(self):
         return self.tri.copy()
 
+    # gmesh_inside's first ray direction: oblique, so rays do not run along axis-aligned edges.
+    # ponytail: one ray, without gmesh_inside's vote of three on a ray that grazes an edge;
+    # add the vote if a mesh shows parity errors
+    RAY = np.array([0.4719, 0.6213, 0.6254])
+
     def contains(self, p):
-        """Parity of the +x ray from each point."""
+        """Parity of a ray from each point inside the mesh's bounding box."""
         inside = np.zeros(len(p), bool)
-        i, j = self.grid_yz.query(p[:, 1:], p[:, 1:])
+        idx = np.flatnonzero(np.all((p >= self.bvh.lo[0]) & (p <= self.bvh.hi[0]), axis=1))
+        if len(idx) == 0:
+            return inside
+        direction = np.broadcast_to(self.RAY, (len(idx), 3))
+        i, j = self.bvh.candidates(p[idx], direction, np.inf)
         if len(i):
-            direction = np.broadcast_to([1.0, 0.0, 0.0], (len(i), 3))
-            hit, _ = ray_triangle(p[i], direction, self.tri[j], np.inf)
-            np.logical_xor.at(inside, i[hit], True)
+            hit, _ = ray_triangle(p[idx][i], direction[i], self.tri[j], np.inf)
+            np.logical_xor.at(inside, idx[i[hit]], True)
         return inside
 
     def crossings(self, a, b):
-        i, j = self.grid3.query(np.minimum(a, b), np.maximum(a, b))
+        i, j = self.bvh.candidates(a, b - a, 1.0)
         if len(i) == 0:
             return i, np.zeros(0)
         hit, t = ray_triangle(a[i], b[i] - a[i], self.tri[j], 1.0)
@@ -373,7 +403,6 @@ class Clipper:
         self.own_masks = own_masks
         self.cutters = cutters
         self.sources = sources
-        self.out = []
 
     def highest(self, p):
         """r_has_highest_priority: in the component's masks, and inside no cutter."""
@@ -429,105 +458,116 @@ class Clipper:
                     x, y = s0[m], s1[m]
         return cuts, start
 
-    def emit(self, a, b, c):
-        self.out.append((a, b, c))
-
-    def add(self, a, b, c, depth, pre=None):
-        """union_tri_add; pre = (cuts, start) per edge when already known."""
-        v = (a, b, c)
-        if depth <= TRI_DEPTH:
-            cuts, st = pre or self.edge_cuts(np.array(v), np.array((b, c, a)))
-            n = [len(x) for x in cuts]
-            total = sum(n)
-            if total == 0:
-                if depth <= 1 or self.highest((a + b + c) / 3)[0] == st[0]:
-                    if st[0]:
-                        self.emit(a, b, c)
-                    return
-            elif total == 2 and max(n) <= 1:
-                k = next(k for k in range(3) if n[k] == 1 and n[(k + 2) % 3] == 1)
-                w1, w2 = v[(k + 1) % 3], v[(k + 2) % 3]
-                sp, sq = cuts[k][0], 1 - cuts[(k + 2) % 3][0]
-                p = v[k] + (w1 - v[k]) * sp
-                q = v[k] + (w2 - v[k]) * sq
-                # a straight boundary crosses the median v[k] -> (w1+w2)/2 at 2 sp sq / (sp + sq)
-                m = 0.5 * (w1 + w2)
-                size = max(np.linalg.norm(w1 - v[k]), np.linalg.norm(w2 - v[k]), np.linalg.norm(w2 - w1))
-                (sm,), _ = self.edge_cuts(v[k][None], m[None])
-                median = np.linalg.norm(m - v[k])
-                if depth == 0 or (len(sm) == 1 and abs(sm[0] - 2 * sp * sq / (sp + sq)) * median < TRI_CUT_TOL * size):
-                    if st[k]:
-                        self.emit(v[k], p, q)
-                    else:
-                        self.emit(p, w1, w2)
-                        self.emit(p, w2, q)
-                    return
-            elif total == 1:
-                # boundary from the vertex o opposite the cut edge (left on the boundary by a split in 2)
-                k = next(k for k in range(3) if n[k] == 1)
-                o, w1, w2 = v[(k + 2) % 3], v[k], v[(k + 1) % 3]
-                p = w1 + (w2 - w1) * cuts[k][0]
-                m1, m2 = 0.5 * (w1 + o), 0.5 * (w2 + o)
-                size = max(np.linalg.norm(w2 - w1), np.linalg.norm(o - w1), np.linalg.norm(o - w2))
-                (sm,), _ = self.edge_cuts(m1[None], m2[None])
-                midline = 0.5 * np.linalg.norm(w2 - w1)
-                if depth == 0 or (len(sm) == 1 and abs(sm[0] - cuts[k][0]) * midline < TRI_CUT_TOL * size):
-                    if st[k]:
-                        self.emit(w1, p, o)
-                    else:
-                        self.emit(p, w2, o)
-                    return
-            elif depth > 0:
-                # split in 2 through the crossing nearest the middle of the most crossed edge
-                e = 0
-                for k in (1, 2):
-                    if n[k] > n[e]:
-                        e = k
-                best = 0
-                for i in range(1, min(n[e], EDGE_MAX_CUTS)):
-                    if abs(cuts[e][i] - 0.5) < abs(cuts[e][best] - 0.5):
-                        best = i
-                x = v[e] + (v[(e + 1) % 3] - v[e]) * cuts[e][best]
-                self.add(v[e], x, v[(e + 2) % 3], depth - 1)
-                self.add(x, v[(e + 1) % 3], v[(e + 2) % 3], depth - 1)
-                return
-            if depth <= 1:
-                if self.highest((a + b + c) / 3)[0]:
-                    self.emit(a, b, c)
-                return
-        ab, bc, ca = 0.5 * (a + b), 0.5 * (b + c), 0.5 * (c + a)
-        self.add(a, ab, ca, depth - 2)
-        self.add(ab, b, bc, depth - 2)
-        self.add(ca, bc, c, depth - 2)
-        self.add(ab, bc, ca, depth - 2)
+    def triangle_cuts(self, tri):
+        """union_edge_cuts of edges v0->v1, v1->v2, v2->v0 of each triangle:
+        ([cuts per edge], [status at each edge's start]) per triangle."""
+        cuts, st = self.edge_cuts(tri.reshape(-1, 3), tri[:, [1, 2, 0]].reshape(-1, 3))
+        return [(cuts[3 * i:3 * i + 3], st[3 * i:3 * i + 3]) for i in range(len(tri))]
 
     def run(self, tri, depth):
-        """Clip triangles (T, 3, 3) at the given split budget. The first level runs
-        vectorized over the shared edges; only triangles a boundary touches recurse."""
+        """union_tri_add on triangles (T, 3, 3) at the given split budget.
+
+        The recursion runs breadth first: every level's edge cuts, centroid tests and
+        straight-cut checks go through numpy in one batch, while each triangle takes
+        the branch union_tri_add would take."""
         while depth > TRI_DEPTH:
-            ab, bc, ca = (tri[:, 0] + tri[:, 1]) / 2, (tri[:, 1] + tri[:, 2]) / 2, (tri[:, 2] + tri[:, 0]) / 2
-            tri = np.concatenate([
-                np.stack([tri[:, 0], ab, ca], 1), np.stack([ab, tri[:, 1], bc], 1),
-                np.stack([ca, bc, tri[:, 2]], 1), np.stack([ab, bc, ca], 1),
-            ])
+            tri = split_in_4(tri)
             depth -= 2
         if not self.sources and self.own_masks is None:
             return tri
-        mesh = trimesh.Trimesh(tri.reshape(-1, 3), np.arange(3 * len(tri)).reshape(-1, 3), process=False)
-        mesh.merge_vertices()
-        faces, edges, fe = mesh.faces, mesh.edges_unique, mesh.faces_unique_edges
-        cuts, st = self.edge_cuts(mesh.vertices[edges[:, 0]], mesh.vertices[edges[:, 1]])
-        n_cuts = np.array([len(c) for c in cuts])
-        forward = edges[fe, 0] == faces
-        # status at the start vertex of each face edge
-        st_face = np.where(forward, st[fe], st[fe] ^ (n_cuts[fe] % 2 == 1))
-        centroid_ok = self.highest(tri.mean(1))
-        easy = (n_cuts[fe].sum(1) == 0) & (centroid_ok == st_face[:, 0])
-        kept = tri[easy & st_face[:, 0]]
-        for f in np.flatnonzero(~easy):
-            pre = [cuts[fe[f, k]] if forward[f, k] else sorted(1 - x for x in cuts[fe[f, k]]) for k in range(3)]
-            self.add(*tri[f], depth, pre=(pre, list(st_face[f])))
-        return np.concatenate([kept, np.array(self.out).reshape(-1, 3, 3)])
+        out = []
+        # (vertices, depth, centroid_only); centroid_only is union_tri_add's depth <= 1 fallback
+        work = [(t, depth, False) for t in tri]
+        while work:
+            full = [w for w in work if not w[2]]
+            cuts = self.triangle_cuts(np.array([w[0] for w in full])) if full else []
+            centroid_items, line_items, after = [], [], []
+            for (v, d, _), (c, st) in zip(full, cuts):
+                n = [len(x) for x in c]
+                total = sum(n)
+                if total == 0:
+                    if d <= 1:
+                        if st[0]:
+                            out.append(v)
+                    else:
+                        centroid_items.append(("same", v, d, st[0]))
+                elif total == 2 and max(n) <= 1:
+                    k = next(k for k in range(3) if n[k] == 1 and n[(k + 2) % 3] == 1)
+                    w1, w2 = v[(k + 1) % 3], v[(k + 2) % 3]
+                    sp, sq = c[k][0], 1 - c[(k + 2) % 3][0]
+                    p = v[k] + (w1 - v[k]) * sp
+                    q = v[k] + (w2 - v[k]) * sq
+                    if st[k]:
+                        pieces = [(v[k], p, q)]
+                    else:
+                        pieces = [(p, w1, w2), (p, w2, q)]
+                    if d == 0:
+                        out.extend(np.array(pieces))
+                        continue
+                    # a straight boundary crosses the median v[k] -> (w1+w2)/2 at 2 sp sq / (sp + sq)
+                    m = 0.5 * (w1 + w2)
+                    size = max(np.linalg.norm(w1 - v[k]), np.linalg.norm(w2 - v[k]), np.linalg.norm(w2 - w1))
+                    line_items.append((v[k], m, 2 * sp * sq / (sp + sq), np.linalg.norm(m - v[k]), size, pieces, v, d))
+                elif total == 1:
+                    # boundary from the vertex o opposite the cut edge (left on the boundary by a split in 2)
+                    k = next(k for k in range(3) if n[k] == 1)
+                    o, w1, w2 = v[(k + 2) % 3], v[k], v[(k + 1) % 3]
+                    p = w1 + (w2 - w1) * c[k][0]
+                    pieces = [(w1, p, o)] if st[k] else [(p, w2, o)]
+                    if d == 0:
+                        out.extend(np.array(pieces))
+                        continue
+                    size = max(np.linalg.norm(w2 - w1), np.linalg.norm(o - w1), np.linalg.norm(o - w2))
+                    line_items.append((0.5 * (w1 + o), 0.5 * (w2 + o), c[k][0], 0.5 * np.linalg.norm(w2 - w1), size, pieces, v, d))
+                elif d > 0:
+                    # split in 2 through the crossing nearest the middle of the most crossed edge
+                    e = 0
+                    for k in (1, 2):
+                        if n[k] > n[e]:
+                            e = k
+                    best = 0
+                    for i in range(1, min(n[e], EDGE_MAX_CUTS)):
+                        if abs(c[e][i] - 0.5) < abs(c[e][best] - 0.5):
+                            best = i
+                    x = v[e] + (v[(e + 1) % 3] - v[e]) * c[e][best]
+                    after.append((np.array([v[e], x, v[(e + 2) % 3]]), d - 1, False))
+                    after.append((np.array([x, v[(e + 1) % 3], v[(e + 2) % 3]]), d - 1, False))
+                else:
+                    centroid_items.append(("keep", v, d, None))
+            centroid_items += [("keep", v, d, None) for v, d, only in work if only]
+            if line_items:
+                line_cuts, _ = self.edge_cuts(np.array([it[0] for it in line_items]),
+                                              np.array([it[1] for it in line_items]))
+                # straight cut if the boundary crosses the check line where a straight one would
+                for (_, _, expected, length, size, pieces, v, d), sm in zip(line_items, line_cuts):
+                    if len(sm) == 1 and abs(sm[0] - expected) * length < TRI_CUT_TOL * size:
+                        out.extend(np.array(pieces))
+                    elif d <= 1:
+                        after.append((v, d, True))
+                    else:
+                        after.extend((t, d - 2, False) for t in split_in_4(v[None]))
+            if centroid_items:
+                ok = self.highest(np.array([it[1].mean(0) for it in centroid_items]))
+                for (rule, v, d, st0), inside in zip(centroid_items, ok):
+                    if rule == "keep":
+                        if inside:
+                            out.append(v)
+                    elif inside == st0:
+                        if st0:
+                            out.append(v)
+                    else:
+                        after.extend((t, d - 2, False) for t in split_in_4(v[None]))
+            work = after
+        return np.array(out).reshape(-1, 3, 3)
+
+
+def split_in_4(tri):
+    """Each triangle (T, 3, 3) split at its edge midpoints, as union_tri_add splits."""
+    ab, bc, ca = (tri[:, 0] + tri[:, 1]) / 2, (tri[:, 1] + tri[:, 2]) / 2, (tri[:, 2] + tri[:, 0]) / 2
+    return np.concatenate([
+        np.stack([tri[:, 0], ab, ca], 1), np.stack([ab, tri[:, 1], bc], 1),
+        np.stack([ca, bc, tri[:, 2]], 1), np.stack([ab, bc, ca], 1),
+    ])
 
 
 def _masked(comp, shapes, union_geometries):
