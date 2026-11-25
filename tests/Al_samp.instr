@@ -1,0 +1,213 @@
+/*******************************************************************************
+*         McStas instrument definition URL=http://www.mcstas.org
+*
+* Instrument: test (rename also the example and DEFINE lines below)
+*
+* %Identification
+* Written by: Your name (email)
+* Date: Current Date
+* Origin: Your institution
+* %INSTRUMENT_SITE: Templates
+*
+* Instrument short description
+*
+* %Description
+* Instrument longer description (type, elements, usage...)
+*
+* Example: mcrun test.instr <parameters=values>
+*
+* once your instrument is written and functional:
+* - replace INSTRUMENT_SITE entry above with your Institution name as a single word
+* - rename the instrument name after DEFINE INSTRUMENT below
+* - update the parameter help in the following Parameters section
+* - update the instrument description, and better add a usage example with a
+*     sensible parameter set.
+*
+* %Parameters
+*
+* %Link
+* A reference/HTML link for more information
+*
+* %End
+*******************************************************************************/
+DEFINE INSTRUMENT AL_sample(use_water=0, det_pixels=1024, mon_x=0.12, mon_y=0.15)
+
+/* The DECLARE section allows us to declare variables or  small      */
+/* functions in C syntax. These may be used in the whole instrument. */
+DECLARE
+%{
+  double LambdaMin;
+  double LambdaMax;
+  double eps;
+  double water_unit_cell;
+  double det_dist;
+  double n_scat;
+%}
+
+/* The INITIALIZE section is executed when the simulation starts     */
+/* (C code). You may use them as component parameter values.         */
+INITIALIZE
+%{
+  LambdaMin = 1;
+  LambdaMax = 4;
+  eps=1e9;
+  water_unit_cell = 18.015/1/6.022 * 10;
+  det_dist=0.01;
+  n_scat=0;
+%}
+
+/* Here comes the TRACE section, where the actual      */
+/* instrument is defined as a sequence of components.  */
+TRACE
+
+/* The Arm() class component defines reference points and orientations  */
+/* in 3D space. Every component instance must have a unique name. Here, */
+/* Origin is used. This Arm() component is set to define the origin of  */
+/* our global coordinate system (AT (0,0,0) ABSOLUTE). It may be used   */
+/* for further RELATIVE reference, Other useful keywords are : ROTATED  */
+/* EXTEND GROUP PREVIOUS. Also think about adding a neutron source !    */
+/* Progress_bar is an Arm displaying simulation progress.               */
+COMPONENT Origin = Progress_bar()
+  AT (0,0,0) ABSOLUTE
+
+// COPIED FROM ICON. REPLACE WITH NEUTRA
+
+COMPONENT src = Source_gen( 
+  lambda0 = 3, dlambda = 2,
+  dist = 4.677+7.599, focus_xw = mon_x + 0.2,
+ focus_yh = mon_y + 0.02,
+ yheight = 0.093, xwidth = 0.06437,
+ Lmin = LambdaMin, Lmax=LambdaMax
+)
+AT (0,0,1.523) RELATIVE Origin
+
+
+COMPONENT arm_sample = Arm(
+
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+
+
+//==============================================================================
+//===================== SAMPLE 
+//==============================================================================
+
+
+COMPONENT water_inc = Inhomogenous_incoherent_process(
+ sigma_expr = "5/4*(2*(19.79 + (73.4)/(1 + ((sqrt(vx*vx + vy*vy + vz*vz)*2.5278*10^(-4))^(-1)/1.86)^(-1.99))))", unit_cell_volume = water_unit_cell,
+ number_of_sample_points = 1, verbose = 0)
+AT (0,     0,     0) ABSOLUTE
+
+COMPONENT water = Union_make_material(
+ process_string = "water_inc", my_absorption = 5/4*100 * (2*0.3326 + 0.00019)/water_unit_cell)
+AT (0,     0,     0) ABSOLUTE
+
+/* COMPONENT water = Union_NCrystal_material(cfg="LiquidWaterH2O_T300.0K.ncmat")
+AT (0,0,0) ABSOLUTE */
+
+COMPONENT iron = Union_NCrystal_material(
+  cfg = "Fe_sg225_Iron-gamma.ncmat;temp=25C"
+) AT (0,0,0) ABSOLUTE
+
+COMPONENT al = Union_NCrystal_material(cfg="Al_sg225.ncmat;temp=25C")
+AT (0,     0,     0) ABSOLUTE
+
+COMPONENT teflon = Union_NCrystal_material(
+cfg = "Polyethylene_CH2.ncmat"
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+COMPONENT casingtop = Union_mesh(
+    priority = 10,
+    material_string= "al",
+    filename="./casing_1.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT casingbot = Union_mesh(
+    priority = 10.3,
+    material_string= "al",
+    filename="./casing_2.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+
+COMPONENT fittings = Union_mesh(
+    priority = 10.6,
+    material_string= "al",
+    filename="./fittings.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+
+COMPONENT water_wedge_2_5mm = Union_mesh(
+    priority = 11,
+    material_string= "al",
+    filename="./water_wedge_2_5mm.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT water_wedge_5mm = Union_mesh(
+    priority = 12,
+    material_string= "al",
+    filename="./water_wedge_5mm.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT teflon_1 = Union_mesh(
+    priority = 13,
+    material_string= "teflon",
+    filename="./teflon_1.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT teflon_2 = Union_mesh(
+    priority = 14,
+    material_string= "teflon",
+    filename="./teflon_2.stl"
+)
+AT (0,0,0) RELATIVE arm_sample
+
+COMPONENT master = Union_master(
+
+)
+AT (0,0,0) RELATIVE PREVIOUS
+EXTEND %{
+n_scat=number_of_scattering_events;
+%}
+
+
+COMPONENT tot = PSD_monitor(
+ nx = det_pixels, ny = det_pixels,
+ xwidth = mon_x, yheight = mon_y,
+ restore_neutron = 1)
+AT (0,     0,     0.035 + det_dist) RELATIVE arm_sample
+
+COMPONENT trans = PSD_monitor(
+ nx = det_pixels, ny = det_pixels,
+ xwidth = mon_x, yheight = mon_y,
+ restore_neutron = 1)
+WHEN (n_scat==0)
+AT (0,     0,     0) RELATIVE tot
+
+COMPONENT scat = PSD_monitor(
+ nx = det_pixels, ny = det_pixels,
+ xwidth = mon_x, yheight = mon_y,
+ restore_neutron = 1)
+WHEN (n_scat>0)
+AT (0,     0,     0) RELATIVE tot
+
+COMPONENT Lam_mon_post = L_monitor(
+ nL = det_pixels, xwidth = mon_x,
+ yheight = mon_y, Lmin = LambdaMin,
+ Lmax = LambdaMax, restore_neutron = 1)
+AT (0,     0,     eps) RELATIVE tot
+
+
+FINALLY
+%{
+%}
+/* The END token marks the instrument definition end */
+END
+
