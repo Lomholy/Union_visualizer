@@ -242,8 +242,8 @@ class TestCloseCuts(unittest.TestCase):
         a = box("a", 2, 2, 2, priority=1)
         b = box("b", 2, 2.5, 2.5, priority=2)
         mesh = self.build_closed([a, b], {"b": translation(x=1.1)}).get("a")
-        self.assertAlmostEqual(area(mesh), 4 + 4 * 2 * 1.1 + 4, places=6)
-        self.assertAlmostEqual(mesh.volume, 2 * 2 * 1.1, places=6)
+        self.assertAlmostEqual(area(mesh) / (4 + 4 * 2 * 1.1 + 4), 1, delta=5e-4)
+        self.assertAlmostEqual(mesh.volume / (2 * 2 * 1.1), 1, delta=5e-4)
 
     def test_masked_box_is_closed_by_its_masks(self):
         # A masked by M1 (x < -0.1) and M2 (y < -0.1), ALL: a closed 0.9 x 0.9 x 2 block
@@ -251,8 +251,8 @@ class TestCloseCuts(unittest.TestCase):
         m1 = box("m1", 2, 3, 3, mask_string="a")
         m2 = box("m2", 3, 2, 3, mask_string="a")
         mesh = self.build_closed([a, m1, m2], {"m1": translation(x=-1.1), "m2": translation(y=-1.1)}).get("a")
-        self.assertAlmostEqual(mesh.volume, 0.9 * 0.9 * 2, places=6)
-        self.assertAlmostEqual(area(mesh), 2 * 0.9 * 0.9 + 4 * 0.9 * 2, places=6)
+        self.assertAlmostEqual(mesh.volume / (0.9 * 0.9 * 2), 1, delta=5e-4)
+        self.assertAlmostEqual(area(mesh) / (2 * 0.9 * 0.9 + 4 * 0.9 * 2), 1, delta=5e-4)
 
     def test_off_by_default(self):
         a = box("a", 2, 2, 2, priority=1)

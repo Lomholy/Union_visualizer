@@ -375,10 +375,18 @@ class MesherPanel(QtWidgets.QWidget):
         self.deflection_label = add_labeled_row(layout, "Surface deflection", self.deflection_spin)
         self.deflection_label.setToolTip(DEFLECTION_TOOLTIP)
 
+        self.close_cuts_checkbox = make_checkbox(
+            "Close cut surfaces", False,
+            "Add walls where higher-priority components and masks cut a component, "
+            "so it is drawn closed as the brep mesher draws it. Slower.",
+        )
+        layout.addWidget(self.close_cuts_checkbox)
+
         self.update_capabilities()
         self.mesher_box.currentIndexChanged.connect(self._on_mesher_changed)
         self.resolution_box.currentIndexChanged.connect(lambda *_: self.changed.emit())
         self.deflection_spin.valueChanged.connect(lambda *_: self.changed.emit())
+        self.close_cuts_checkbox.stateChanged.connect(lambda *_: self.changed.emit())
 
     def mesher(self):
         return self.mesher_box.currentData()
@@ -388,6 +396,9 @@ class MesherPanel(QtWidgets.QWidget):
 
     def deflection(self):
         return self.deflection_spin.value()
+
+    def close_cuts(self):
+        return self.close_cuts_checkbox.isChecked()
 
     def update_capabilities(self):
         mesher = self.mesher()
@@ -402,6 +413,11 @@ class MesherPanel(QtWidgets.QWidget):
             (self.deflection_spin, self.deflection_label),
             caps["deflection"],
             DEFLECTION_TOOLTIP if caps["deflection"] else unused_tip,
+        )
+        set_option_enabled(
+            (self.close_cuts_checkbox,),
+            caps["close_cuts"],
+            "" if caps["close_cuts"] else unused_tip,
         )
 
     def _on_mesher_changed(self):

@@ -532,6 +532,7 @@ class Viewer(QtWidgets.QMainWindow):
             res=self.mesher_panel.resolution(),
             group_by_material=self.settings_panel.material_group_checkbox.isChecked(),
             deflection=self.mesher_panel.deflection(),
+            close_cuts=self.mesher_panel.close_cuts(),
             force_pygen=self.settings_panel.pygen_checkbox.isChecked(),
             param_values=dict(self.params_panel.values),
             # Building the pygfx objects is cheap, so it stays on the job's

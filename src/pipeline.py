@@ -27,6 +27,7 @@ def compute_mesh_data(
     deflection=DEFAULT_BREP_DEFLECTION,
     force_pygen=False,
     param_values=None,
+    close_cuts=False,
 ):
     """Everything a mesh reload needs to do that doesn't touch pygfx/Qt:
     preprocessing, SDF/BREP mesh building (with dependency-based incremental
@@ -71,6 +72,7 @@ def compute_mesh_data(
             mesher=mesher,
             deflection=deflection,
             world_bboxes=world_bboxes,
+            close_cuts=close_cuts,
         )
     else:
         changed_names = [
@@ -96,6 +98,7 @@ def compute_mesh_data(
                 build_union_meshes(
                     union_geometries, world_matrices, clip, verbose,
                     world_bboxes=world_bboxes, names=changed_names,
+                    close_cuts=close_cuts,
                 )
             )
         else:

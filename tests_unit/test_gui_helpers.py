@@ -226,7 +226,7 @@ class TestMesherCapabilities(unittest.TestCase):
         self.assertEqual(set(MESHER_CAPABILITIES), set(panels.MESHER_KEYS))
 
     def test_every_entry_has_the_same_capability_keys(self):
-        expected_keys = {"resolution", "deflection", "clip", "incremental_rebuild"}
+        expected_keys = {"resolution", "deflection", "close_cuts", "clip", "incremental_rebuild"}
         for mesher, caps in MESHER_CAPABILITIES.items():
             with self.subTest(mesher=mesher):
                 self.assertEqual(set(caps), expected_keys)

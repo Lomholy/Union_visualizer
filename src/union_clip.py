@@ -422,10 +422,12 @@ class Masked:
 class Clipper:
     """union_tri_add for one component against everything that can hide it."""
 
-    def __init__(self, own_masks, cutters, sources):
+    def __init__(self, own_masks, cutters, sources, status=None):
         self.own_masks = own_masks
         self.cutters = cutters
         self.sources = sources
+        # status(p, shift) -> keep; by default the point moved by shift has the highest priority
+        self.status = status or (lambda p, shift: self.highest(p + shift))
 
     def highest(self, p):
         """r_has_highest_priority: in the component's masks, and inside no cutter."""
@@ -459,7 +461,7 @@ class Clipper:
         into = toward[sid] - mid
         length = np.linalg.norm(into, axis=1)[:, None]
         into = np.divide(into, length, out=np.zeros_like(into), where=length > 0)
-        keep = self.highest(mid + shift[sid] + INWARD * into)
+        keep = self.status(mid + INWARD * into, shift[sid])
         cuts = [[] for _ in range(n)]
         start = np.zeros(n, bool)
         bounds = np.flatnonzero(np.diff(np.concatenate([[-1], sid, [n]])))
@@ -580,7 +582,8 @@ class Clipper:
                     else:
                         after.extend((t, d - 2, False, h) for t in split_in_4(v[None]))
             if centroid_items:
-                ok = self.highest(np.array([it[1].mean(0) + it[4] for it in centroid_items]))
+                ok = self.status(np.array([it[1].mean(0) for it in centroid_items]),
+                                 np.array([it[4] for it in centroid_items]))
                 for (rule, v, d, st0, h), inside in zip(centroid_items, ok):
                     if rule == "keep":
                         if inside:
@@ -617,8 +620,9 @@ def _masked(comp, shapes, union_geometries):
     return Masked(shapes[comp.name], [shapes[m.name] for m in masks], mask_mode_any(masks))
 
 
-def clip_component(comp, union_geometries, shapes, world_bboxes, clip):
-    """Triangles (T, 3, 3) of comp's surface where it has the highest priority."""
+def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False):
+    """Triangles (T, 3, 3) of comp's surface where it has the highest priority and,
+    with walls, the walls closing it where higher-priority components and masks cut it."""
     candidates = [
         c.name for c in union_geometries.values()
         if not is_mask(c) and shapes.get(c.name) is not None and c.priority > comp.priority
@@ -636,7 +640,67 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip):
     clipper = Clipper(own if own.masks else None, cutters, sources)
     tri = own.shape.triangles()
     tri = clipper.run(tri, own.shape.depth, inward_shift(own.shape, tri))
-    return orient_outward(tri, own.shape.center) if own.shape.convex else tri
+    tri = orient_outward(tri, own.shape.center) if own.shape.convex else tri
+    if not walls:
+        return tri
+    return np.concatenate([tri, *cut_walls(own, cutters, sources, clip)])
+
+
+def cut_walls(own, cutters, sources, clip):
+    """The walls that close comp's shown surface, as the brep mesher's solids have:
+    the parts of every surface bounding the region where comp is present and on top
+    (its masks, each cutter and each cutter's masks) with that region on one side
+    only, facing away from it. The clip plane gets no wall."""
+    def inside(shape, p, side):
+        # the wall's own surface is decided by the side tested, not by its exact shape:
+        # a cylinder's 32-sided display surface lies inside the true cylinder
+        return np.full(len(p), side[1]) if shape is side[0] else shape.contains(p)
+
+    def present(masked, p, side):
+        ok = inside(masked.shape, p, side)
+        if masked.masks:
+            status = [inside(m, p, side) for m in masked.masks]
+            ok &= np.any(status, 0) if masked.any_mode else np.all(status, 0)
+        return ok
+
+    def region(p, side):
+        ok = present(own, p, side)
+        for cutter in cutters:
+            idx = np.flatnonzero(ok)
+            if len(idx) == 0:
+                break
+            ok[idx] = ~present(cutter, p[idx], side)
+        return ok
+
+    real_cutters = cutters[:-1] if clip.get("enable") else cutters
+    surfaces = list(own.masks) + [shape for c in real_cutters for shape in (c.shape, *c.masks)]
+    own_tri = own.shape.triangles()
+    lo, hi = own_tri.min((0, 1)), own_tri.max((0, 1))
+    walls = []
+    for surface in surfaces:
+        out_side, in_side = (surface, False), (surface, True)
+
+        # p + shift lies just outside the surface, p - shift just inside it
+        def one_side(p, h, o=out_side, i=in_side):
+            return region(p + h, o) != region(p - h, i)
+
+        tri = surface.triangles()
+        # only triangles reaching into comp's bounding box can bound its region
+        tri = tri[np.all((tri.max(1) >= lo) & (tri.min(1) <= hi), axis=1)]
+        if len(tri) == 0:
+            continue
+        wall = Clipper(None, [], sources + [own.shape], one_side).run(tri, surface.depth, -inward_shift(surface, tri))
+        if len(wall) == 0:
+            continue
+        # face away from the region: inwards where it lies outside the surface
+        outward = -inward_shift(surface, wall)
+        region_outside = region(wall.mean(1) + outward, out_side)
+        facing = np.where(region_outside[:, None], -outward, outward)
+        normal = np.cross(wall[:, 1] - wall[:, 0], wall[:, 2] - wall[:, 0])
+        flip = (normal * facing).sum(1) < 0
+        wall[flip] = wall[flip][:, [0, 2, 1]]
+        walls.append(wall)
+    return walls
 
 
 def _to_mesh(tri):
@@ -656,9 +720,11 @@ def build_shapes(union_geometries, world_matrices):
     return shapes
 
 
-def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, world_bboxes=None, names=None):
+def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, world_bboxes=None, names=None,
+                       close_cuts=False):
     """{name: trimesh or None} for names (default: every component). Masks, unknown
-    shapes and fully hidden components map to None."""
+    shapes and fully hidden components map to None. close_cuts adds the walls
+    that close each component where higher priorities and masks cut it."""
     if world_bboxes is None:
         world_bboxes = compute_all_world_bboxes(
             {n: c for n, c in union_geometries.items() if c.component_name in KNOWN_SHAPES},
@@ -673,7 +739,7 @@ def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, wo
                 print(f"{name} is a mask, and is therefore not meshed.")
             meshes[name] = None
             continue
-        meshes[name] = _to_mesh(clip_component(comp, union_geometries, shapes, world_bboxes, clip))
+        meshes[name] = _to_mesh(clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts))
     return meshes
 
 
