@@ -253,10 +253,26 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
             ),
         )
 
+        # Settings > Show triangle lines; shares the mesh's geometry, so it hides and clips with it
+        wireframe = gfx.Mesh(
+            gfx_mesh.geometry,
+            gfx.MeshBasicMaterial(color="black", wireframe=True, wireframe_thickness=1.0),
+        )
+        wireframe.visible = False
+        gfx_mesh.add(wireframe)
+
         group.add(gfx_mesh)
         group.geometry_meshes[key] = gfx_mesh
 
     return group
+
+
+def set_triangle_lines(group, visible):
+    """Show or hide the black wireframe build_gfx_group puts over every Union mesh."""
+    for mesh in group.geometry_meshes.values():
+        for child in mesh.children:
+            if getattr(child.material, "wireframe", False):
+                child.visible = visible
 
 
 # The viewer clips Union meshes with pygfx clipping planes like everything
@@ -1147,6 +1163,11 @@ class Viewer(QtWidgets.QMainWindow):
         self.arms_checkbox.setToolTip("Arms only mark coordinate frames.")
         settings_layout.addWidget(self.arms_checkbox)
 
+        self.triangle_lines_checkbox = QtWidgets.QCheckBox("Show triangle lines")
+        self.triangle_lines_checkbox.setChecked(False)
+        self.triangle_lines_checkbox.setToolTip("Draw the edges of every triangle of the Union meshes in black.")
+        settings_layout.addWidget(self.triangle_lines_checkbox)
+
         self.rays_checkbox = QtWidgets.QCheckBox("Show neutron rays")
         self.rays_checkbox.setChecked(False)
         self.rays_checkbox.setToolTip(
@@ -1606,6 +1627,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.pygen_checkbox.stateChanged.connect(self.on_pygen_changed)
         self.components_checkbox.stateChanged.connect(self.on_components_changed)
         self.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
+        self.triangle_lines_checkbox.stateChanged.connect(self.apply_triangle_lines)
         self.rays_checkbox.stateChanged.connect(self.on_rays_changed)
         self.ray_count_val.valueChanged.connect(self.ray_rerun_timer.start)
         self.ray_seed_val.valueChanged.connect(self.ray_rerun_timer.start)
@@ -1696,6 +1718,10 @@ class Viewer(QtWidgets.QMainWindow):
             if hide_vacuum and is_vacuum.get(key, False):
                 visible = False
             mesh.visible = visible
+
+    def apply_triangle_lines(self):
+        if self.current_group is not None:
+            set_triangle_lines(self.current_group, self.triangle_lines_checkbox.isChecked())
 
     def on_geometry_visibility_changed(self, name, mesh, checked):
         self.geometry_visibility[name] = checked
@@ -2109,6 +2135,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         self.rebuild_geometry_panel()
         self.apply_geometry_visibility()
+        self.apply_triangle_lines()
         self._resize_grid(self.current_group)
         recentre_controller(self.controller, self.current_group)
         if self.counts:
