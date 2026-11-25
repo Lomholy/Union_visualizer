@@ -54,7 +54,7 @@ def compute_mesh_data(
     print("Building meshes")
 
     new_dependencies = {
-        name: component_dependency_signature(name, union_geometries, world_bboxes)
+        name: component_dependency_signature(name, union_geometries, world_bboxes, world_matrices)
         for name in union_geometries
     }
 

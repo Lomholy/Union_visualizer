@@ -183,7 +183,7 @@ class TestComponentDependencySignature(unittest.TestCase):
         bboxes = self._bboxes(comps, world_matrices)
         sig = bounding_box.component_dependency_signature("low", comps, bboxes)
         # No cutters at all: "lower" has lower priority than "low".
-        own_min, own_max, cutters, masks, mask_string, mask_setting = sig
+        own_min, own_max, own_shape, cutters, masks, mask_string, mask_setting = sig
         self.assertEqual(cutters, ())
 
     def test_priority_reordering_that_changes_the_candidate_set_is_detected(self):
