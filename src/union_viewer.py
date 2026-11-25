@@ -14,6 +14,7 @@ from clipping import resolve_clip_frame
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
 from brep import build_many_brep_meshes
+from union_clip import build_union_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
 from gui_helpers import (
     group_meshes_by_material,
@@ -179,6 +180,14 @@ def compute_mesh_data(
                 build_many_brep_meshes(
                     changed_names, union_geometries, world_matrices, clip,
                     verbose, deflection=deflection, world_bboxes=world_bboxes,
+                )
+            )
+        elif mesher == "union":
+            # One call, so every shape is built once however many components changed.
+            meshes.update(
+                build_union_meshes(
+                    union_geometries, world_matrices, clip, verbose,
+                    world_bboxes=world_bboxes, names=changed_names,
                 )
             )
         else:

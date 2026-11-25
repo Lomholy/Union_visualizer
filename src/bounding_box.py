@@ -113,9 +113,10 @@ def overlapping(name, candidate_names, world_bboxes, tol=1e-9):
 def component_dependency_signature(name, union_geometries, world_bboxes):
     """A comparable value for what this component's mesh depends on: its
     own world bbox, the (name, bbox) of every higher-priority component
-    whose bbox currently overlaps it, and the same for whatever currently
-    masks it (masks are matched by name, not bbox). Equal values across two
-    calls mean this component does not need remeshing.
+    whose bbox currently overlaps it with the masks of that component, and
+    the same for whatever currently masks this one (masks are matched by
+    name, not bbox). Equal values across two calls mean this component does
+    not need remeshing.
 
     Geometry-only: a shape parameter change is caught via its effect on
     the bbox, not compared directly. Does not detect a Union_mesh's file
@@ -123,28 +124,28 @@ def component_dependency_signature(name, union_geometries, world_bboxes):
     comp = union_geometries[name]
     own_min, own_max = world_bboxes[name]
 
+    def masks_of(target):
+        return tuple(
+            sorted(
+                (c.name, tuple(world_bboxes[c.name][0]), tuple(world_bboxes[c.name][1]),
+                 getattr(c, "mask_setting", None))
+                for c in union_geometries.values()
+                if getattr(c, "mask_string", None) and target in c.mask_string
+            )
+        )
+
     higher_priority_names = [
         c.name for c in union_geometries.values() if c.priority > comp.priority
     ]
     cutters = tuple(
         sorted(
-            (n, tuple(world_bboxes[n][0]), tuple(world_bboxes[n][1]))
+            (n, tuple(world_bboxes[n][0]), tuple(world_bboxes[n][1]), masks_of(n))
             for n in overlapping(name, higher_priority_names, world_bboxes)
         )
     )
 
     mask_string = getattr(comp, "mask_string", None)
-    masking_names = [
-        c.name
-        for c in union_geometries.values()
-        if getattr(c, "mask_string", None) and name in c.mask_string
-    ]
-    masks = tuple(
-        sorted(
-            (n, tuple(world_bboxes[n][0]), tuple(world_bboxes[n][1]))
-            for n in masking_names
-        )
-    )
+    masks = masks_of(name)
 
     return (
         tuple(own_min),

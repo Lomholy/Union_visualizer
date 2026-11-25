@@ -173,6 +173,39 @@ class TestMasks(unittest.TestCase):
         self.assertAlmostEqual(area(meshes.get("ab")), 4 + 4 * 2 * 0.9, places=6)
 
 
+class TestIncrementalRebuild(unittest.TestCase):
+    def test_moving_a_cutters_mask_changes_the_lower_components_signature(self):
+        # A (priority 1) is cut by B (priority 2), which mask M limits
+        from bounding_box import compute_all_world_bboxes, component_dependency_signature
+
+        geoms = {c.name: c for c in (box("a", 2, 2, 2, priority=1), box("b", 1, 1, 1, priority=2),
+                                     box("m", 1, 1, 1, mask_string="b"))}
+        signatures = []
+        for x in (0.0, 0.3):
+            world = {"a": np.eye(4), "b": np.eye(4), "m": translation(x=x)}
+            signatures.append(component_dependency_signature("a", geoms, compute_all_world_bboxes(geoms, world)))
+        self.assertNotEqual(*signatures)
+
+    def test_union_rebuild_builds_shapes_once(self):
+        import union_clip
+        import union_viewer
+
+        calls = []
+        real = union_clip.build_shapes
+
+        def counting(*args):
+            calls.append(1)
+            return real(*args)
+
+        inp = str(DATA / "union_clip_shapes.instr")
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, _, meshes, deps, _ = union_viewer.compute_mesh_data(inp, NO_CLIP, mesher="union")
+            stale = {name: "stale" for name in deps}
+            with mock.patch.object(union_clip, "build_shapes", counting):
+                union_viewer.compute_mesh_data(inp, NO_CLIP, meshes=meshes, dependencies=stale, mesher="union")
+        self.assertEqual(len(calls), 1)
+
+
 class TestClipBox(unittest.TestCase):
     # R4: the clip plane removes its side of every component
     def test_clip_removes_side(self):
