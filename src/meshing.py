@@ -5,6 +5,7 @@ from plot_union_cloud import sdf_normal
 from bounding_box import compute_world_bbox
 from dual_cont import build_mesh_dual
 from brep import build_brep_meshes, build_single_brep_mesh
+from union_clip import build_union_meshes
 
 
 # What each mesher's dock controls actually do.
@@ -24,6 +25,12 @@ MESHER_CAPABILITIES = {
     "brep": {
         "resolution": False,
         "deflection": True,
+        "clip": True,
+        "incremental_rebuild": True,
+    },
+    "union": {
+        "resolution": False,
+        "deflection": False,
         "clip": True,
         "incremental_rebuild": True,
     },
@@ -75,6 +82,11 @@ def build_mesh(
     if verbose:
         print(f"build single mesh! Building {comp.name}!")
     name = comp.name
+    if mesher == "union":
+        return build_union_meshes(
+            union_geometries, world_matrices, clip, verbose,
+            world_bboxes=world_bboxes, names=[name],
+        )[name]
     if comp.component_name == "Union_mesh":
         mesh = trimesh.load_mesh(comp.filename.strip('"'))
         if comp.coordinate_scale is None:
@@ -151,6 +163,10 @@ def build_all_meshes(
             world_matrices,
             out_file,
             meshes_dict,
+        )
+    if mesher == "union":
+        meshes_dict = build_union_meshes(
+            union_geometries, world_matrices, clip, verbose, world_bboxes=world_bboxes,
         )
     if mesher == "brep":
         meshes_dict = build_brep_meshes(

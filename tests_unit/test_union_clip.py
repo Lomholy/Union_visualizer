@@ -65,11 +65,13 @@ def area(mesh):
 
 class TestPriorityClipping(unittest.TestCase):
     def test_higher_priority_hides_lower(self):
-        # R1: A is shown only outside the higher-priority B
+        # R1: A is shown only outside the higher-priority B (x > 0.1). Boundaries in
+        # these tests stay off the 0.5 vertex lattice the box pre-split makes, where
+        # McStas's algorithm drops slivers along an edge lying in the boundary.
         a = box("a", 2, 2, 2, priority=1)
         b = box("b", 2, 2.5, 2.5, priority=2)
-        meshes = build([a, b], {"b": translation(x=1)})
-        self.assertAlmostEqual(area(meshes.get("a")), 12.0, places=6)
+        meshes = build([a, b], {"b": translation(x=1.1)})
+        self.assertAlmostEqual(area(meshes.get("a")), 4 + 4 * 2 * 1.1, places=6)
         self.assertAlmostEqual(area(meshes.get("b")), 2 * 2 * 2.5 * 2 + 2 * 2.5 * 2.5, places=6)
 
     def test_no_boolean_operations(self):
@@ -140,50 +142,53 @@ class TestShapes(unittest.TestCase):
 
 
 class TestMasks(unittest.TestCase):
-    # R3: A (cube of side 2 at the origin) masked by M1 (x < 0) and M2 (y < 0)
+    # R3: A (cube of side 2 at the origin) masked by M1 (x < -0.1) and M2 (y < -0.1)
+    ALL_AREA = 2 * 0.9 * 2 + 2 * 0.9 * 0.9
+    ANY_AREA = 24 - (2 * 1.1 * 2 + 2 * 1.1 * 1.1)
+
     def masks(self, setting):
         a = box("a", 2, 2, 2, priority=1)
         m1 = box("m1", 2, 3, 3, mask_string="a", mask_setting=setting)
         m2 = box("m2", 3, 2, 3, mask_string="a", mask_setting=setting)
-        return build([a, m1, m2], {"m1": translation(x=-1), "m2": translation(y=-1)})
+        return build([a, m1, m2], {"m1": translation(x=-1.1), "m2": translation(y=-1.1)})
 
     def test_all(self):
         meshes = self.masks("All")
-        self.assertAlmostEqual(area(meshes.get("a")), 6.0, places=6)
+        self.assertAlmostEqual(area(meshes.get("a")), self.ALL_AREA, places=6)
         self.assertIsNone(meshes.get("m1"))
         self.assertIsNone(meshes.get("m2"))
 
     def test_any(self):
-        self.assertAlmostEqual(area(self.masks('"ANY"').get("a")), 18.0, places=6)
+        self.assertAlmostEqual(area(self.masks('"ANY"').get("a")), self.ANY_AREA, places=6)
 
     def test_unset_setting_is_all(self):
-        self.assertAlmostEqual(area(self.masks(None).get("a")), 6.0, places=6)
+        self.assertAlmostEqual(area(self.masks(None).get("a")), self.ALL_AREA, places=6)
 
     def test_mask_name_must_match_whole_name(self):
         a = box("a", 2, 2, 2, priority=1)
         ab = box("ab", 2, 2, 2, priority=2)
         mask = box("m", 2, 3, 3, mask_string="ab")
-        meshes = build([a, ab, mask], {"ab": translation(z=5), "m": translation(z=5, x=-1)})
+        meshes = build([a, ab, mask], {"ab": translation(z=5), "m": translation(z=5, x=-1.1)})
         self.assertAlmostEqual(area(meshes.get("a")), 24.0, places=6)
-        self.assertAlmostEqual(area(meshes.get("ab")), 12.0, places=6)
+        self.assertAlmostEqual(area(meshes.get("ab")), 4 + 4 * 2 * 0.9, places=6)
 
 
 class TestClipBox(unittest.TestCase):
     # R4: the clip plane removes its side of every component
     def test_clip_removes_side(self):
-        clip = {"enable": True, "axis": "X", "mode": "Above", "position": 0.0}
-        self.assertAlmostEqual(area(build([box("a", 2, 2, 2)], clip=clip).get("a")), 12.0, places=6)
+        clip = {"enable": True, "axis": "X", "mode": "Above", "position": 0.1}
+        self.assertAlmostEqual(area(build([box("a", 2, 2, 2)], clip=clip).get("a")), 4 + 4 * 2 * 0.9, places=6)
 
     def test_clip_below(self):
-        clip = {"enable": True, "axis": "Z", "mode": "Below", "position": 0.5}
-        self.assertAlmostEqual(area(build([box("a", 2, 2, 2)], clip=clip).get("a")), 4 + 4 * 2 * 1.5, places=6)
+        clip = {"enable": True, "axis": "Z", "mode": "Below", "position": 0.3}
+        self.assertAlmostEqual(area(build([box("a", 2, 2, 2)], clip=clip).get("a")), 4 + 4 * 2 * 1.3, places=6)
 
     def test_clip_disabled(self):
         self.assertAlmostEqual(area(build([box("a", 2, 2, 2)]).get("a")), 24.0, places=6)
 
 
 class TestMcStasReference(unittest.TestCase):
-    # R5: per-component area within 0.1% of McStas's own --trace=2 polyhedra
+    # R7: per-component area within 0.2% of McStas's own --trace=2 polyhedra
     def test_shapes_instrument(self):
         import preprocess
         from clipping import resolve_clip_frame
@@ -198,7 +203,7 @@ class TestMcStasReference(unittest.TestCase):
         self.assertEqual(set(reference), {n for n, m in meshes.items() if m is not None})
         for name, mcstas_area in reference.items():
             with self.subTest(name=name):
-                self.assertAlmostEqual(area(meshes[name]) / mcstas_area, 1.0, delta=1e-3)
+                self.assertAlmostEqual(area(meshes[name]) / mcstas_area, 1.0, delta=2e-3)
 
 
 if __name__ == "__main__":

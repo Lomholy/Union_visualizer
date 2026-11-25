@@ -43,7 +43,7 @@ import logger_output
 import argparse
 
 # The meshers offered in the dock, in display order.
-MESHER_KEYS = ("mc", "dc", "brep")
+MESHER_KEYS = ("mc", "dc", "brep", "union")
 
 MESHER_DESCRIPTIONS = {
     "mc": (
@@ -58,6 +58,11 @@ MESHER_DESCRIPTIONS = {
         "BREP (exact CAD): uses OpenCASCADE boundary representation for exact, "
         "resolution-independent geometry. Most accurate, but can be slower for "
         "complex boolean operations."
+    ),
+    "union": (
+        "Union priority clipping: keeps each component's own surface where it has "
+        "the highest priority, as McStas draws it with mcdisplay --trace=2. Fast, "
+        "with open surfaces where a cut is made."
     ),
 }
 
@@ -129,8 +134,8 @@ def compute_mesh_data(
     )
     clip = resolve_clip_frame(clip, world_matrices)
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
-    # The "brep" mesher never touches sdfs/final_sdfs, so skip building them.
-    if mesher == "brep":
+    # The "brep" and "union" meshers never touch sdfs/final_sdfs, so skip building them.
+    if mesher in ("brep", "union"):
         final_sdfs, sdfs = {}, {}
     else:
         print("Building sdfs")

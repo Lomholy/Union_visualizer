@@ -1,0 +1,18 @@
+# Auto-managed by flowctl — do not edit above this marker.
+.checkpoint-*.json
+receipts/
+tmp/
+.backup-pre-1.0/
+.banner-acknowledged
+.migrating
+.migration-manifest
+sync-runs/
+.locks/
+locks/
+pilot-runs/
+.cache/
+create-first/
+review-fanout/
+artifacts/*/pr-cognitive-aid/*.json
+artifacts/*/pr-cognitive-aid/.write.lock
+# End of auto-managed block. User patterns below this line are preserved.
