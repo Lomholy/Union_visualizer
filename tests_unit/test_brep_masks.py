@@ -56,5 +56,33 @@ class TestBrepMasks(unittest.TestCase):
         self.assertAlmostEqual(area([a, b, m], "a", {"m": translation(z=1.5)}), 24 - 1 + 4 + 1, places=4)
 
 
+class TestBrepMaskSetting(unittest.TestCase):
+    # McStas: ALL unless any of the masks says ANY. A (cube of side 2) masked by
+    # M1 (x < -0.1) and M2 (y < -0.1): ALL keeps 0.9 x 0.9 x 2, ANY all but 1.1 x 1.1 x 2
+    ALL_VOLUME = 0.9 * 0.9 * 2
+    ANY_VOLUME = 8 - 1.1 * 1.1 * 2
+
+    def volume(self, setting1, setting2):
+        a = FakeBox("a", 2, 2, 2, priority=1)
+        m1 = FakeBox("m1", 2, 3, 3, priority=100, mask_string="a", mask_setting=setting1)
+        m2 = FakeBox("m2", 3, 2, 3, priority=101, mask_string="a", mask_setting=setting2)
+        geoms = {c.name: c for c in (a, m1, m2)}
+        world = {"a": np.eye(4), "m1": np.eye(4), "m2": np.eye(4)}
+        world["m1"][0, 3], world["m2"][1, 3] = -1.1, -1.1
+        with contextlib.redirect_stdout(io.StringIO()):
+            mesh = brep.build_single_brep_mesh(a, geoms, world, NO_CLIP, False)
+        return 0.0 if mesh is None else float(mesh.volume)
+
+    def test_unset_is_all(self):
+        self.assertAlmostEqual(self.volume(None, None), self.ALL_VOLUME, places=4)
+
+    def test_any_mask_saying_any_wins(self):
+        self.assertAlmostEqual(self.volume("All", "Any"), self.ANY_VOLUME, places=4)
+
+    def test_quoted_upper_case(self):
+        self.assertAlmostEqual(self.volume('"ANY"', '"ANY"'), self.ANY_VOLUME, places=4)
+        self.assertAlmostEqual(self.volume('"ALL"', '"ALL"'), self.ALL_VOLUME, places=4)
+
+
 if __name__ == "__main__":
     unittest.main()
