@@ -33,6 +33,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
+from union_clip import mask_mode_any
 
 
 def _mesh_to_brep(mesh, name, verbose=False):
@@ -204,11 +205,8 @@ def get_mask_comps(focus_comp, union_geometries):
             continue
         if focus_comp.name in comp.mask_string:
             mask_comps.append(comp)
-    for mask in mask_comps:
-        if mask.mask_setting == "All":
-            mask_setting = mask.mask_setting
-    if mask_setting == "No" and len(mask_comps)>0:
-        mask_setting = "Any"
+    if mask_comps:
+        mask_setting = "Any" if mask_mode_any(mask_comps) else "All"
     return mask_comps, mask_setting
 
 def intersect_with_masks(shape, mask_comps, mask_setting):
@@ -263,11 +261,16 @@ def build_mask_comps(mask_comps, world_matrices):
 
     return breps
 
-def build_higher_priorities(higher_priorities, world_matrices):
+def build_higher_priorities(higher_priorities, union_geometries, world_matrices):
+    """Each cutter's solid, limited to its own masks when it is masked."""
     breps = []
-    for i, comp in enumerate(higher_priorities):
-        brep = build_comp_brep(comp, world_matrices)
-        breps.append(brep)
+    for comp in higher_priorities:
+        mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
+        breps.append(intersect_with_masks(
+            build_comp_brep(comp, world_matrices),
+            build_mask_comps(mask_comps, world_matrices),
+            mask_setting,
+        ))
     return breps
 
 
@@ -325,9 +328,11 @@ def build_single_brep_mesh(
     if world_bboxes is None:
         world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     # Only a higher-priority component whose world bbox actually overlaps
-    # this one can change the result of subtracting it.
+    # this one can change the result of subtracting it. Masks never cut:
+    # they only limit the components they mask.
     candidates = [
-        x.name for n, x in union_geometries.items() if x.priority > comp.priority
+        x.name for n, x in union_geometries.items()
+        if x.priority > comp.priority and getattr(x, "mask_string", None) is None
     ]
     higher_priority = [
         union_geometries[n] for n in overlapping(comp.name, candidates, world_bboxes)
@@ -335,7 +340,7 @@ def build_single_brep_mesh(
     res_comp = build_comp_brep(comp, world_matrices)
     mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
     mask_comps = build_mask_comps(mask_comps, world_matrices)
-    prio_breps = build_higher_priorities(higher_priority, world_matrices)
+    prio_breps = build_higher_priorities(higher_priority, union_geometries, world_matrices)
     res_comp = subtract_higher_priorities(res_comp, prio_breps)
     res_comp = intersect_with_masks(res_comp, mask_comps, mask_setting)
     res_comp = clip_component(res_comp, clip)

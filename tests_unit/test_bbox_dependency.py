@@ -183,7 +183,7 @@ class TestComponentDependencySignature(unittest.TestCase):
         bboxes = self._bboxes(comps, world_matrices)
         sig = bounding_box.component_dependency_signature("low", comps, bboxes)
         # No cutters at all: "lower" has lower priority than "low".
-        own_min, own_max, cutters, masks, mask_string, mask_setting = sig
+        own_min, own_max, own_shape, cutters, masks, mask_string, mask_setting = sig
         self.assertEqual(cutters, ())
 
     def test_priority_reordering_that_changes_the_candidate_set_is_detected(self):
@@ -318,6 +318,43 @@ class TestUnionMeshBboxScale(unittest.TestCase):
         explicit = bounding_box.compute_local_bbox(FakeMeshCompScaled(stl_path))
         np.testing.assert_allclose(np.array(default[0]), np.array(explicit[0]))
         np.testing.assert_allclose(np.array(default[1]), np.array(explicit[1]))
+
+
+class TestShapeChangesWithinTheBbox(unittest.TestCase):
+    """A shape change that leaves the world bbox unchanged still needs a remesh."""
+
+    def signature(self, name, comps, matrices=None):
+        world = {c.name: (matrices or {}).get(c.name, np.eye(4)) for c in comps.values()}
+        bboxes = bounding_box.compute_all_world_bboxes(comps, world)
+        return bounding_box.component_dependency_signature(name, comps, bboxes, world)
+
+    def test_own_taper_change(self):
+        # xwidth2 grows from 0.2 to 0.5, still under xwidth: the bbox stays 0.6 wide
+        before = {"box": FakeBox("box", 1, xwidth=0.6)}
+        after = {"box": FakeBox("box", 1, xwidth=0.6)}
+        before["box"].xwidth2, after["box"].xwidth2 = 0.2, 0.5
+        bboxes = [bounding_box.compute_all_world_bboxes(c, {"box": np.eye(4)}) for c in (before, after)]
+        self.assertNotEqual(
+            bounding_box.component_dependency_signature("box", before, bboxes[0]),
+            bounding_box.component_dependency_signature("box", after, bboxes[1]),
+        )
+
+    def test_priority_changes(self):
+        # own and cutter priorities change without changing who cuts whom
+        def comps(low, high):
+            return {"low": FakeBox("low", low, xwidth=2), "high": FakeBox("high", high)}
+
+        base = self.signature("low", comps(1, 2))
+        self.assertNotEqual(base, self.signature("low", comps(1, 3)))
+        self.assertNotEqual(base, self.signature("low", comps(1.5, 2)))
+
+    def test_cutter_rotated_within_its_bbox(self):
+        # a square cutter turned by 90 degrees about z keeps its bbox, but not its taper's orientation
+        low, high = FakeBox("low", 1, xwidth=2, yheight=2, zdepth=2), FakeBox("high", 2)
+        high.xwidth2 = 0.5
+        comps = {"low": low, "high": high}
+        turn = np.array([[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], float)
+        self.assertNotEqual(self.signature("low", comps), self.signature("low", comps, {"high": turn}))
 
 
 if __name__ == "__main__":

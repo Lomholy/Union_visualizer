@@ -1,4 +1,6 @@
 
+import os
+
 import numpy as np
 import trimesh
 
@@ -110,25 +112,54 @@ def overlapping(name, candidate_names, world_bboxes, tol=1e-9):
     ]
 
 
-def component_dependency_signature(name, union_geometries, world_bboxes):
-    """A comparable value for what this component's mesh depends on: its
-    own world bbox, the (name, bbox) of every higher-priority component
-    whose bbox currently overlaps it with the masks of that component, and
-    the same for whatever currently masks this one (masks are matched by
-    name, not bbox). Equal values across two calls mean this component does
-    not need remeshing.
+# The parameters each Union shape's geometry is built from
+SHAPE_PARAMETERS = {
+    "union_box": ("xwidth", "yheight", "zdepth", "xwidth2", "yheight2"),
+    "union_sphere": ("radius",),
+    "union_cylinder": ("radius", "yheight"),
+    "union_cone": ("radius", "radius_top", "radius_bottom", "yheight"),
+    "union_mesh": ("filename", "coordinate_scale"),
+}
 
-    Geometry-only: a shape parameter change is caught via its effect on
-    the bbox, not compared directly. Does not detect a Union_mesh's file
-    changing to different geometry with the same bounding box."""
+
+def shape_signature(comp, world_matrices=None):
+    """A comparable value for one component's own geometry: its type, the
+    parameters its shape is built from, its placement and, for a
+    Union_mesh, the modification time of its mesh file."""
+    kind = comp.component_name.lower()
+    params = tuple(getattr(comp, p, None) for p in SHAPE_PARAMETERS.get(kind, ()))
+    placement = None
+    if world_matrices is not None:
+        placement = tuple(np.asarray(world_matrices[comp.name], float).ravel())
+    mtime = None
+    if kind == "union_mesh":
+        try:
+            mtime = os.path.getmtime(str(comp.filename).strip('"'))
+        except OSError:
+            mtime = None
+    return (kind, params, placement, mtime, getattr(comp, "priority", None))
+
+
+def component_dependency_signature(name, union_geometries, world_bboxes, world_matrices=None):
+    """A comparable value for what this component's mesh depends on: its
+    own geometry, that of every higher-priority component whose bbox
+    currently overlaps it together with that component's masks, and that
+    of whatever currently masks this one (masks are matched by name, not
+    bbox). Geometry means each component's bbox and its shape_signature,
+    so a shape change that leaves the bbox unchanged (a taper, a rotation
+    of a symmetric outline, an edited mesh file) is caught too. Equal
+    values across two calls mean this component does not need remeshing."""
     comp = union_geometries[name]
     own_min, own_max = world_bboxes[name]
+
+    def geometry(c):
+        return (c.name, tuple(world_bboxes[c.name][0]), tuple(world_bboxes[c.name][1]),
+                shape_signature(c, world_matrices))
 
     def masks_of(target):
         return tuple(
             sorted(
-                (c.name, tuple(world_bboxes[c.name][0]), tuple(world_bboxes[c.name][1]),
-                 getattr(c, "mask_setting", None))
+                (geometry(c), getattr(c, "mask_setting", None))
                 for c in union_geometries.values()
                 if getattr(c, "mask_string", None) and target in c.mask_string
             )
@@ -139,7 +170,7 @@ def component_dependency_signature(name, union_geometries, world_bboxes):
     ]
     cutters = tuple(
         sorted(
-            (n, tuple(world_bboxes[n][0]), tuple(world_bboxes[n][1]), masks_of(n))
+            (geometry(union_geometries[n]), masks_of(n))
             for n in overlapping(name, higher_priority_names, world_bboxes)
         )
     )
@@ -150,6 +181,7 @@ def component_dependency_signature(name, union_geometries, world_bboxes):
     return (
         tuple(own_min),
         tuple(own_max),
+        shape_signature(comp, world_matrices),
         cutters,
         masks,
         mask_string,
