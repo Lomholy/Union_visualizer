@@ -9,7 +9,7 @@
   "priority": null,
   "spec": "fn-1-union-priority-clipping-mesher",
   "spec_path": ".flow/tasks/fn-1-union-priority-clipping-mesher.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Implement Union priority-clipping mesher",
   "updated_at": "2026-11-25T17:10:00.355653Z"
 }

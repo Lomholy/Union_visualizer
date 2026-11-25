@@ -147,7 +147,7 @@
     "impl:fn-1-union-priority-clipping-mesher.1": 0
   },
   "spec_path": ".flow/specs/fn-1-union-priority-clipping-mesher.md",
-  "status": "open",
+  "status": "done",
   "title": "Union priority-clipping mesher",
   "tracker": {
     "baseHashFlow": null,
@@ -160,5 +160,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-11-25T17:44:20.243232Z"
+  "updated_at": "2026-11-25T17:45:07.385332Z"
 }
