@@ -33,6 +33,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
+from union_clip import mask_mode_any
 
 
 def _mesh_to_brep(mesh, name, verbose=False):
@@ -204,11 +205,8 @@ def get_mask_comps(focus_comp, union_geometries):
             continue
         if focus_comp.name in comp.mask_string:
             mask_comps.append(comp)
-    for mask in mask_comps:
-        if mask.mask_setting == "All":
-            mask_setting = mask.mask_setting
-    if mask_setting == "No" and len(mask_comps)>0:
-        mask_setting = "Any"
+    if mask_comps:
+        mask_setting = "Any" if mask_mode_any(mask_comps) else "All"
     return mask_comps, mask_setting
 
 def intersect_with_masks(shape, mask_comps, mask_setting):
