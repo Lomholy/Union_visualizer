@@ -339,6 +339,15 @@ class TestShapeChangesWithinTheBbox(unittest.TestCase):
             bounding_box.component_dependency_signature("box", after, bboxes[1]),
         )
 
+    def test_priority_changes(self):
+        # own and cutter priorities change without changing who cuts whom
+        def comps(low, high):
+            return {"low": FakeBox("low", low, xwidth=2), "high": FakeBox("high", high)}
+
+        base = self.signature("low", comps(1, 2))
+        self.assertNotEqual(base, self.signature("low", comps(1, 3)))
+        self.assertNotEqual(base, self.signature("low", comps(1.5, 2)))
+
     def test_cutter_rotated_within_its_bbox(self):
         # a square cutter turned by 90 degrees about z keeps its bbox, but not its taper's orientation
         low, high = FakeBox("low", 1, xwidth=2, yheight=2, zdepth=2), FakeBox("high", 2)
