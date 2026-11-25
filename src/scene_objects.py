@@ -84,6 +84,14 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
             ),
         )
 
+        # Settings > Show triangle lines; shares the mesh's geometry, so it hides and clips with it
+        wireframe = gfx.Mesh(
+            gfx_mesh.geometry,
+            gfx.MeshBasicMaterial(color="black", wireframe=True, wireframe_thickness=1.0),
+        )
+        wireframe.visible = False
+        gfx_mesh.add(wireframe)
+
         edges = feature_edges(mesh)
         if len(edges):
             lines = build_edge_lines(mesh.vertices + mesh.vertex_normals * EDGE_OFFSET, edges)
@@ -94,6 +102,14 @@ def build_gfx_group(render_meshes, geometry_is_vacuum, colors):
         group.geometry_meshes[key] = gfx_mesh
 
     return group
+
+
+def set_triangle_lines(group, visible):
+    """Show or hide the black wireframe build_gfx_group puts over every Union mesh."""
+    for mesh in group.geometry_meshes.values():
+        for child in mesh.children:
+            if getattr(child.material, "wireframe", False):
+                child.visible = visible
 
 
 def build_component_group(components, colors):

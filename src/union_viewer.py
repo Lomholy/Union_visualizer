@@ -33,6 +33,7 @@ from scene_objects import (
     grid_size_for_bbox,
     make_coordinate_axes,
     pick_world_point,
+    set_triangle_lines,
 )
 from background import JobRunner
 from qt_helpers import ask_color
@@ -206,6 +207,7 @@ class Viewer(QtWidgets.QMainWindow):
         settings.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
         settings.edges_checkbox.stateChanged.connect(self.apply_edges_visibility)
+        settings.triangle_lines_checkbox.stateChanged.connect(self.apply_triangle_lines)
         for checkbox, attr in (
             (settings.grid_checkbox, "grid"),
             (settings.gizmo_checkbox, "gizmo"),
@@ -332,6 +334,10 @@ class Viewer(QtWidgets.QMainWindow):
         show = self.settings_panel.edges_checkbox.isChecked()
         for edges in self.current_group.edge_lines:
             edges.visible = show
+
+    def apply_triangle_lines(self):
+        if self.current_group is not None:
+            set_triangle_lines(self.current_group, self.settings_panel.triangle_lines_checkbox.isChecked())
 
     def on_geometry_visibility_changed(self, name, checked):
         self.apply_geometry_visibility()
@@ -574,6 +580,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.rebuild_geometry_panel()
         self.apply_geometry_visibility()
         self.apply_edges_visibility()
+        self.apply_triangle_lines()
         self._resize_grid(self.current_group)
         recentre_controller(self.controller, self.current_group)
         if self.counts:

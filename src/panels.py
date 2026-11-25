@@ -26,7 +26,7 @@ from scene_objects import DEFAULT_MARKER_SIZES, DEFAULT_RAY_COLORS, RULER_COLOR
 from widgets import ColorBarWidget
 
 # The meshers offered in the dock, in display order.
-MESHER_KEYS = ("mc", "dc", "brep")
+MESHER_KEYS = ("mc", "dc", "brep", "union")
 
 MESHER_DESCRIPTIONS = {
     "mc": (
@@ -41,6 +41,11 @@ MESHER_DESCRIPTIONS = {
         "BREP (exact CAD): uses OpenCASCADE boundary representation for exact, "
         "resolution-independent geometry. Most accurate, but can be slower for "
         "complex boolean operations."
+    ),
+    "union": (
+        "Union priority clipping: keeps each component's own surface where it has "
+        "the highest priority, as McStas draws it with mcdisplay --trace=2. Fast, "
+        "with open surfaces where a cut is made."
     ),
 }
 
@@ -118,6 +123,9 @@ class SettingsPanel(QtWidgets.QWidget):
         self.edges_checkbox = make_checkbox(
             "Show edges", True, "Draw the sharp edges of the Union meshes as lines."
         )
+        self.triangle_lines_checkbox = make_checkbox(
+            "Show triangle lines", False, "Draw the edges of every triangle of the Union meshes in black."
+        )
         self.trace_status_label = make_note_label()
         self.reset_view_button = make_button("Reset view", "Refit the camera (shortcut: R)")
         self.fit_instrument_button = make_button(
@@ -144,6 +152,7 @@ class SettingsPanel(QtWidgets.QWidget):
             self.gizmo_checkbox,
             self.axes_checkbox,
             self.edges_checkbox,
+            self.triangle_lines_checkbox,
             self.trace_status_label,
             self.reset_view_button,
             self.fit_instrument_button,

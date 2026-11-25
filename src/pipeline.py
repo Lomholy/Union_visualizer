@@ -7,6 +7,7 @@ from clipping import resolve_clip_frame
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, DEFAULT_BREP_DEFLECTION
 from brep import build_many_brep_meshes
+from union_clip import build_union_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
 from gui_helpers import group_meshes_by_material, is_vacuum_material
 from mcstas_trace import trace_instrument, component_types
@@ -42,8 +43,8 @@ def compute_mesh_data(
     )
     clip = resolve_clip_frame(clip, world_matrices)
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
-    # The "brep" mesher never touches sdfs/final_sdfs, so skip building them.
-    if mesher == "brep":
+    # The "brep" and "union" meshers never touch sdfs/final_sdfs, so skip building them.
+    if mesher in ("brep", "union"):
         final_sdfs, sdfs = {}, {}
     else:
         print("Building sdfs")
@@ -87,6 +88,14 @@ def compute_mesh_data(
                 build_many_brep_meshes(
                     changed_names, union_geometries, world_matrices, clip,
                     verbose, deflection=deflection, world_bboxes=world_bboxes,
+                )
+            )
+        elif mesher == "union":
+            # One call, so every shape is built once however many components changed.
+            meshes.update(
+                build_union_meshes(
+                    union_geometries, world_matrices, clip, verbose,
+                    world_bboxes=world_bboxes, names=changed_names,
                 )
             )
         else:
