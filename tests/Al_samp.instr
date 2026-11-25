@@ -30,7 +30,10 @@
 *
 * %End
 *******************************************************************************/
-DEFINE INSTRUMENT AL_sample(use_water=0, det_pixels=1024, mon_x=0.12, mon_y=0.15)
+DEFINE INSTRUMENT AL_sample(use_water=0, 
+                          det_pixels=1024, 
+                          mon_x=0.15, 
+                          mon_y=0.15)
 
 /* The DECLARE section allows us to declare variables or  small      */
 /* functions in C syntax. These may be used in the whole instrument. */
@@ -74,18 +77,23 @@ COMPONENT Origin = Progress_bar()
 
 COMPONENT src = Source_gen( 
   lambda0 = 3, dlambda = 2,
-  dist = 4.677+7.599, focus_xw = mon_x + 0.2,
- focus_yh = mon_y + 0.02,
+  dist = 30, focus_xw = mon_x,
+ focus_yh = mon_y,
  yheight = 0.093, xwidth = 0.06437,
  Lmin = LambdaMin, Lmax=LambdaMax
 )
 AT (0,0,1.523) RELATIVE Origin
 
+//==============================================================================
+//===================== OPTICS 
+//==============================================================================
+
 
 COMPONENT arm_sample = Arm(
 
 )
-AT (0,0,0) RELATIVE PREVIOUS
+AT (0,0,30) RELATIVE PREVIOUS
+ROTATED (0,0,180) RELATIVE PREVIOUS
 
 
 
@@ -141,33 +149,48 @@ COMPONENT fittings = Union_mesh(
 AT (0,0,0) RELATIVE arm_sample
 
 
+COMPONENT Right_wedge = Arm(
+
+)
+AT (0.0175,0,0.005) RELATIVE arm_sample
+ROTATED (0,0,90) RELATIVE arm_sample
+
+
+COMPONENT Left_wedge = Arm(
+
+)
+AT (-0.0175,0,0.005) RELATIVE arm_sample
+ROTATED (0,0,90) RELATIVE arm_sample
+
+
 COMPONENT water_wedge_2_5mm = Union_mesh(
     priority = 11,
     material_string= "al",
     filename="./water_wedge_2_5mm.stl"
 )
-AT (0,0,0) RELATIVE arm_sample
-
-COMPONENT water_wedge_5mm = Union_mesh(
-    priority = 12,
-    material_string= "al",
-    filename="./water_wedge_5mm.stl"
-)
-AT (0,0,0) RELATIVE arm_sample
-
-COMPONENT teflon_1 = Union_mesh(
-    priority = 13,
-    material_string= "teflon",
-    filename="./teflon_1.stl"
-)
-AT (0,0,0) RELATIVE arm_sample
+AT (0,0,0) RELATIVE Left_wedge
 
 COMPONENT teflon_2 = Union_mesh(
     priority = 14,
     material_string= "teflon",
     filename="./teflon_2.stl"
 )
-AT (0,0,0) RELATIVE arm_sample
+AT (0,0,0) RELATIVE Left_wedge
+
+COMPONENT water_wedge_5mm = Union_mesh(
+    priority = 12,
+    material_string= "al",
+    filename="./water_wedge_5mm.stl"
+)
+AT (0,0,0) RELATIVE Right_wedge
+
+COMPONENT teflon_1 = Union_mesh(
+    priority = 13,
+    material_string= "teflon",
+    filename="./teflon_1.stl"
+)
+AT (0,0,0) RELATIVE Right_wedge
+
 
 COMPONENT master = Union_master(
 
