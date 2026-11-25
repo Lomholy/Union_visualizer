@@ -320,5 +320,33 @@ class TestUnionMeshBboxScale(unittest.TestCase):
         np.testing.assert_allclose(np.array(default[1]), np.array(explicit[1]))
 
 
+class TestShapeChangesWithinTheBbox(unittest.TestCase):
+    """A shape change that leaves the world bbox unchanged still needs a remesh."""
+
+    def signature(self, name, comps, matrices=None):
+        world = {c.name: (matrices or {}).get(c.name, np.eye(4)) for c in comps.values()}
+        bboxes = bounding_box.compute_all_world_bboxes(comps, world)
+        return bounding_box.component_dependency_signature(name, comps, bboxes, world)
+
+    def test_own_taper_change(self):
+        # xwidth2 grows from 0.2 to 0.5, still under xwidth: the bbox stays 0.6 wide
+        before = {"box": FakeBox("box", 1, xwidth=0.6)}
+        after = {"box": FakeBox("box", 1, xwidth=0.6)}
+        before["box"].xwidth2, after["box"].xwidth2 = 0.2, 0.5
+        bboxes = [bounding_box.compute_all_world_bboxes(c, {"box": np.eye(4)}) for c in (before, after)]
+        self.assertNotEqual(
+            bounding_box.component_dependency_signature("box", before, bboxes[0]),
+            bounding_box.component_dependency_signature("box", after, bboxes[1]),
+        )
+
+    def test_cutter_rotated_within_its_bbox(self):
+        # a square cutter turned by 90 degrees about z keeps its bbox, but not its taper's orientation
+        low, high = FakeBox("low", 1, xwidth=2, yheight=2, zdepth=2), FakeBox("high", 2)
+        high.xwidth2 = 0.5
+        comps = {"low": low, "high": high}
+        turn = np.array([[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], float)
+        self.assertNotEqual(self.signature("low", comps), self.signature("low", comps, {"high": turn}))
+
+
 if __name__ == "__main__":
     unittest.main()
