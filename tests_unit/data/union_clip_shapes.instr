@@ -1,0 +1,74 @@
+/*******************************************************************************
+* Every Union shape, overlapping at different priorities, plus one volume
+* masked in ALL mode and one in ANY mode. Reference for the "union" mesher:
+* union_clip_shapes_mcstas_areas.json holds the area of each polyhedron
+* McStas draws for it with mcdisplay --trace=2.
+*******************************************************************************/
+DEFINE INSTRUMENT union_clip_shapes()
+
+TRACE
+
+COMPONENT Origin = Arm()
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT inc_proc = Incoherent_process(sigma=1, unit_cell_volume=10)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT inc = Union_make_material(process_string="inc_proc", my_absorption=1)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT base = Union_box(material_string="inc", priority=1,
+    xwidth=0.1, yheight=0.1, zdepth=0.1)
+AT (0, 0, 0) RELATIVE Origin
+
+COMPONENT tapered = Union_box(material_string="inc", priority=2,
+    xwidth=0.04, yheight=0.06, zdepth=0.08, xwidth2=0.08, yheight2=0.02)
+AT (0.04, 0.03, 0.02) RELATIVE Origin
+ROTATED (10, 20, 30) RELATIVE Origin
+
+COMPONENT cylinder = Union_cylinder(material_string="inc", priority=3,
+    radius=0.02, yheight=0.15)
+AT (-0.03, 0, 0) RELATIVE Origin
+ROTATED (90, 0, 0) RELATIVE Origin
+
+COMPONENT cone = Union_cone(material_string="inc", priority=4,
+    radius_bottom=0.03, radius_top=0.01, yheight=0.08)
+AT (0, -0.05, 0.03) RELATIVE Origin
+ROTATED (0, 0, 25) RELATIVE Origin
+
+COMPONENT sphere = Union_sphere(material_string="inc", priority=5, radius=0.035)
+AT (0.05, -0.04, -0.04) RELATIVE Origin
+
+COMPONENT icosphere = Union_mesh(material_string="inc", priority=6,
+    filename="union_clip_icosphere.stl", coordinate_scale=0.001)
+AT (-0.05, 0.05, -0.03) RELATIVE Origin
+
+COMPONENT masked_all = Union_cylinder(material_string="inc", priority=7,
+    radius=0.03, yheight=0.2)
+AT (0, 0.02, -0.02) RELATIVE Origin
+ROTATED (0, 0, 90) RELATIVE Origin
+
+COMPONENT mask_all_box = Union_box(mask_string="masked_all", mask_setting="All", priority=100,
+    xwidth=0.12, yheight=0.12, zdepth=0.12)
+AT (0.06, 0, 0) RELATIVE Origin
+
+COMPONENT mask_all_sphere = Union_sphere(mask_string="masked_all", mask_setting="All", priority=101,
+    radius=0.07)
+AT (0, 0, 0) RELATIVE Origin
+
+COMPONENT masked_any = Union_box(material_string="inc", priority=0.5,
+    xwidth=0.2, yheight=0.02, zdepth=0.02)
+AT (0, -0.08, 0.06) RELATIVE Origin
+
+COMPONENT mask_any_left = Union_sphere(mask_string="masked_any", mask_setting="Any", priority=102,
+    radius=0.04)
+AT (-0.06, -0.08, 0.06) RELATIVE Origin
+
+COMPONENT mask_any_right = Union_sphere(mask_string="masked_any", mask_setting="Any", priority=103,
+    radius=0.04)
+AT (0.06, -0.08, 0.06) RELATIVE Origin
+
+COMPONENT master = Union_master()
+AT (0, 0, 0) RELATIVE Origin
+
+END
