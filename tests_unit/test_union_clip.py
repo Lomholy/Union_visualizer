@@ -173,6 +173,27 @@ class TestMasks(unittest.TestCase):
         self.assertAlmostEqual(area(meshes.get("ab")), 4 + 4 * 2 * 0.9, places=6)
 
 
+class TestCoincidentSurfaces(unittest.TestCase):
+    # CAD parts often share faces exactly; a surface point takes the status of the material just inside it
+    def mesh_comp(self, tmp, name, priority, offset=(0, 0, 0)):
+        path = Path(tmp) / f"{name}.stl"
+        cube = trimesh.creation.box(extents=(1, 1, 1))
+        cube.apply_translation(offset)
+        cube.export(path)
+        return FakeComp("Union_mesh", name, priority=priority, filename=str(path), coordinate_scale=1.0)
+
+    def test_identical_higher_priority_copy_hides_the_lower(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            meshes = build([self.mesh_comp(tmp, "low", 1), self.mesh_comp(tmp, "high", 2)])
+        self.assertIsNone(meshes.get("low"))
+        self.assertAlmostEqual(area(meshes.get("high")), 6.0, places=6)
+
+    def test_touching_face_stays_visible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            meshes = build([self.mesh_comp(tmp, "low", 1), self.mesh_comp(tmp, "high", 2, offset=(1, 0, 0))])
+        self.assertAlmostEqual(area(meshes.get("low")), 6.0, places=6)
+
+
 class TestIncrementalRebuild(unittest.TestCase):
     def test_moving_a_cutters_mask_changes_the_lower_components_signature(self):
         # A (priority 1) is cut by B (priority 2), which mask M limits

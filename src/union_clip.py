@@ -25,6 +25,12 @@ EDGE_MAX_CUTS = 8
 EPS = 1e-9
 LATHE_SEGMENTS = 32
 CLIP_BOX_SIZE = 10000.0
+# A surface point's status is that of the material just inside it, this far along the inward
+# normal: a face lying exactly on a higher-priority surface is then hidden consistently
+# instead of by rounding, which otherwise splits it down to the last level
+INWARD = 1e-9
+# How far inside a triangle's centroid the own shape is probed to orient its normal
+ORIENT_PROBE = 1e-7
 
 
 # ------------------------------- shapes ---------------------------------------
@@ -94,8 +100,8 @@ class BVH:
         return np.concatenate(found_q), np.concatenate(found_tri)
 
 
-def ray_triangle(origin, direction, tri, t_max):
-    """Moller-Trumbore for paired rays and triangles: (hit mask, t)."""
+def ray_triangle(origin, direction, tri, t_max, barycentric=False):
+    """Moller-Trumbore for paired rays and triangles: (hit mask, t), plus (u, v) if asked."""
     v0 = tri[:, 0]
     e1, e2 = tri[:, 1] - v0, tri[:, 2] - v0
     p = np.cross(direction, e2)
@@ -107,7 +113,8 @@ def ray_triangle(origin, direction, tri, t_max):
     q = np.cross(s, e1)
     v = f * (direction * q).sum(1)
     t = f * (e2 * q).sum(1)
-    return ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0) & (t < t_max), t
+    hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0) & (t < t_max)
+    return (hit, t, u, v) if barycentric else (hit, t)
 
 
 def orient_outward(tri, center):
@@ -149,22 +156,38 @@ class MeshShape(Shape):
     def triangles(self):
         return self.tri.copy()
 
-    # gmesh_inside's first ray direction: oblique, so rays do not run along axis-aligned edges.
-    # ponytail: one ray, without gmesh_inside's vote of three on a ray that grazes an edge;
-    # add the vote if a mesh shows parity errors
-    RAY = np.array([0.4719, 0.6213, 0.6254])
+    # gmesh_inside's fixed oblique ray directions
+    RAYS = np.array([[0.4719, 0.6213, 0.6254], [0.8017, -0.3259, 0.5012], [-0.2263, 0.9147, -0.3349]])
+    # a hit this close to a triangle edge (in barycentric terms) may be counted twice or not at all
+    EDGE_TOL = 1e-9
+
+    def parity(self, p, direction):
+        """(odd number of crossings, ray passed close to an edge) for rays from p."""
+        odd = np.zeros(len(p), bool)
+        ambiguous = np.zeros(len(p), bool)
+        d = np.broadcast_to(direction, p.shape)
+        i, j = self.bvh.candidates(p, d, np.inf)
+        if len(i):
+            hit, _, u, v = ray_triangle(p[i], d[i], self.tri[j], np.inf, barycentric=True)
+            np.logical_xor.at(odd, i[hit], True)
+            edge = hit & ((u < self.EDGE_TOL) | (v < self.EDGE_TOL) | (u + v > 1 - self.EDGE_TOL))
+            ambiguous[i[edge]] = True
+        return odd, ambiguous
 
     def contains(self, p):
-        """Parity of a ray from each point inside the mesh's bounding box."""
+        """gmesh_inside: parity of the first ray, or the majority of three when it grazes an edge."""
         inside = np.zeros(len(p), bool)
         idx = np.flatnonzero(np.all((p >= self.bvh.lo[0]) & (p <= self.bvh.hi[0]), axis=1))
         if len(idx) == 0:
             return inside
-        direction = np.broadcast_to(self.RAY, (len(idx), 3))
-        i, j = self.bvh.candidates(p[idx], direction, np.inf)
-        if len(i):
-            hit, _ = ray_triangle(p[idx][i], direction[i], self.tri[j], np.inf)
-            np.logical_xor.at(inside, idx[i[hit]], True)
+        odd, ambiguous = self.parity(p[idx], self.RAYS[0])
+        inside[idx] = odd
+        redo = idx[ambiguous]
+        if len(redo):
+            votes = odd[ambiguous].astype(int)
+            for direction in self.RAYS[1:]:
+                votes += self.parity(p[redo], direction)[0]
+            inside[redo] = votes >= 2
         return inside
 
     def crossings(self, a, b):
@@ -417,8 +440,10 @@ class Clipper:
             ok[idx] = ~cutter.contains(p[idx])
         return ok
 
-    def edge_cuts(self, a, b):
-        """union_edge_cuts per segment: (fractions where the status changes, status at a)."""
+    def edge_cuts(self, a, b, shift, toward):
+        """union_edge_cuts per segment: (fractions where the status changes, status at a).
+        shift[i] moves segment i's status tests inward, and they also move INWARD towards
+        toward[i] (a point inside the triangle), off the planes of neighbouring faces."""
         n = len(a)
         seg, ts = [np.arange(n), np.arange(n)], [np.zeros(n), np.ones(n)]
         for shape in self.sources:
@@ -430,7 +455,11 @@ class Clipper:
         seg, ts = seg[order], ts[order]
         same = seg[1:] == seg[:-1]
         s0, s1, sid = ts[:-1][same], ts[1:][same], seg[:-1][same]
-        keep = self.highest(a[sid] + (b[sid] - a[sid]) * (0.5 * (s0 + s1))[:, None])
+        mid = a[sid] + (b[sid] - a[sid]) * (0.5 * (s0 + s1))[:, None]
+        into = toward[sid] - mid
+        length = np.linalg.norm(into, axis=1)[:, None]
+        into = np.divide(into, length, out=np.zeros_like(into), where=length > 0)
+        keep = self.highest(mid + shift[sid] + INWARD * into)
         cuts = [[] for _ in range(n)]
         start = np.zeros(n, bool)
         bounds = np.flatnonzero(np.diff(np.concatenate([[-1], sid, [n]])))
@@ -458,31 +487,33 @@ class Clipper:
                     x, y = s0[m], s1[m]
         return cuts, start
 
-    def triangle_cuts(self, tri):
+    def triangle_cuts(self, tri, shift):
         """union_edge_cuts of edges v0->v1, v1->v2, v2->v0 of each triangle:
         ([cuts per edge], [status at each edge's start]) per triangle."""
-        cuts, st = self.edge_cuts(tri.reshape(-1, 3), tri[:, [1, 2, 0]].reshape(-1, 3))
+        cuts, st = self.edge_cuts(tri.reshape(-1, 3), tri[:, [1, 2, 0]].reshape(-1, 3),
+                                  np.repeat(shift, 3, axis=0), np.repeat(tri.mean(1), 3, axis=0))
         return [(cuts[3 * i:3 * i + 3], st[3 * i:3 * i + 3]) for i in range(len(tri))]
 
-    def run(self, tri, depth):
-        """union_tri_add on triangles (T, 3, 3) at the given split budget.
+    def run(self, tri, depth, shift):
+        """union_tri_add on triangles (T, 3, 3) at the given split budget; shift (T, 3)
+        moves each triangle's status tests inward.
 
         The recursion runs breadth first: every level's edge cuts, centroid tests and
         straight-cut checks go through numpy in one batch, while each triangle takes
         the branch union_tri_add would take."""
         while depth > TRI_DEPTH:
-            tri = split_in_4(tri)
+            tri, shift = split_in_4(tri), np.tile(shift, (4, 1))
             depth -= 2
         if not self.sources and self.own_masks is None:
             return tri
         out = []
-        # (vertices, depth, centroid_only); centroid_only is union_tri_add's depth <= 1 fallback
-        work = [(t, depth, False) for t in tri]
+        # (vertices, depth, centroid_only, shift); centroid_only is union_tri_add's depth <= 1 fallback
+        work = [(t, depth, False, h) for t, h in zip(tri, shift)]
         while work:
             full = [w for w in work if not w[2]]
-            cuts = self.triangle_cuts(np.array([w[0] for w in full])) if full else []
+            cuts = self.triangle_cuts(np.array([w[0] for w in full]), np.array([w[3] for w in full])) if full else []
             centroid_items, line_items, after = [], [], []
-            for (v, d, _), (c, st) in zip(full, cuts):
+            for (v, d, _, h), (c, st) in zip(full, cuts):
                 n = [len(x) for x in c]
                 total = sum(n)
                 if total == 0:
@@ -490,7 +521,7 @@ class Clipper:
                         if st[0]:
                             out.append(v)
                     else:
-                        centroid_items.append(("same", v, d, st[0]))
+                        centroid_items.append(("same", v, d, st[0], h))
                 elif total == 2 and max(n) <= 1:
                     k = next(k for k in range(3) if n[k] == 1 and n[(k + 2) % 3] == 1)
                     w1, w2 = v[(k + 1) % 3], v[(k + 2) % 3]
@@ -507,7 +538,7 @@ class Clipper:
                     # a straight boundary crosses the median v[k] -> (w1+w2)/2 at 2 sp sq / (sp + sq)
                     m = 0.5 * (w1 + w2)
                     size = max(np.linalg.norm(w1 - v[k]), np.linalg.norm(w2 - v[k]), np.linalg.norm(w2 - w1))
-                    line_items.append((v[k], m, 2 * sp * sq / (sp + sq), np.linalg.norm(m - v[k]), size, pieces, v, d))
+                    line_items.append((v[k], m, 2 * sp * sq / (sp + sq), np.linalg.norm(m - v[k]), size, pieces, v, d, h))
                 elif total == 1:
                     # boundary from the vertex o opposite the cut edge (left on the boundary by a split in 2)
                     k = next(k for k in range(3) if n[k] == 1)
@@ -518,7 +549,7 @@ class Clipper:
                         out.extend(np.array(pieces))
                         continue
                     size = max(np.linalg.norm(w2 - w1), np.linalg.norm(o - w1), np.linalg.norm(o - w2))
-                    line_items.append((0.5 * (w1 + o), 0.5 * (w2 + o), c[k][0], 0.5 * np.linalg.norm(w2 - w1), size, pieces, v, d))
+                    line_items.append((0.5 * (w1 + o), 0.5 * (w2 + o), c[k][0], 0.5 * np.linalg.norm(w2 - w1), size, pieces, v, d, h))
                 elif d > 0:
                     # split in 2 through the crossing nearest the middle of the most crossed edge
                     e = 0
@@ -530,25 +561,27 @@ class Clipper:
                         if abs(c[e][i] - 0.5) < abs(c[e][best] - 0.5):
                             best = i
                     x = v[e] + (v[(e + 1) % 3] - v[e]) * c[e][best]
-                    after.append((np.array([v[e], x, v[(e + 2) % 3]]), d - 1, False))
-                    after.append((np.array([x, v[(e + 1) % 3], v[(e + 2) % 3]]), d - 1, False))
+                    after.append((np.array([v[e], x, v[(e + 2) % 3]]), d - 1, False, h))
+                    after.append((np.array([x, v[(e + 1) % 3], v[(e + 2) % 3]]), d - 1, False, h))
                 else:
-                    centroid_items.append(("keep", v, d, None))
-            centroid_items += [("keep", v, d, None) for v, d, only in work if only]
+                    centroid_items.append(("keep", v, d, None, h))
+            centroid_items += [("keep", v, d, None, h) for v, d, only, h in work if only]
             if line_items:
                 line_cuts, _ = self.edge_cuts(np.array([it[0] for it in line_items]),
-                                              np.array([it[1] for it in line_items]))
+                                              np.array([it[1] for it in line_items]),
+                                              np.array([it[8] for it in line_items]),
+                                              np.array([it[6].mean(0) for it in line_items]))
                 # straight cut if the boundary crosses the check line where a straight one would
-                for (_, _, expected, length, size, pieces, v, d), sm in zip(line_items, line_cuts):
+                for (_, _, expected, length, size, pieces, v, d, h), sm in zip(line_items, line_cuts):
                     if len(sm) == 1 and abs(sm[0] - expected) * length < TRI_CUT_TOL * size:
                         out.extend(np.array(pieces))
                     elif d <= 1:
-                        after.append((v, d, True))
+                        after.append((v, d, True, h))
                     else:
-                        after.extend((t, d - 2, False) for t in split_in_4(v[None]))
+                        after.extend((t, d - 2, False, h) for t in split_in_4(v[None]))
             if centroid_items:
-                ok = self.highest(np.array([it[1].mean(0) for it in centroid_items]))
-                for (rule, v, d, st0), inside in zip(centroid_items, ok):
+                ok = self.highest(np.array([it[1].mean(0) + it[4] for it in centroid_items]))
+                for (rule, v, d, st0, h), inside in zip(centroid_items, ok):
                     if rule == "keep":
                         if inside:
                             out.append(v)
@@ -556,7 +589,7 @@ class Clipper:
                         if st0:
                             out.append(v)
                     else:
-                        after.extend((t, d - 2, False) for t in split_in_4(v[None]))
+                        after.extend((t, d - 2, False, h) for t in split_in_4(v[None]))
             work = after
         return np.array(out).reshape(-1, 3, 3)
 
@@ -568,6 +601,15 @@ def split_in_4(tri):
         np.stack([tri[:, 0], ab, ca], 1), np.stack([ab, tri[:, 1], bc], 1),
         np.stack([ca, bc, tri[:, 2]], 1), np.stack([ab, bc, ca], 1),
     ])
+
+
+def inward_shift(shape, tri):
+    """INWARD along each triangle's inward normal, oriented by probing the shape itself."""
+    normal = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    length = np.linalg.norm(normal, axis=1)
+    normal = np.divide(normal, length[:, None], out=np.zeros_like(normal), where=length[:, None] > 0)
+    outward = shape.contains(tri.mean(1) - ORIENT_PROBE * normal)
+    return np.where(outward[:, None], -normal, normal) * INWARD
 
 
 def _masked(comp, shapes, union_geometries):
@@ -592,7 +634,8 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip):
         cutters.append(Masked(box, [], False))
         sources.append(box)
     clipper = Clipper(own if own.masks else None, cutters, sources)
-    tri = clipper.run(own.shape.triangles(), own.shape.depth)
+    tri = own.shape.triangles()
+    tri = clipper.run(tri, own.shape.depth, inward_shift(own.shape, tri))
     return orient_outward(tri, own.shape.center) if own.shape.convex else tri
 
 
