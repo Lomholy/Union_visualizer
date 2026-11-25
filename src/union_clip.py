@@ -644,7 +644,9 @@ def _to_mesh(tri):
         return None
     mesh = trimesh.Trimesh(tri.reshape(-1, 3), np.arange(3 * len(tri)).reshape(-1, 3), process=False)
     mesh.merge_vertices()
-    return mesh
+    # vertices stay shared only across smooth edges, so flat faces are not shaded with
+    # normals averaged over their sharp edges
+    return mesh.smooth_shaded
 
 
 def build_shapes(union_geometries, world_matrices):
