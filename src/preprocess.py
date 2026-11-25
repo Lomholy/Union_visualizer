@@ -2,6 +2,7 @@ import mcstasscript as ms
 import mcstasscript.helper.mcstas_objects as mshelp
 import operator
 import ast
+import keyword
 import os
 import re
 import math
@@ -209,8 +210,8 @@ OPERATORS = {
 UNARY = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
-    ast.Not: operator.not_,   # the "!" -> " not " substitution ahead of a
-                               # single-line "if (cond) ..." turns C's "!"
+    ast.Not: operator.not_,   # the "!" -> " not " substitution ahead of an
+                               # "if (cond) ..." condition turns C's "!"
                                # into an ast.UnaryOp(ast.Not, ...) node,
                                # which the existing UNARY dispatch handles
                                # for free once it's in this table.
@@ -228,6 +229,25 @@ COMPARE_OPERATORS = {
     ast.NotEq: operator.ne,
 }
 
+def _unquote(value):
+    """A McStas string value without the source quotes it may still carry."""
+    s = str(value)
+    return s[1:-1] if len(s) >= 2 and s[0] == s[-1] == '"' else s
+
+
+def _c_strcmp(a, b):
+    a, b = _unquote(a), _unquote(b)
+    return (a > b) - (a < b)
+
+
+def _c_strstr(haystack, needle):
+    return int(_unquote(needle) in _unquote(haystack))
+
+
+def _c_strcasestr(haystack, needle):
+    return int(_unquote(needle).lower() in _unquote(haystack).lower())
+
+
 # Allowed math functions/constants
 MATH_ENV = {name: getattr(math, name) for name in dir(math) if not name.startswith("_")}
 
@@ -238,7 +258,17 @@ MATH_ENV.update({
     "abs": abs,
     "min": min,
     "max": max,
+    "strcmp": _c_strcmp,
+    "strstr": _c_strstr,
+    "strcasestr": _c_strcasestr,
 })
+
+# Python keywords that are ordinary identifiers in C (e.g. McStas' common
+# "lambda"); eval_expr renames them outside string literals before parsing.
+_PY_ONLY_KEYWORDS = set(keyword.kwlist) - {"and", "or", "not", "True", "False", "None"}
+_PY_KEYWORD_RE = re.compile(r"\b(%s)\b" % "|".join(sorted(_PY_ONLY_KEYWORDS)))
+_STRING_LITERAL_RE = re.compile(r'("(?:\\.|[^"\\])*")')
+_KEYWORD_PREFIX = "_kw_"
 
 # McStas's own built-in constants (defined in its C runtime headers), which
 # aren't part of Python's math module. Values pulled directly from
@@ -330,7 +360,7 @@ def eval_expr(expr, var_map=None, comp_context=None):
                 # this assignment (and cascading into every later expression
                 # that depends on it) the way an unhandled exception would.
                 print(
-                    f"Warning: Division by zero evaluating '{ast.unparse(node)}' "
+                    f"Warning: Division by zero evaluating '{ast.unparse(node).replace(_KEYWORD_PREFIX, '')}' "
                     f"in '{expr}'; defaulting to 0"
                 )
                 return 0
@@ -368,14 +398,17 @@ def eval_expr(expr, var_map=None, comp_context=None):
                 raise TypeError(f"Unsupported boolean operator: {type(node.op).__name__}")
 
         elif isinstance(node, ast.Name):  # variables
-            if node.id in var_map:
-                return var_map[node.id]
-            elif node.id in MCSTAS_CONSTANTS:
-                return MCSTAS_CONSTANTS[node.id]
-            elif node.id in MATH_ENV:
-                return MATH_ENV[node.id]
+            name = node.id
+            if name.startswith(_KEYWORD_PREFIX) and name[len(_KEYWORD_PREFIX):] in _PY_ONLY_KEYWORDS:
+                name = name[len(_KEYWORD_PREFIX):]
+            if name in var_map:
+                return var_map[name]
+            elif name in MCSTAS_CONSTANTS:
+                return MCSTAS_CONSTANTS[name]
+            elif name in MATH_ENV:
+                return MATH_ENV[name]
             else:
-                raise ValueError(f"Unknown variable: {node.id}")
+                raise ValueError(f"Unknown variable: {name}")
 
         elif isinstance(node, ast.Call):  # function calls
             if isinstance(node.func, ast.Name) and node.func.id == "COMP_GETPAR":
@@ -399,7 +432,10 @@ def eval_expr(expr, var_map=None, comp_context=None):
         else:
             raise TypeError(f"Unsupported expression: {expr}")
 
-    tree = ast.parse(expr, mode="eval")
+    pieces = _STRING_LITERAL_RE.split(expr)
+    for i in range(0, len(pieces), 2):
+        pieces[i] = _PY_KEYWORD_RE.sub(lambda m: _KEYWORD_PREFIX + m.group(1), pieces[i])
+    tree = ast.parse("".join(pieces), mode="eval")
     return _eval(tree.body)
 
 
@@ -440,7 +476,9 @@ _PARAM_TYPE_KEYWORDS = _C_TYPE_KEYWORDS | {"string"}
 
 _RAW_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
 _QUOTED_STRING_RE = re.compile(r'^"(.*)"$', re.S)
-_ELSE_ASSIGNMENT_RE = re.compile(r"^else\s+([A-Za-z_]\w*)\s*=\s*(.+)$", re.S)
+_CONTROL_RE = re.compile(r"(if|for|while|switch)\s*\(")
+_ELSE_RE = re.compile(r"else\b")
+_DO_RE = re.compile(r"do\b")
 _NEGATION_RE = re.compile(r"!(?!=)")  # a bare "!", not part of "!="
 
 
@@ -498,32 +536,130 @@ def _c_bool_ops_to_python(text):
     return _NEGATION_RE.sub(" not ", text)
 
 
-def _split_if_statement(statement):
-    """Split a statement starting with "if (" into (cond, rest), where rest
-    is everything after the condition's *matching* close-paren. A naive
-    regex like r"if\\s*\\((.+)\\)" stops at the first ")", which breaks on
-    any condition that has parens of its own, e.g. "if ((a<b) && c) x=1" -
-    so this walks the text counting paren depth instead, the same technique
-    _split_top_level_statements already uses for ';'. Returns None if the
-    statement doesn't start with "if (" or the parens never balance."""
-    match = re.match(r"^if\s*\(", statement)
-    if not match:
-        return None
-    i = match.end()
-    depth = 1
-    start = i
-    n = len(statement)
-    while i < n and depth > 0:
-        if statement[i] == "(":
+def _strip_c_comments(text):
+    """Remove // and /* */ comments outside string and char literals."""
+    out = []
+    i = 0
+    n = len(text)
+    quote = None
+    while i < n:
+        c = text[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+            out.append(c)
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+            continue
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _skip_space(text, i):
+    """Index of the next character after whitespace and preprocessor lines."""
+    while i < len(text):
+        if text[i].isspace():
+            i += 1
+        elif text[i] == "#":
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        else:
+            break
+    return i
+
+
+def _scan_to(text, i, stop):
+    """Index of the first character in stop that is outside literals and
+    not nested in ()/[]/{}, searching from i; len(text) if there is none."""
+    depth = 0
+    quote = None
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if quote:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+        elif depth == 0 and c in stop:
+            return i
+        elif c in "([{":
             depth += 1
-        elif statement[i] == ")":
+        elif c in ")]}":
             depth -= 1
         i += 1
-    if depth != 0:
-        return None
-    cond = statement[start:i - 1].strip()
-    rest = statement[i:].strip()
-    return cond, rest
+    return n
+
+
+def _parse_c_statement(text, i):
+    """Parse the C statement starting at i. Returns (node, next index), node
+    being ("stmt", text), ("block", [nodes]) or
+    ("if", cond, then_node, else_node or None, display text). Loop and
+    switch bodies become plain blocks, run once."""
+    n = len(text)
+    if i >= n:
+        return ("block", []), i
+    start = i
+    if text[i] == "{":
+        end = _scan_to(text, i + 1, "}")
+        return ("block", _parse_c_block(text[i + 1:end])), end + 1
+
+    control = _CONTROL_RE.match(text, i)
+    if control:
+        close = _scan_to(text, control.end(), ")")
+        cond = " ".join(text[control.end():close].split())
+        then_node, i = _parse_c_statement(text, _skip_space(text, close + 1))
+        if control.group(1) != "if":
+            return then_node, i
+        else_node = None
+        j = _skip_space(text, i)
+        if _ELSE_RE.match(text, j):
+            else_node, i = _parse_c_statement(text, _skip_space(text, j + 4))
+        display = " ".join(text[start:i].split())
+        if "{" in display:
+            display = f"if ({cond}) {{ ... }}"
+        return ("if", cond, then_node, else_node, display), i
+
+    if _DO_RE.match(text, i):
+        body, i = _parse_c_statement(text, _skip_space(text, i + 2))
+        end = _scan_to(text, i, ";")
+        return body, end + 1
+
+    end = _scan_to(text, i, ";}")
+    statement = text[i:end].strip()
+    return ("stmt", statement), (end + 1 if end < n else end)
+
+
+def _parse_c_block(text):
+    """Parse a sequence of C statements into nodes for _run_c_statements."""
+    nodes = []
+    i = _skip_space(text, 0)
+    while i < len(text):
+        if text[i] in ";}":
+            i = _skip_space(text, i + 1)
+            continue
+        node, i = _parse_c_statement(text, i)
+        nodes.append(node)
+        i = _skip_space(text, i)
+    return nodes
 
 
 def _strip_c_type_prefix(statement, type_keywords=_C_TYPE_KEYWORDS):
@@ -639,32 +775,46 @@ def _assign_or_warn(var_map, name, expr, display_text):
         print(f"Warning: Failed to evaluate {display_text}: {e}")
 
 
-def _apply_conditional_statement(cond, name, expr, else_name, else_expr, var_map):
-    """Handle one "if (cond) name = expr;", optionally paired with
-    "else name2 = expr2;". Real C semantics: only the taken branch is ever
-    executed, so the untaken one must never be evaluated or warned about -
-    a failing expression that's never reached isn't a bug."""
-    display = f"if ({cond}) {name} = {expr};"
-    if else_name is not None:
-        display += f" else {else_name} = {else_expr};"
+def _assigns(node):
+    """Whether a parsed statement contains an assignment."""
+    if node is None:
+        return False
+    if node[0] == "stmt":
+        return _RAW_ASSIGNMENT_RE.match(_strip_c_type_prefix(" ".join(node[1].split()))) is not None
+    if node[0] == "block":
+        return any(_assigns(child) for child in node[1])
+    return _assigns(node[2]) or _assigns(node[3])
 
-    try:
-        # ast.parse(mode="eval") treats leading whitespace as an
-        # (invalid) indent, not just insignificant padding - and "!x" at
-        # the very start of a condition becomes " not x" after the
-        # substitution below, so this can't skip the strip().
-        cond_value = eval_expr(_c_bool_ops_to_python(cond).strip(), var_map)
-    except OpaqueRuntimeCall as e:
-        print(f"Info: {display} depends on runtime state ({e}()), left unresolved")
-        return
-    except Exception as e:
-        print(f"Warning: Failed to evaluate {display}: {e}")
-        return
 
-    if cond_value:
-        _assign_or_warn(var_map, name, expr, display)
-    elif else_name is not None:
-        _assign_or_warn(var_map, else_name, else_expr, display)
+def _run_c_statements(nodes, var_map):
+    """Run parsed INITIALIZE statements: assignments update var_map, and of
+    an if/else only the taken branch runs. A condition that can't be
+    evaluated runs neither branch; an if without assignments is skipped."""
+    for node in nodes:
+        kind = node[0]
+        if kind == "block":
+            _run_c_statements(node[1], var_map)
+        elif kind == "stmt":
+            statement = _strip_c_type_prefix(" ".join(node[1].split()))
+            match = _RAW_ASSIGNMENT_RE.match(statement)
+            if match:
+                name, expr = match.groups()
+                _assign_or_warn(var_map, name, expr, f"{statement};")
+        elif _assigns(node):
+            _, cond, then_node, else_node, display = node
+            try:
+                # "!x" at the start of a condition becomes " not x", and
+                # ast.parse(mode="eval") rejects the leading space.
+                taken = eval_expr(_c_bool_ops_to_python(cond).strip(), var_map)
+            except OpaqueRuntimeCall as e:
+                print(f"Info: {display} depends on runtime state ({e}()), left unresolved")
+                continue
+            except Exception as e:
+                print(f"Warning: Failed to evaluate {display}: {e}")
+                continue
+            branch = then_node if taken else else_node
+            if branch is not None:
+                _run_c_statements([branch], var_map)
 
 
 def _parameter_info_from_raw(raw_text):
@@ -735,53 +885,8 @@ def create_var_map(instr: ms.McStas_instr, param_values=None):
         if name in param_types and text.strip():
             _override_parameter(name, text, param_types[name], var_map)
 
-    lines = instr.initialize_section.splitlines()
-
-    for line in lines:
-        line = line.strip()
-
-        if not line or line.startswith("//"):
-            continue
-
-        # C allows several ';'-terminated statements on one line (McStas
-        # INITIALIZE sections use this constantly, e.g. "SM=1; SS=-1;
-        # SA=1;"), so split on top-level ';' first and process each
-        # resulting statement independently, instead of matching (and
-        # requiring) exactly one assignment for the whole line.
-        statements = _split_top_level_statements(line)
-        idx = 0
-        n = len(statements)
-        while idx < n:
-            statement = statements[idx]
-
-            if_split = _split_if_statement(statement)
-            if if_split is not None:
-                cond, rest = if_split
-                match = _RAW_ASSIGNMENT_RE.match(rest)
-                if match:
-                    name, expr = match.groups()
-                    else_name = else_expr = None
-                    # An "if (cond) x=a;" and its "else x=b;" become two
-                    # separate chunks after the ';'-split above - look ahead
-                    # one chunk to re-associate them before evaluating.
-                    if idx + 1 < n:
-                        else_match = _ELSE_ASSIGNMENT_RE.match(statements[idx + 1])
-                        if else_match:
-                            else_name, else_expr = else_match.groups()
-                            idx += 1
-                    _apply_conditional_statement(
-                        cond, name, expr.strip(), else_name,
-                        else_expr.strip() if else_expr is not None else None,
-                        var_map,
-                    )
-                idx += 1
-                continue
-
-            match = _RAW_ASSIGNMENT_RE.match(statement)
-            if match:
-                name, expr = match.groups()
-                _assign_or_warn(var_map, name, expr, f"{statement};")
-            idx += 1
+    initialize = _strip_c_comments(instr.initialize_section)
+    _run_c_statements(_parse_c_block(initialize), var_map)
     return var_map
 
 

@@ -214,16 +214,16 @@ class TestAssignDefaultColor(unittest.TestCase):
 
 
 class TestMesherCapabilities(unittest.TestCase):
-    """Cross-checks against what union_viewer.py actually offers and does,
-    without needing a QApplication - see union_viewer.MESHER_KEYS, a
+    """Cross-checks against what the viewer actually offers and does,
+    without needing a QApplication - see panels.MESHER_KEYS, a
     module-level constant kept in sync with the dock's combo box precisely
     so this comparison doesn't need to construct one."""
 
     def test_covers_exactly_the_meshers_the_combo_offers(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-        import union_viewer
+        import panels
 
-        self.assertEqual(set(MESHER_CAPABILITIES), set(union_viewer.MESHER_KEYS))
+        self.assertEqual(set(MESHER_CAPABILITIES), set(panels.MESHER_KEYS))
 
     def test_every_entry_has_the_same_capability_keys(self):
         expected_keys = {"resolution", "deflection", "clip", "incremental_rebuild"}

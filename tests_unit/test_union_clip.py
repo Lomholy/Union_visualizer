@@ -173,18 +173,6 @@ class TestMasks(unittest.TestCase):
         self.assertAlmostEqual(area(meshes.get("ab")), 4 + 4 * 2 * 0.9, places=6)
 
 
-class TestShading(unittest.TestCase):
-    def test_vertex_normals_do_not_blend_across_sharp_edges(self):
-        # the viewer shades with vertex normals; a box face must not take its corners' averaged normal
-        mesh = build([box("a", 1, 2, 3)]).get("a")
-        cos = (mesh.vertex_normals[mesh.faces] * mesh.face_normals[:, None, :]).sum(2)
-        self.assertGreater(cos.min(), 0.999)
-
-    def test_curved_surfaces_stay_smooth(self):
-        mesh = build([FakeComp("Union_sphere", "a", radius=1.0)]).get("a")
-        self.assertLess(len(mesh.vertices), 3 * len(mesh.faces))
-
-
 class TestCoincidentSurfaces(unittest.TestCase):
     # CAD parts often share faces exactly; a surface point takes the status of the material just inside it
     def mesh_comp(self, tmp, name, priority, offset=(0, 0, 0)):

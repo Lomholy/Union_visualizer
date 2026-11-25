@@ -936,8 +936,22 @@ COMPONENT spot_dir = Arm()
 AT (0,0,0) RELATIVE orange
 ROTATED (0,tag_angle,0) RELATIVE orange
 
-COMPONENT space_all_PSD_conditional = Union_conditional_PSD(
- target_loggers = "logger_2D_space_con_zx_all,logger_2D_space_con_zx_1,logger_2D_space_con_zx_2,logger_2D_space_con_zx_3,logger_2D_space_con_zx_4,logger_2D_space_con_zx_5,logger_2D_space_con_zx_6,logger_2D_space_con_zy_all,logger_2D_space_con_zy_1,logger_2D_space_con_zy_2,logger_2D_space_con_zy_3,logger_2D_space_con_zy_4,logger_2D_space_con_zy_5,logger_2D_space_con_zy_6,logger_2D_space_con_xy_all,logger_2D_space_con_xy_1,logger_2D_space_con_xy_2,logger_2D_space_con_xy_3,logger_2D_space_con_xy_4,logger_2D_space_con_xy_5,logger_2D_space_con_xy_6,logger_2DQ_con_zx_all,logger_2DQ_con_zx_1,logger_2DQ_con_zx_2,logger_2DQ_con_zx_3,logger_2DQ_con_zx_4,logger_2DQ_con_zx_5,logger_2DQ_con_zx_6,logger_2DQ_con_zy_all,logger_2DQ_con_zy_1,logger_2DQ_con_zy_2,logger_2DQ_con_zy_3,logger_2DQ_con_zy_4,logger_2DQ_con_zy_5,logger_2DQ_con_zy_6,logger_2DQ_con_xy_all,logger_2DQ_con_xy_1,logger_2DQ_con_xy_2,logger_2DQ_con_xy_3,logger_2DQ_con_xy_4,logger_2DQ_con_xy_5,logger_2DQ_con_xy_6", xwidth = conditional_xwidth,
+// Union_conditional_PSD crashes on target_loggers longer than 511 characters
+// (mccode-dev/McCode#2788), so the 42 loggers are split over three conditionals.
+COMPONENT space_all_PSD_conditional_1 = Union_conditional_PSD(
+ target_loggers = "logger_2D_space_con_zx_all,logger_2D_space_con_zx_1,logger_2D_space_con_zx_2,logger_2D_space_con_zx_3,logger_2D_space_con_zx_4,logger_2D_space_con_zx_5,logger_2D_space_con_zx_6,logger_2D_space_con_zy_all,logger_2D_space_con_zy_1,logger_2D_space_con_zy_2,logger_2D_space_con_zy_3,logger_2D_space_con_zy_4,logger_2D_space_con_zy_5,logger_2D_space_con_zy_6", xwidth = conditional_xwidth,
+ yheight = 0.2, time_min = tag_time-0.5*tag_interval,
+ time_max = tag_time+0.5*tag_interval)
+AT (0,0,0.5) RELATIVE spot_dir
+
+COMPONENT space_all_PSD_conditional_2 = Union_conditional_PSD(
+ target_loggers = "logger_2D_space_con_xy_all,logger_2D_space_con_xy_1,logger_2D_space_con_xy_2,logger_2D_space_con_xy_3,logger_2D_space_con_xy_4,logger_2D_space_con_xy_5,logger_2D_space_con_xy_6,logger_2DQ_con_zx_all,logger_2DQ_con_zx_1,logger_2DQ_con_zx_2,logger_2DQ_con_zx_3,logger_2DQ_con_zx_4,logger_2DQ_con_zx_5,logger_2DQ_con_zx_6", xwidth = conditional_xwidth,
+ yheight = 0.2, time_min = tag_time-0.5*tag_interval,
+ time_max = tag_time+0.5*tag_interval)
+AT (0,0,0.5) RELATIVE spot_dir
+
+COMPONENT space_all_PSD_conditional_3 = Union_conditional_PSD(
+ target_loggers = "logger_2DQ_con_zy_all,logger_2DQ_con_zy_1,logger_2DQ_con_zy_2,logger_2DQ_con_zy_3,logger_2DQ_con_zy_4,logger_2DQ_con_zy_5,logger_2DQ_con_zy_6,logger_2DQ_con_xy_all,logger_2DQ_con_xy_1,logger_2DQ_con_xy_2,logger_2DQ_con_xy_3,logger_2DQ_con_xy_4,logger_2DQ_con_xy_5,logger_2DQ_con_xy_6", xwidth = conditional_xwidth,
  yheight = 0.2, time_min = tag_time-0.5*tag_interval,
  time_max = tag_time+0.5*tag_interval)
 AT (0,0,0.5) RELATIVE spot_dir
