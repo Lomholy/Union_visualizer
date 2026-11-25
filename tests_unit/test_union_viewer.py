@@ -175,5 +175,35 @@ class FitCameraToSceneTest(unittest.TestCase):
         self.assertGreater(camera.depth_range[0], 0)
 
 
+class TriangleLinesTest(unittest.TestCase):
+    """Settings > Show triangle lines: a black wireframe over every Union mesh."""
+
+    def build(self):
+        import trimesh
+
+        meshes = {"a": trimesh.creation.box(), "b": trimesh.creation.icosphere()}
+        return uv.build_gfx_group(meshes, {"a": False, "b": False}, {})
+
+    def wireframes(self, group):
+        return [c for m in group.geometry_meshes.values() for c in m.children
+                if getattr(c.material, "wireframe", False)]
+
+    def test_every_mesh_gets_a_hidden_black_wireframe(self):
+        group = self.build()
+        wires = self.wireframes(group)
+        self.assertEqual(len(wires), 2)
+        for wire, mesh in zip(wires, group.geometry_meshes.values()):
+            self.assertFalse(wire.visible)
+            self.assertIs(wire.geometry, mesh.geometry)
+            self.assertEqual(tuple(wire.material.color)[:3], (0.0, 0.0, 0.0))
+
+    def test_toggle_shows_and_hides_them(self):
+        group = self.build()
+        uv.set_triangle_lines(group, True)
+        self.assertTrue(all(w.visible for w in self.wireframes(group)))
+        uv.set_triangle_lines(group, False)
+        self.assertFalse(any(w.visible for w in self.wireframes(group)))
+
+
 if __name__ == "__main__":
     unittest.main()
