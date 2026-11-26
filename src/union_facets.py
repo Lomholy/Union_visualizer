@@ -95,10 +95,10 @@ class Kernel:
                 return v
         return self.vertex(x, line | {p})
 
-    def classify(self, poly, plane, p, side, probe):
+    def classify(self, poly, plane, p, side, probe, flush=None):
         """+1 if polygon poly (on plane) lies outside the half-space side * (n.x - d) <= 0
-        of plane p, -1 if inside, 0 if it straddles. A polygon lying on p takes the side
-        that probe (a direction off the polygon) points to."""
+        of plane p, -1 if inside, 0 if it straddles. A polygon lying on p is flush, if given,
+        or else takes the side that probe (a direction off the polygon) points to."""
         if plane != p:
             s = [side * self.sign(v, p) for v in poly]
             lo, hi = min(s), max(s)
@@ -106,6 +106,8 @@ class Kernel:
                 return 0
             if lo < 0 or hi > 0:
                 return 1 if hi > 0 else -1
+        if flush is not None:
+            return flush
         return 1 if side * (probe @ self.normal[p]) > 0 else -1
 
     def split(self, poly, p, side):
@@ -124,18 +126,18 @@ class Kernel:
                 outside.append(c)
         return inside, outside
 
-    def subtract(self, poly, plane, probe, cutter):
+    def subtract(self, poly, plane, probe, cutter, flush=None):
         """Convex pieces of poly outside the convex cutter (half-spaces, bounding box)."""
         half, lo, hi = cutter
         if lo is not None:
             pts = np.array([self.pos[v] for v in poly])
             if np.any(pts.min(0) > hi + self.eps) or np.any(pts.max(0) < lo - self.eps):
                 return [poly]
-        if any(self.classify(poly, plane, p, s, probe) > 0 for p, s in half):
+        if any(self.classify(poly, plane, p, s, probe, flush) > 0 for p, s in half):
             return [poly]
         kept = []
         for p, s in half:
-            c = self.classify(poly, plane, p, s, probe)
+            c = self.classify(poly, plane, p, s, probe, flush)
             if c > 0:
                 kept.append(poly)
                 break
@@ -229,7 +231,8 @@ def closed_cut(own, cutters, clip_box=None):
         loops += pieces
     own_planes = {p for p, _ in body.half}
     for i, shape in enumerate(shapes):
-        others = blockers[:i] + blockers[i + 1:]
+        # a wall lying on an earlier cutter's face counts as inside it, so flush walls appear once
+        others = [(cutter, -1 if j < i else None) for j, cutter in enumerate(blockers) if j != i]
         for poly, plane, side in shape.facets:
             pts = np.array([kernel.pos[v] for v in poly])
             if plane in own_planes or np.any(pts.min(0) > body.hi) or np.any(pts.max(0) < body.lo):
@@ -239,8 +242,8 @@ def closed_cut(own, cutters, clip_box=None):
             if piece is None:
                 continue
             pieces = [piece]
-            for cutter in others:
-                pieces = [q for p in pieces for q in kernel.subtract(p, plane, probe, cutter)]
+            for cutter, flush in others:
+                pieces = [q for p in pieces for q in kernel.subtract(p, plane, probe, cutter, flush)]
             loops += [q[::-1] for q in pieces]
     faces = [t for poly in loops for t in kernel.fan(kernel.repair(poly))]
     if not faces:

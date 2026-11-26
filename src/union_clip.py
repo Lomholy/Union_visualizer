@@ -652,7 +652,8 @@ def _masked(comp, shapes, union_geometries):
 def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False):
     """Triangles (T, 3, 3) of comp's surface where it has the highest priority and,
     with walls, the walls closing it where higher-priority components and masks cut it.
-    Walls on convex shapes without masks come from closed_cut as (vertices, faces)."""
+    With walls, convex shapes without masks give the whole closed surface from closed_cut
+    as (vertices, faces) instead."""
     candidates = [
         c.name for c in union_geometries.values()
         if not is_mask(c) and shapes.get(c.name) is not None and c.priority > comp.priority
