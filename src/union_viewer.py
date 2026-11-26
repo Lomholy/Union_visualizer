@@ -15,6 +15,7 @@ from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
 from brep import build_many_brep_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
+from coplanar import find_coincident_faces
 from gui_helpers import (
     group_meshes_by_material,
     is_vacuum_material,
@@ -192,6 +193,12 @@ def compute_mesh_data(
                     world_bboxes=world_bboxes,
                 )
     dependencies = new_dependencies
+
+    for a, b, shared in find_coincident_faces(meshes):
+        print(
+            f"Warning: Union components '{a}' and '{b}' have coinciding faces "
+            f"in {len(shared)} plane(s); Union's ray tracing is ambiguous there."
+        )
 
     # One entry per component, or per material if grouped (trimesh
     # concatenation, not a boolean fusion). Vacuum is not filtered here -

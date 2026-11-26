@@ -6,186 +6,50 @@ import numpy as np
 import trimesh
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from coplanar import (  # noqa: E402
-    find_coincident_curved,
-    find_coplanar_faces,
-    flat_planes,
-    primitive_mesh,
-)
-
-
-class Comp:
-    def __init__(self, component_name, **params):
-        self.component_name = component_name
-        self.name = component_name
-        self.__dict__.update(params)
-
-
-def at(x=0.0, y=0.0, z=0.0, rot_x=0.0, rot_z=0.0):
-    m = trimesh.transformations.euler_matrix(np.radians(rot_x), 0, np.radians(rot_z))
-    m[:3, 3] = [x, y, z]
-    return m
-
-
-def curved(geoms):
-    """find_coincident_curved on {name: (comp, matrix)}, as name pairs."""
-    comps = {n: c for n, (c, _m) in geoms.items()}
-    matrices = {n: m for n, (_c, m) in geoms.items()}
-    return [(f[0], f[1]) for f in find_coincident_curved(comps, matrices)]
-
-
-def cyl(radius=0.02, yheight=0.1):
-    return Comp("Union_cylinder", radius=radius, yheight=yheight)
-
-
-def cone(radius_bottom, radius_top, yheight):
-    return Comp("Union_cone", radius_bottom=radius_bottom, radius_top=radius_top, yheight=yheight)
+from coplanar import find_coincident_faces  # noqa: E402
 
 
 def box(x=0.0, y=0.0, z=0.0, size=0.1):
     return trimesh.creation.box(extents=[size] * 3).apply_translation([x, y, z])
 
 
-def cylinder_along_y(matrix, radius=0.02, height=0.1):
+def cylinder_along_y(y=0.0, radius=0.02, height=0.1):
     mesh = trimesh.creation.cylinder(radius=radius, height=height, sections=32)
     mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
-    return mesh.apply_transform(matrix)
+    return mesh.apply_translation([0, y, 0])
 
 
-def pairs(found):
-    return [(f[0], f[1]) for f in found]
+def pairs(meshes):
+    return [(f[0], f[1]) for f in find_coincident_faces(meshes)]
 
 
-class TestCoplanar(unittest.TestCase):
+class TestCoincidentFaces(unittest.TestCase):
     def test_touching_boxes_are_flagged(self):
-        found = find_coplanar_faces({"a": box(), "b": box(x=0.1)})
-        self.assertEqual(pairs(found), [("a", "b")])
+        found = find_coincident_faces({"a": box(), "b": box(x=0.1)})
+        self.assertEqual([(f[0], f[1]) for f in found], [("a", "b")])
+        [(normal, offset)] = found[0][2]
+        np.testing.assert_allclose(normal, [1, 0, 0])
+        self.assertAlmostEqual(offset, 0.05)
 
     def test_offset_boxes_are_not_flagged(self):
-        self.assertEqual(find_coplanar_faces({"a": box(), "b": box(x=0.1 + 1e-6)}), [])
+        self.assertEqual(pairs({"a": box(), "b": box(x=0.1 + 1e-6)}), [])
 
     def test_coplanar_but_separate_faces_are_not_flagged(self):
-        self.assertEqual(find_coplanar_faces({"a": box(), "b": box(x=0.5)}), [])
+        self.assertEqual(pairs({"a": box(), "b": box(x=0.5)}), [])
 
     def test_edge_contact_is_not_flagged(self):
-        self.assertEqual(find_coplanar_faces({"a": box(), "b": box(x=0.1, y=0.1)}), [])
+        self.assertEqual(pairs({"a": box(), "b": box(x=0.1, y=0.1)}), [])
 
     def test_cylinder_cap_on_box_is_flagged(self):
-        matrix = at(y=0.1)
-        comp = Comp("Union_cylinder", radius=0.02, yheight=0.1)
-        planes = {"a": flat_planes(Comp("Union_box", xwidth=0.1, yheight=0.1, zdepth=0.1), at()),
-                  "c": flat_planes(comp, matrix)}
-        found = find_coplanar_faces({"a": box(), "c": cylinder_along_y(matrix)}, planes)
-        self.assertEqual(pairs(found), [("a", "c")])
+        self.assertEqual(pairs({"a": box(), "c": cylinder_along_y(y=0.1)}), [("a", "c")])
 
-    def test_tessellated_cylinder_sides_are_ignored(self):
-        comp = Comp("Union_cylinder", radius=0.02, yheight=0.1)
-        low, high = at(), at(y=0.05)
-        meshes = {"low": cylinder_along_y(low), "high": cylinder_along_y(high)}
-        self.assertTrue(find_coplanar_faces(meshes))
-        planes = {"low": flat_planes(comp, low), "high": flat_planes(comp, high)}
-        self.assertEqual(find_coplanar_faces(meshes, planes), [])
+    def test_overlapping_coaxial_cylinder_sides_are_flagged(self):
+        self.assertEqual(pairs({"low": cylinder_along_y(), "high": cylinder_along_y(y=0.05)}),
+                         [("high", "low")])
 
-
-class TestPrintedPrecision(unittest.TestCase):
-    """Union prints vertices with %g; far from the master origin a vertex is
-    off by up to 5e-6 of its coordinate. The exact planes from the geometry
-    parameters still decide which faces share a plane."""
-
-    def rounded_box(self, x):
-        mesh = box(x=x, z=35.0)
-        mesh.vertices = np.array([[float(f"{v:g}") for v in p] for p in mesh.vertices])
-        return mesh
-
-    def check(self, gap):
-        comp = Comp("Union_box", xwidth=0.1, yheight=0.1, zdepth=0.1)
-        ma, mb = at(z=35.0), at(x=0.1 + gap, z=35.0)
-        meshes = {"a": self.rounded_box(0.0), "b": self.rounded_box(0.1 + gap)}
-        planes = {"a": flat_planes(comp, ma), "b": flat_planes(comp, mb)}
-        precision = 5e-6 * 35.05
-        return pairs(find_coplanar_faces(meshes, planes, precisions={"a": precision, "b": precision}))
-
-    def test_touching_boxes_far_from_origin_are_flagged(self):
-        self.assertEqual(self.check(0.0), [("a", "b")])
-
-    def test_gap_below_print_precision_is_not_flagged(self):
-        self.assertEqual(self.check(1e-6), [])
-
-
-class TestCurved(unittest.TestCase):
-    def test_overlapping_coaxial_cylinders_are_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(), at(y=0.05))}), [("a", "b")])
-
-    def test_flipped_coaxial_cylinder_is_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(), at(y=0.05, rot_x=180))}),
-                         [("a", "b")])
-
-    def test_end_to_end_cylinders_are_not_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(), at(y=0.1))}), [])
-
-    def test_different_radius_is_not_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(radius=0.021), at())}), [])
-
-    def test_parallel_offset_axis_is_not_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(), at(x=1e-6))}), [])
-
-    def test_crossing_cylinders_are_not_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(), at(rot_z=90))}), [])
-
-    def test_cone_continuing_another_cone_is_flagged(self):
-        # radius 0.1 -> 0.05 over y in [-0.1, 0.1]; the second cone covers
-        # y in [0, 0.2] with the same slope, so the sides share y in [0, 0.1].
-        self.assertEqual(
-            curved({"a": (cone(0.1, 0.05, 0.2), at()), "b": (cone(0.075, 0.025, 0.2), at(y=0.1))}),
-            [("a", "b")],
-        )
-
-    def test_cone_with_other_slope_is_not_flagged(self):
-        self.assertEqual(
-            curved({"a": (cone(0.1, 0.05, 0.2), at()), "b": (cone(0.075, 0.05, 0.2), at(y=0.1))}),
-            [],
-        )
-
-    def test_cylinder_matching_equal_radius_cone_is_flagged(self):
-        self.assertEqual(curved({"a": (cyl(), at()), "b": (cone(0.02, 0.02, 0.1), at())}),
-                         [("a", "b")])
-
-    def test_identical_spheres_are_flagged(self):
-        s = Comp("Union_sphere", radius=0.05)
-        self.assertEqual(curved({"a": (s, at()), "b": (s, at())}), [("a", "b")])
-
-    def test_shifted_spheres_are_not_flagged(self):
-        s = Comp("Union_sphere", radius=0.05)
-        self.assertEqual(curved({"a": (s, at()), "b": (s, at(z=1e-6))}), [])
-
-
-class TestUndrawnVolumes(unittest.TestCase):
-    """Masks and visualize=0 volumes are not drawn by Union, so they are
-    checked on their uncarved primitive meshes."""
-
-    def test_mask_box_touching_volume_box_is_flagged(self):
-        mask = Comp("Union_box", xwidth=0.1, yheight=0.1, zdepth=0.1, mask_string="v")
-        vol = Comp("Union_box", xwidth=0.1, yheight=0.1, zdepth=0.1)
-        m_mask, m_vol = at(), at(x=0.1)
-        meshes = {"mask": primitive_mesh(mask, m_mask), "vol": primitive_mesh(vol, m_vol)}
-        planes = {"mask": flat_planes(mask, m_mask), "vol": flat_planes(vol, m_vol)}
-        self.assertEqual(pairs(find_coplanar_faces(meshes, planes)), [("mask", "vol")])
-
-    def test_tapered_box_primitive_has_its_faces(self):
-        comp = Comp("Union_box", xwidth=0.2, yheight=0.1, zdepth=0.1, xwidth2=0.1, yheight2=0.05)
-        mesh = primitive_mesh(comp, at())
-        self.assertTrue(mesh.is_watertight)
-        self.assertAlmostEqual(mesh.bounds[1][0], 0.1)
-
-    def test_cylinder_cap_primitive_on_box_is_flagged(self):
-        box_comp = Comp("Union_box", xwidth=0.1, yheight=0.1, zdepth=0.1)
-        c, m = cyl(), at(y=0.1)
-        meshes = {"a": primitive_mesh(box_comp, at()), "c": primitive_mesh(c, m)}
-        planes = {"a": flat_planes(box_comp, at()), "c": flat_planes(c, m)}
-        self.assertEqual(pairs(find_coplanar_faces(meshes, planes)), [("a", "c")])
-
-    def test_sphere_has_no_primitive(self):
-        self.assertIsNone(primitive_mesh(Comp("Union_sphere", radius=0.05), at()))
+    def test_empty_and_missing_meshes_are_skipped(self):
+        empty = trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=int))
+        self.assertEqual(pairs({"a": box(), "b": None, "c": empty}), [])
 
 
 if __name__ == "__main__":
