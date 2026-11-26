@@ -260,6 +260,74 @@ class TestCloseCuts(unittest.TestCase):
         self.assertAlmostEqual(area(build([a, b], {"b": translation(x=1.1)}).get("a")), 4 + 4 * 2 * 1.1, places=6)
 
 
+class TestClosedCut(unittest.TestCase):
+    # Close cut surfaces on convex cutters: the kept surface and the walls share their cut vertices
+    CUTTERS = {
+        "box": (box("b", 2, 2.5, 2.5, priority=2), translation(x=1.1)),
+        "cylinder_side": (FakeComp("Union_cylinder", "b", priority=2, radius=0.5, yheight=3), translation(x=0.93, z=0.07)),
+        "cylinder_cap": (FakeComp("Union_cylinder", "b", priority=2, radius=0.5, yheight=1),
+                         translation(x=0.03, y=1.07, z=0.11)),
+        "cone": (FakeComp("Union_cone", "b", priority=2, radius_bottom=0.5, radius_top=0.2, yheight=1),
+                 translation(x=0.05, y=0.93, z=-0.12)),
+        "sphere": (FakeComp("Union_sphere", "b", priority=2, radius=0.5), translation(x=0.91, y=0.13, z=0.07)),
+    }
+
+    def build_pair(self, cutter, matrix, close_cuts=True):
+        geoms = {"a": box("a", 2, 2, 2, priority=1), "b": cutter}
+        with contextlib.redirect_stdout(io.StringIO()):
+            return meshing.build_all_meshes(geoms, {"a": np.eye(4), "b": matrix}, {}, {}, 64, NO_CLIP,
+                                            export=False, mesher="union", close_cuts=close_cuts)
+
+    def assert_closed(self, mesh):
+        self.assertTrue(mesh.is_watertight)
+        self.assertTrue(mesh.is_winding_consistent)
+        self.assertGreater(mesh.volume, 0)
+        edges = np.sort(mesh.faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1)
+        self.assertEqual(set(np.unique(edges, axis=0, return_counts=True)[1]), {2})
+        faces = np.sort(mesh.faces, axis=1)
+        self.assertEqual(len(np.unique(faces, axis=0)), len(faces))
+        self.assertFalse(np.any((faces[:, 0] == faces[:, 1]) | (faces[:, 1] == faces[:, 2])))
+
+    def facet_volume_inside_a(self, cutter, matrix):
+        # the cutter's display polyhedron cut by the six faces of a (a cube of side 2 at the origin)
+        import union_clip
+        solid = trimesh.Trimesh(union_clip.make_shape(cutter, matrix).triangles().reshape(-1, 3)).convex_hull
+        for axis in range(3):
+            for sign in (1, -1):
+                normal = np.zeros(3)
+                normal[axis] = -sign
+                solid = trimesh.intersections.slice_mesh_plane(solid, normal, -normal, cap=True)
+        return solid.volume
+
+    def test_convex_cutters_close_watertight(self):
+        for name, (cutter, matrix) in self.CUTTERS.items():
+            with self.subTest(cutter=name):
+                meshes = self.build_pair(cutter, matrix)
+                for mesh in meshes.values():
+                    self.assert_closed(mesh)
+                expected = 2 * 2 * 1.1 if name == "box" else 8 - self.facet_volume_inside_a(cutter, matrix)
+                self.assertAlmostEqual(meshes["a"].volume / expected, 1, delta=5e-4)
+
+    def test_kept_area_matches_the_open_cut(self):
+        # R6: the faceted cut keeps the open cut's area of a's own surface within 1%
+        for name in ("cylinder_side", "cylinder_cap", "cone", "sphere"):
+            with self.subTest(cutter=name):
+                closed = self.build_pair(*self.CUTTERS[name])["a"]
+                on_surface = np.abs(closed.triangles_center).max(1) > 1 - 1e-9
+                kept = closed.area_faces[on_surface].sum()
+                self.assertAlmostEqual(kept / area(self.build_pair(*self.CUTTERS[name], close_cuts=False)["a"]), 1,
+                                       delta=0.01)
+
+    def test_boxes_sharing_a_face_both_close(self):
+        # b touches a's +x face with its -x face: each keeps its own face, neither gets a wall there
+        meshes = self.build_pair(box("b", 2, 1.5, 1.5, priority=2), translation(x=2))
+        for name, volume, surface in (("a", 8.0, 24.0), ("b", 4.5, 4 * 2 * 1.5 + 2 * 1.5 * 1.5)):
+            with self.subTest(name=name):
+                self.assert_closed(meshes[name])
+                self.assertAlmostEqual(meshes[name].volume, volume, places=9)
+                self.assertAlmostEqual(meshes[name].area, surface, places=9)
+
+
 class TestClipBox(unittest.TestCase):
     # R4: the clip plane removes its side of every component
     def test_clip_removes_side(self):
