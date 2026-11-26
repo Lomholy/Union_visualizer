@@ -16,6 +16,7 @@ import trimesh
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
+from union_facets import closed_cut
 
 # Split budget in half levels: a split in 4 costs 2, a split in 2 costs 1
 TRI_DEPTH = 12
@@ -227,7 +228,8 @@ class BoxShape(ConvexShape):
         local = np.array([[sx * w / 2, sy * h / 2, sz]
                           for sz, w, h in ((-z, x1, y1), (z, x2, y2))
                           for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
-        s = self.to_world(local).reshape(2, 4, 3)
+        self.corners = self.to_world(local)
+        s = self.corners.reshape(2, 4, 3)
         # two triangles per face, in McStas's order, so tri[::2] holds one per face
         tri = []
         for j in range(2):
@@ -244,6 +246,10 @@ class BoxShape(ConvexShape):
 
     def triangles(self):
         return self.tri.copy()
+
+    def facets(self):
+        """(points, polygons): the six faces as loops of corner indices."""
+        return self.corners, [[0, 1, 2, 3], [4, 5, 6, 7]] + [[i, (i + 1) % 4, 4 + (i + 1) % 4, 4 + i] for i in range(4)]
 
 
 class ClipBox(ConvexShape):
@@ -284,15 +290,38 @@ class LatheShape(Shape):
         self.profile_y = np.array([-self.half, self.half])
         self.profile_r = np.array([r_bottom, r_top])
 
-    def triangles(self):
-        y, r, n = self.profile_y, self.profile_r, LATHE_SEGMENTS
-        angle = 2 * np.pi * np.arange(n + 1) / n
-        # McStas's point_on_circle: rings start at axis x (0,1,0), or axis x (1,0,0) near y;
-        # a sphere's axis is the world y axis whatever its rotation
+    def frame(self):
+        """McStas's point_on_circle: rings start at axis x (0,1,0), or axis x (1,0,0) near y;
+        a sphere's axis is the world y axis whatever its rotation."""
         axis = np.array([0.0, 1.0, 0.0]) if self.radius is not None else self.rot[:, 1]
         e1 = np.cross(axis, [1.0, 0.0, 0.0] if axis[1] > 0.9 else [0.0, 1.0, 0.0])
         e1 /= np.linalg.norm(e1)
-        e2 = np.cross(axis, e1)
+        return axis, e1, np.cross(axis, e1)
+
+    def facets(self):
+        """(points, polygons) of the surface triangles() draws, with one vertex per ring
+        point (the ring closes on its first point) and one at each pole or apex."""
+        n = LATHE_SEGMENTS
+        axis, e1, e2 = self.frame()
+        angle = 2 * np.pi * np.arange(n) / n
+        circle = np.cos(angle)[:, None] * e1 + np.sin(angle)[:, None] * e2
+        points, rings = [], []
+        for y, r in zip(self.profile_y, self.profile_r):
+            rings.append(len(points) + (np.arange(n) if r > 0 else np.zeros(n, int)))
+            points.extend(y * axis + r * circle if r > 0 else [y * axis])
+        polygons = []
+        for low, high in zip(rings[:-1], rings[1:]):
+            for i in range(n):
+                j = (i + 1) % n
+                loop = [low[i], low[j], high[j], high[i]]
+                polygons.append([v for k, v in enumerate(loop) if v != loop[k - 1]])
+        polygons += [list(ring) for ring, r in ((rings[0], self.profile_r[0]), (rings[-1], self.profile_r[-1])) if r > 0]
+        return np.array(points) + self.center, polygons
+
+    def triangles(self):
+        y, r, n = self.profile_y, self.profile_r, LATHE_SEGMENTS
+        angle = 2 * np.pi * np.arange(n + 1) / n
+        axis, e1, e2 = self.frame()
 
         def ring(k, i):
             return (y[k] * axis + r[k] * (np.cos(angle[i])[:, None] * e1 + np.sin(angle[i])[:, None] * e2))
@@ -622,7 +651,8 @@ def _masked(comp, shapes, union_geometries):
 
 def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False):
     """Triangles (T, 3, 3) of comp's surface where it has the highest priority and,
-    with walls, the walls closing it where higher-priority components and masks cut it."""
+    with walls, the walls closing it where higher-priority components and masks cut it.
+    Walls on convex shapes without masks come from closed_cut as (vertices, faces)."""
     candidates = [
         c.name for c in union_geometries.values()
         if not is_mask(c) and shapes.get(c.name) is not None and c.priority > comp.priority
@@ -630,6 +660,8 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=Fal
     cutters = [_masked(union_geometries[n], shapes, union_geometries)
                for n in overlapping(comp.name, candidates, world_bboxes)]
     own = _masked(comp, shapes, union_geometries)
+    if walls and closable(own, cutters):
+        return closed_cut(own.shape, [c.shape for c in cutters], ClipBox(clip) if clip.get("enable") else None)
     sources = list(own.masks)
     for cutter in cutters:
         sources += [cutter.shape, *cutter.masks]
@@ -644,6 +676,11 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=Fal
     if not walls:
         return tri
     return np.concatenate([tri, *cut_walls(own, cutters, sources, clip)])
+
+
+def closable(own, cutters):
+    """Whether the shared-vertex closed cut handles comp: convex shapes, no masks."""
+    return all(isinstance(m.shape, (BoxShape, LatheShape)) and not m.masks for m in (own, *cutters))
 
 
 def cut_walls(own, cutters, sources, clip):
@@ -739,7 +776,11 @@ def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, wo
                 print(f"{name} is a mask, and is therefore not meshed.")
             meshes[name] = None
             continue
-        meshes[name] = _to_mesh(clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts))
+        result = clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts)
+        if isinstance(result, tuple):
+            meshes[name] = trimesh.Trimesh(*result, process=False) if len(result[1]) else None
+        else:
+            meshes[name] = _to_mesh(result)
     return meshes
 
 
