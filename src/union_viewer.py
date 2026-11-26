@@ -659,11 +659,7 @@ class Viewer(QtWidgets.QMainWindow):
         print(traceback_text, end="", file=sys.stderr)
         print("McStas trace failed:")
         print(summary)
-        self.settings_panel.set_trace_status(
-            "mcrun FAILED. ENSURE THAT INSTRUMENT COMPILES IN ORDER TO "
-            "VISUALIZE THE MCSTAS COMPONENTS",
-            error=True,
-        )
+        self.settings_panel.set_trace_status("")
         QtWidgets.QMessageBox.warning(
             self,
             "McStas trace failed",

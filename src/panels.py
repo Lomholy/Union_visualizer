@@ -160,12 +160,8 @@ class SettingsPanel(QtWidgets.QWidget):
         ):
             layout.addWidget(widget)
 
-    def set_trace_status(self, text, error=False):
-        """Show text under the checkboxes: grey, or red (last 6 lines
-        only) for an error."""
-        if error:
-            text = "\n".join(text.strip().splitlines()[-6:])
-        self.trace_status_label.setStyleSheet("color: #c0392b;" if error else "color: gray;")
+    def set_trace_status(self, text):
+        """Show grey text under the checkboxes."""
         self.trace_status_label.setText(text)
 
 
