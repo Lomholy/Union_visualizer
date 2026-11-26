@@ -87,6 +87,31 @@ class TestCoplanar(unittest.TestCase):
         self.assertEqual(find_coplanar_faces(meshes, planes), [])
 
 
+class TestPrintedPrecision(unittest.TestCase):
+    """Union prints vertices with %g; far from the master origin a vertex is
+    off by up to 5e-6 of its coordinate. The exact planes from the geometry
+    parameters still decide which faces share a plane."""
+
+    def rounded_box(self, x):
+        mesh = box(x=x, z=35.0)
+        mesh.vertices = np.array([[float(f"{v:g}") for v in p] for p in mesh.vertices])
+        return mesh
+
+    def check(self, gap):
+        comp = Comp("Union_box", xwidth=0.1, yheight=0.1, zdepth=0.1)
+        ma, mb = at(z=35.0), at(x=0.1 + gap, z=35.0)
+        meshes = {"a": self.rounded_box(0.0), "b": self.rounded_box(0.1 + gap)}
+        planes = {"a": flat_planes(comp, ma), "b": flat_planes(comp, mb)}
+        precision = 5e-6 * 35.05
+        return pairs(find_coplanar_faces(meshes, planes, precisions={"a": precision, "b": precision}))
+
+    def test_touching_boxes_far_from_origin_are_flagged(self):
+        self.assertEqual(self.check(0.0), [("a", "b")])
+
+    def test_gap_below_print_precision_is_not_flagged(self):
+        self.assertEqual(self.check(1e-6), [])
+
+
 class TestCurved(unittest.TestCase):
     def test_overlapping_coaxial_cylinders_are_flagged(self):
         self.assertEqual(curved({"a": (cyl(), at()), "b": (cyl(), at(y=0.05))}), [("a", "b")])
