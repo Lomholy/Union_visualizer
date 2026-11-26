@@ -318,6 +318,17 @@ class TestClosedCut(unittest.TestCase):
                 self.assertAlmostEqual(kept / area(self.build_pair(*self.CUTTERS[name], close_cuts=False)["a"]), 1,
                                        delta=0.01)
 
+    def test_cutters_with_flush_faces_close_once(self):
+        # b and c share their y and z face planes, facing the same way: their walls overlap there
+        geoms = {c.name: c for c in (box("a", 2, 2, 2, priority=1), box("b", 1, 1, 1, priority=2),
+                                     box("c", 1, 1, 1, priority=3))}
+        world = {"a": np.eye(4), "b": translation(x=0.5), "c": translation(x=0.8)}
+        with contextlib.redirect_stdout(io.StringIO()):
+            mesh = meshing.build_all_meshes(geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union",
+                                            close_cuts=True)["a"]
+        self.assert_closed(mesh)
+        self.assertAlmostEqual(mesh.volume, 7.0, places=9)
+
     def test_boxes_sharing_a_face_both_close(self):
         # b touches a's +x face with its -x face: each keeps its own face, neither gets a wall there
         meshes = self.build_pair(box("b", 2, 1.5, 1.5, priority=2), translation(x=2))
