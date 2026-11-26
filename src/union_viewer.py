@@ -68,6 +68,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.current_group = None
         self.dependencies = None
         self.meshes = None
+        self._shown_mesh_warnings = []
 
         # ----------------------------------------------------
         # Background jobs
@@ -587,6 +588,11 @@ class Viewer(QtWidgets.QMainWindow):
         if self.counts:
             self.rebuild_counts_group()
         print("Reload complete")
+        # Shown once per distinct set, so remeshing on every edit doesn't repeat the popup.
+        warnings = instrument_info["warnings"]
+        if warnings and warnings != self._shown_mesh_warnings:
+            QtWidgets.QMessageBox.warning(self, "Coinciding faces", "\n\n".join(warnings))
+        self._shown_mesh_warnings = warnings
 
         if self._pending_fit_camera:
             self._pending_fit_camera = False
@@ -657,6 +663,12 @@ class Viewer(QtWidgets.QMainWindow):
             "mcrun FAILED. ENSURE THAT INSTRUMENT COMPILES IN ORDER TO "
             "VISUALIZE THE MCSTAS COMPONENTS",
             error=True,
+        )
+        QtWidgets.QMessageBox.warning(
+            self,
+            "McStas trace failed",
+            "mcrun --trace failed, so the McStas components and rays are not shown. "
+            f"Ensure that the instrument compiles.\n\n{summary}",
         )
 
     def on_components_changed(self):

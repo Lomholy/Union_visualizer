@@ -127,11 +127,13 @@ def compute_mesh_data(
         check_meshes = build_union_meshes(
             union_geometries, world_matrices, NO_CLIP, world_bboxes=world_bboxes
         )
-    for a, b, shared in find_coincident_faces(check_meshes):
-        print(
-            f"Warning: Union components '{a}' and '{b}' have coinciding faces "
-            f"in {len(shared)} plane(s); Union's ray tracing is ambiguous there."
-        )
+    warnings = [
+        f"Union components '{a}' and '{b}' have coinciding faces "
+        f"in {len(shared)} plane(s); Union's ray tracing is ambiguous there."
+        for a, b, shared in find_coincident_faces(check_meshes)
+    ]
+    for warning in warnings:
+        print(f"Warning: {warning}")
 
     # One entry per component, or per material if grouped (trimesh
     # concatenation, not a boolean fusion). Vacuum is not filtered here -
@@ -153,6 +155,7 @@ def compute_mesh_data(
     instrument_info = {
         "parameters": instrument_parameters(instr),
         "world_matrices": {name: M.tolist() for name, M in world_matrices.items()},
+        "warnings": warnings,
     }
     return (render_meshes, geometry_is_vacuum, meshes, dependencies, instrument_info)
 
