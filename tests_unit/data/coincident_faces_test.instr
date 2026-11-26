@@ -1,0 +1,38 @@
+DEFINE INSTRUMENT coincident_faces_test()
+
+TRACE
+
+COMPONENT src = Source_simple(radius = 0.1, lambda0 = 3, dlambda = 2)
+AT (0,0,0) RELATIVE ABSOLUTE
+
+COMPONENT sample = Arm()
+AT (0,0,10) RELATIVE src
+
+COMPONENT init = Union_init()
+AT (0,0,0) RELATIVE sample
+
+COMPONENT non = Non_process()
+AT (0,0,0) RELATIVE sample
+
+COMPONENT mat = Union_make_material(my_absorption = 100, process_string = "non")
+AT (0,0,0) RELATIVE sample
+
+COMPONENT touch_a = Union_box(priority = 10, xwidth = 0.1, yheight = 0.1, zdepth = 0.1, material_string = "mat")
+AT (0,0,0) RELATIVE sample
+
+COMPONENT touch_b = Union_box(priority = 20, xwidth = 0.1, yheight = 0.1, zdepth = 0.1, material_string = "mat")
+AT (0.1,0,0) RELATIVE sample
+
+COMPONENT nested_outer = Union_box(priority = 50, xwidth = 0.2, yheight = 0.2, zdepth = 0.2, material_string = "mat")
+AT (0,-0.5,0) RELATIVE sample
+
+COMPONENT nested_inner = Union_box(priority = 60, xwidth = 0.1, yheight = 0.1, zdepth = 0.1, material_string = "mat")
+AT (0,-0.5,0) RELATIVE sample
+
+COMPONENT master = Union_master()
+AT (0,0,0) RELATIVE sample
+
+COMPONENT stop = Union_stop()
+AT (0,0,0) RELATIVE sample
+
+END

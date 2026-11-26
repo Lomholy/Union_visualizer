@@ -7,6 +7,8 @@ was exercised interactively with QT_QPA_PLATFORM=offscreen against real
 test instruments while implementing changes to it.
 """
 
+import contextlib
+import io
 import os
 import shutil
 import sys
@@ -28,6 +30,28 @@ from camera import (  # noqa: E402
     update_camera_depth_range,
 )
 from logger_output import LoggerCounts  # noqa: E402
+
+
+class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
+    def warned(self, close_cuts):
+        instr = ROOT / "tests_unit" / "data" / "coincident_faces_test.instr"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            pipeline.compute_mesh_data(
+                str(instr), pipeline.NO_CLIP, verbose=False, mesher="union", close_cuts=close_cuts
+            )
+        return sorted(
+            line.split("'")[1:4:2] for line in out.getvalue().splitlines()
+            if line.startswith("Warning: Union components")
+        )
+
+    def test_touching_volumes_are_warned_about_but_nested_ones_are_not(self):
+        # nested_inner sits inside nested_outer without touching its faces, so
+        # the hole it leaves in nested_outer, closed by a wall with close_cuts,
+        # must not count.
+        for close_cuts in (False, True):
+            with self.subTest(close_cuts=close_cuts):
+                self.assertEqual(self.warned(close_cuts), [["touch_a", "touch_b"]])
 
 
 @unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")

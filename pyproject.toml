@@ -25,6 +25,7 @@ py-modules = [
     "camera",
     "cli",
     "clipping",
+    "coplanar",
     "dual_cont",
     "gui_helpers",
     "logger_output",

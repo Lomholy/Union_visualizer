@@ -60,6 +60,19 @@ component (sources, guides, slits, monitors, ...) is included too, drawn
 the same way the GUI's "Show McStas components" option draws them, so it
 needs a working McStas install and compiler.
 
+### Checking for coincident surfaces
+
+Union volumes whose surfaces coincide confuse Union's ray tracing. Each time
+the viewer builds its meshes, it prints a warning in the terminal for every
+pair of Union components whose surfaces share triangles in a common plane.
+The check uses the union mesher's surfaces without cut walls, which keep
+each surface only where its component has the highest priority: touching
+volumes are reported, while a volume nested inside another is not, and
+neither is a surface hidden just inside a higher-priority volume. Masks are
+not meshed, so they are not checked.
+
+If `unviz` reports `No module named coplanar`, your environment was
+installed before this module existed: run `python -m pip install -e .` again.
 
 ## GUI options
 
