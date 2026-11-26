@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mesher",
         choices=("mc", "dc", "brep", "union"),
         default="brep",
-        help="Mesher used for export (default: brep)",
+        help="Mesher used for export and the viewer's initial mesher (default: brep)",
     )
     parser.add_argument("--verbose", action="store_true", help="Print detailed progress")
     parser.add_argument(
@@ -74,12 +74,12 @@ def _resolve_input(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     return args.input_file or args.input
 
 
-def launch_viewer(input_file: str | None) -> int:
+def launch_viewer(input_file: str | None, mesher: str = "brep") -> int:
     # Import lazily so that `unviz --help` does not require the GUI stack to
     # initialise and the headless exporter does not import Qt at all.
     from union_viewer import launch
 
-    return launch(input_file)
+    return launch(input_file, mesher=mesher)
 
 
 def export_model(args: argparse.Namespace, input_file: str) -> None:
@@ -192,14 +192,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.out_file != "union_env"
         or args.resolution != 64
         or args.n_points != 1_000
-        or args.mesher != "brep"
         or args.verbose
         or args.force_pygen
     )
     if export_only_options:
         parser.error("export options require --export")
 
-    return launch_viewer(input_file)
+    return launch_viewer(input_file, args.mesher)
 
 
 if __name__ == "__main__":
