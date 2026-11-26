@@ -69,8 +69,11 @@ Union's ray tracing. To list every such pair of volumes, run:
 python -m coplanar my_mcstas_instr.instr
 ```
 
-It checks box faces, cylinder and cone end caps, and mesh triangles. Curved
-surfaces are not checked. The command exits with status 1 when it finds a pair.
+It runs the instrument with `mcrun --trace=2` and compares the triangles of
+Union's own mesher, so faces hidden inside a higher-priority volume are
+ignored. It checks box faces, cylinder and cone end caps, and mesh triangles.
+Curved surfaces, masks and volumes with `visualize=0` are not checked. The
+command exits with status 1 when it finds a pair.
 If Python reports `No module named coplanar`, your environment was installed
 before this module existed: run `python -m pip install -e .` again.
 

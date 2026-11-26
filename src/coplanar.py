@@ -2,123 +2,175 @@
 
 Coincident faces between two Union volumes make the ray tracing in
 Union_master ambiguous: a ray hitting the shared plane can end up in the
-wrong volume. This reports every pair of volumes with overlapping faces in
-a common plane, whether the faces point the same way or opposite ways.
+wrong volume. This reports every pair of volumes with overlapping triangles
+in a common plane, whether they point the same way or opposite ways.
 
-Flat faces checked: all faces of Union_box (tapered too), the end caps of
-Union_cylinder and Union_cone, and every triangle of Union_mesh. Curved
-surfaces (cylinder and cone sides, spheres) are not checked.
+The triangles come from Union's own mesher: the polyhedra Union_master draws
+for each volume under mcrun --trace=2, which keep only the parts of a
+volume's surface where it has the highest priority. Only triangles in a
+volume's flat faces are compared (box faces, cylinder and cone end caps,
+mesh faces), so tessellated curved surfaces cannot match by accident.
+Volumes with visualize=0 and masks are not drawn by Union, so not checked.
 
 Usage:
     python -m coplanar my_instrument.instr
 """
 
 import argparse
+import os
 import sys
 from collections import defaultdict
 
 import numpy as np
-import trimesh
-from shapely.geometry import Polygon
-from shapely.ops import unary_union
 
 from preprocess import box_dimensions
 
-CIRCLE_SEGMENTS = 64
+
+def _is_drawn(comp):
+    if getattr(comp, "mask_string", None) is not None:
+        return False
+    try:
+        return float(getattr(comp, "visualize", None)) != 0
+    except (TypeError, ValueError):
+        return True
 
 
-def _box_faces(comp):
-    x1, y1, x2, y2 = box_dimensions(comp)
-    z = float(comp.zdepth) / 2
-    corners = np.array(
-        [
-            [-x1 / 2, -y1 / 2, -z], [x1 / 2, -y1 / 2, -z],
-            [x1 / 2, y1 / 2, -z], [-x1 / 2, y1 / 2, -z],
-            [-x2 / 2, -y2 / 2, z], [x2 / 2, -y2 / 2, z],
-            [x2 / 2, y2 / 2, z], [-x2 / 2, y2 / 2, z],
-        ]
+def union_mesher_meshes(input_file, instr, union_geometries, world_matrices):
+    """{volume name: world-space trimesh} from the polyhedra Union_master
+    draws. They carry no names; each is matched to the next drawn volume,
+    in instrument order, whose world bbox holds all its vertices, since a
+    fully hidden volume draws nothing."""
+    from bounding_box import compute_all_world_bboxes
+    from mcstas_trace import _polyhedron, instr_file_for, read_positions, run_trace
+
+    masters = {c.name for c in instr.component_list if c.component_name == "Union_master"}
+    text = run_trace(
+        instr_file_for(input_file), cwd=os.path.dirname(os.path.abspath(input_file))
     )
-    quads = [
-        [0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4],
-        [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5],
-    ]
-    return [corners[q] for q in quads]
+    matrices = read_positions(text)
+    polyhedra = []
+    drawing = None
+    for line in text.splitlines():
+        if line.startswith("MCDISPLAY: component "):
+            drawing = line[len("MCDISPLAY: component "):].strip()
+        elif line.startswith("MCDISPLAY: polyhedron") and drawing in masters:
+            mesh = _polyhedron(line[len("MCDISPLAY: polyhedron"):].strip())
+            if mesh is not None:
+                polyhedra.append(mesh.apply_transform(matrices[drawing]))
+        elif line.startswith("ENTER:"):
+            break
+
+    volumes = {n: c for n, c in union_geometries.items() if _is_drawn(c)}
+    bboxes = compute_all_world_bboxes(volumes, world_matrices)
+    names = list(volumes)
+    meshes = {}
+    for mesh in polyhedra:
+        while names:
+            name = names.pop(0)
+            low, high = bboxes[name]
+            if np.all(mesh.bounds[0] >= low - 1e-6) and np.all(mesh.bounds[1] <= high + 1e-6):
+                meshes[name] = mesh
+                break
+    return meshes
 
 
-def _disc(radius, y):
-    angles = np.linspace(0, 2 * np.pi, CIRCLE_SEGMENTS, endpoint=False)
-    return np.column_stack(
-        [radius * np.cos(angles), np.full_like(angles, y), radius * np.sin(angles)]
-    )
-
-
-def _local_faces(comp):
-    """Flat faces of one Union geometry, each an (N, 3) array of vertices."""
+def flat_planes(comp, matrix):
+    """(normals, points) of a volume's flat faces in world space, or None
+    when every face is flat (Union_mesh)."""
     t = comp.component_name.lower()
-    if t == "union_box":
-        return _box_faces(comp)
-    if t == "union_cylinder":
-        h = float(comp.yheight) / 2
-        r = float(comp.radius)
-        return [_disc(r, -h), _disc(r, h)]
-    if t == "union_cone":
-        h = float(comp.yheight) / 2
-        caps = [(float(comp.radius_bottom), -h), (float(comp.radius_top), h)]
-        return [_disc(r, y) for r, y in caps if r > 0]
+    R, c = matrix[:3, :3], matrix[:3, 3]
     if t == "union_mesh":
-        scale = float(comp.coordinate_scale) if comp.coordinate_scale is not None else 1e-3
-        mesh = trimesh.load(comp.filename, force="mesh")
-        return list(mesh.vertices[mesh.faces] * scale)
-    return []
+        return None
+    if t in ("union_cylinder", "union_cone"):
+        axis = R[:, 1]
+        h = float(comp.yheight) / 2
+        return np.array([axis, axis]), np.array([c - h * axis, c + h * axis])
+    if t == "union_box":
+        x1, y1, x2, y2 = box_dimensions(comp)
+        z = float(comp.zdepth) / 2
+        corners = np.array(
+            [[sx * x / 2, sy * y / 2, sz * z]
+             for sz, x, y in ((-1, x1, y1), (1, x2, y2))
+             for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        ) @ R.T + c
+        faces = [[0, 1, 2], [4, 5, 6], [0, 1, 5], [3, 2, 6], [0, 3, 7], [1, 2, 6]]
+        tri = corners[faces]
+        return np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]), tri[:, 0]
+    return np.zeros((0, 3)), np.zeros((0, 3))
 
 
-def _plane(points):
-    """Unit normal with a fixed sign convention, and offset d = n . p."""
-    centered = points - points.mean(axis=0)
-    normal = np.linalg.svd(centered)[2][-1]
-    if normal[np.argmax(np.abs(normal))] < 0:
-        normal = -normal
-    return normal, float(normal @ points[0])
+def _plane_keys(normals, points, tol):
+    """Unit normals with a fixed sign convention, and the integer bucket key
+    of each (normal, offset) plane."""
+    normals = normals / np.linalg.norm(normals, axis=1)[:, None]
+    flip = normals[np.arange(len(normals)), np.argmax(np.abs(normals), axis=1)] < 0
+    normals[flip] *= -1
+    offsets = np.einsum("ij,ij->i", normals, points)
+    # ponytail: planes are bucketed by rounding, so two planes that
+    # straddle a rounding boundary are missed; compare neighbouring
+    # buckets if that ever matters.
+    return np.round(np.column_stack([normals, offsets]) / tol).astype(np.int64)
 
 
-def _in_plane_polygon(points, normal):
+def _plane_basis(normal):
     u = np.cross(normal, [1.0, 0, 0] if abs(normal[0]) < 0.9 else [0, 1.0, 0])
     u /= np.linalg.norm(u)
-    v = np.cross(normal, u)
-    return Polygon(np.column_stack([points @ u, points @ v])).buffer(0)
+    return np.stack([u, np.cross(normal, u)])
 
 
-def find_coplanar_faces(union_geometries, world_matrices, tol=1e-9):
-    """Return [(name_a, name_b, normal, offset, overlap_area)] for every pair
-    of volumes that have overlapping flat faces in a common plane.
+def _triangles_overlap(a, b, eps):
+    """Do two 2D triangles (3, 2) overlap with positive area? Separating axis
+    test over the six edge normals; touching along an edge is not overlap."""
+    for tri in (a, b):
+        edges = np.roll(tri, -1, axis=0) - tri
+        for axis in np.column_stack([-edges[:, 1], edges[:, 0]]):
+            pa, pb = a @ axis, b @ axis
+            gap = eps * np.linalg.norm(axis)
+            if pa.max() <= pb.min() + gap or pb.max() <= pa.min() + gap:
+                return False
+    return True
 
+
+def find_coplanar_faces(meshes, planes=None, tol=1e-9):
+    """Return [(name_a, name_b, normal, offset, n_triangle_pairs)] for every
+    pair of meshes with overlapping triangles in a common plane.
+
+    planes: {name: (normals, points)} restricting a mesh to triangles in
+    those planes; a missing name or None keeps all its triangles.
     tol is the distance (m) within which two planes count as the same plane,
     and also the tolerance on the components of their unit normals."""
+    planes = planes or {}
     buckets = defaultdict(lambda: defaultdict(list))
-    for name, comp in union_geometries.items():
-        matrix = world_matrices[name]
-        for face in _local_faces(comp):
-            world = face @ matrix[:3, :3].T + matrix[:3, 3]
-            normal, offset = _plane(world)
-            # ponytail: planes are bucketed by rounding, so two planes that
-            # straddle a rounding boundary are missed; compare neighbouring
-            # buckets if that ever matters.
-            key = tuple(np.round(np.append(normal, offset) / tol).astype(np.int64))
-            buckets[key][name].append(_in_plane_polygon(world, normal))
+    for name, mesh in meshes.items():
+        triangles = np.asarray(mesh.vertices)[np.asarray(mesh.faces)]
+        normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+        keep = np.linalg.norm(normals, axis=1) > 0
+        triangles, normals = triangles[keep], normals[keep]
+        keys = _plane_keys(normals, triangles[:, 0], tol)
+        allowed = planes.get(name)
+        if allowed is not None:
+            allowed = set(map(tuple, _plane_keys(*allowed, tol))) if len(allowed[0]) else set()
+        for key, tri in zip(map(tuple, keys), triangles):
+            if allowed is None or key in allowed:
+                buckets[key][name].append(tri)
 
     found = []
     for key, per_volume in buckets.items():
         names = sorted(per_volume)
         if len(names) < 2:
             continue
-        shapes = {n: unary_union(per_volume[n]) for n in names}
         normal = np.array(key[:3]) * tol
-        offset = key[3] * tol
+        basis = _plane_basis(normal / np.linalg.norm(normal))
+        flat = {n: [t @ basis.T for t in per_volume[n]] for n in names}
         for i, a in enumerate(names):
             for b in names[i + 1:]:
-                area = shapes[a].intersection(shapes[b]).area
-                if area > 1e-9 * min(shapes[a].area, shapes[b].area):
-                    found.append((a, b, normal, offset, area))
+                # ponytail: all triangle pairs in one plane, O(n*m); add a 2D
+                # grid if huge flat meshes get slow.
+                hits = sum(
+                    _triangles_overlap(ta, tb, tol) for ta in flat[a] for tb in flat[b]
+                )
+                if hits:
+                    found.append((a, b, normal, key[3] * tol, hits))
     return found
 
 
@@ -134,12 +186,14 @@ def main(argv=None):
 
     from preprocess import preprocess
 
-    _instr, world_matrices, union_geometries = preprocess(args.input_file, verbose=False)
-    found = find_coplanar_faces(union_geometries, world_matrices, tol=args.tol)
-    for a, b, normal, offset, area in found:
+    instr, world_matrices, union_geometries = preprocess(args.input_file, verbose=False)
+    meshes = union_mesher_meshes(args.input_file, instr, union_geometries, world_matrices)
+    planes = {n: flat_planes(union_geometries[n], world_matrices[n]) for n in meshes}
+    found = find_coplanar_faces(meshes, planes, tol=args.tol)
+    for a, b, normal, offset, hits in found:
         print(
             f"{a} and {b}: coplanar faces, normal {np.round(normal, 6)}, "
-            f"offset {offset:.6g} m, overlap area {area:.3g} m^2"
+            f"offset {offset:.6g} m, {hits} overlapping triangle pairs"
         )
     if not found:
         print("No overlapping coplanar faces found.")
