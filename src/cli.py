@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mesher",
-        choices=("mc", "dc", "brep"),
+        choices=("mc", "dc", "brep", "union"),
         default="brep",
         help="Mesher used for export (default: brep)",
     )

@@ -8,7 +8,7 @@ from OCC.Core.gp import gp_Ax2, gp_Pnt, gp_Dir
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED
-from OCC.Core.BRep import BRep_Tool
+from OCC.Core.BRep import BRep_Builder, BRep_Tool
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pln
 from OCC.Core.BRepBuilderAPI import (
@@ -24,7 +24,7 @@ from OCC.Core.BRepAlgoAPI import (
 )
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_ThruSections
 from OCC.Core.TopAbs import TopAbs_SHELL
-from OCC.Core.TopoDS import Shell as topods_Shell
+from OCC.Core.TopoDS import TopoDS_Compound, Shell as topods_Shell
 import trimesh
 import numpy as np
 import os
@@ -33,6 +33,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
+from union_clip import mask_mode_any
 
 
 def _mesh_to_brep(mesh, name, verbose=False):
@@ -64,8 +65,16 @@ def _mesh_to_brep(mesh, name, verbose=False):
     sewing.Perform()
     shape = sewing.SewedShape()
 
-    if shape.ShapeType() != TopAbs_SHELL:
-        # Sewing didn't produce a single closed shell (e.g. a non-watertight
+    # A mesh of several separate bodies sews into a compound of shells:
+    # each shell becomes its own solid, collected in a compound of solids.
+    shells = []
+    explorer = TopExp_Explorer(shape, TopAbs_SHELL)
+    while explorer.More():
+        shells.append(topods_Shell(explorer.Current()))
+        explorer.Next()
+
+    if not shells:
+        # Sewing didn't produce any closed shell (e.g. a non-watertight
         # mesh) - fall back to the sewn shape as-is rather than raising, so
         # a slightly-open mesh still degrades gracefully.
         if verbose:
@@ -73,13 +82,24 @@ def _mesh_to_brep(mesh, name, verbose=False):
                   f"using the sewn shape as-is.")
         return shape
 
-    solid_maker = BRepBuilderAPI_MakeSolid(topods_Shell(shape))
-    if not solid_maker.IsDone():
-        if verbose:
-            print(f"Warning: could not close mesh '{name}' into a solid; "
-                  f"using the sewn shell as-is.")
-        return shape
-    return solid_maker.Solid()
+    solids = []
+    for shell in shells:
+        solid_maker = BRepBuilderAPI_MakeSolid(shell)
+        if not solid_maker.IsDone():
+            if verbose:
+                print(f"Warning: could not close mesh '{name}' into a solid; "
+                      f"using the sewn shape as-is.")
+            return shape
+        solids.append(solid_maker.Solid())
+
+    if len(solids) == 1:
+        return solids[0]
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    for solid in solids:
+        builder.Add(compound, solid)
+    return compound
 
 
 def _rectangle_wire(center, x_dir, y_dir, width, height):
@@ -185,11 +205,8 @@ def get_mask_comps(focus_comp, union_geometries):
             continue
         if focus_comp.name in comp.mask_string:
             mask_comps.append(comp)
-    for mask in mask_comps:
-        if mask.mask_setting == "All":
-            mask_setting = mask.mask_setting
-    if mask_setting == "No" and len(mask_comps)>0:
-        mask_setting = "Any"
+    if mask_comps:
+        mask_setting = "Any" if mask_mode_any(mask_comps) else "All"
     return mask_comps, mask_setting
 
 def intersect_with_masks(shape, mask_comps, mask_setting):
@@ -244,11 +261,16 @@ def build_mask_comps(mask_comps, world_matrices):
 
     return breps
 
-def build_higher_priorities(higher_priorities, world_matrices):
+def build_higher_priorities(higher_priorities, union_geometries, world_matrices):
+    """Each cutter's solid, limited to its own masks when it is masked."""
     breps = []
-    for i, comp in enumerate(higher_priorities):
-        brep = build_comp_brep(comp, world_matrices)
-        breps.append(brep)
+    for comp in higher_priorities:
+        mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
+        breps.append(intersect_with_masks(
+            build_comp_brep(comp, world_matrices),
+            build_mask_comps(mask_comps, world_matrices),
+            mask_setting,
+        ))
     return breps
 
 
@@ -306,9 +328,11 @@ def build_single_brep_mesh(
     if world_bboxes is None:
         world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
     # Only a higher-priority component whose world bbox actually overlaps
-    # this one can change the result of subtracting it.
+    # this one can change the result of subtracting it. Masks never cut:
+    # they only limit the components they mask.
     candidates = [
-        x.name for n, x in union_geometries.items() if x.priority > comp.priority
+        x.name for n, x in union_geometries.items()
+        if x.priority > comp.priority and getattr(x, "mask_string", None) is None
     ]
     higher_priority = [
         union_geometries[n] for n in overlapping(comp.name, candidates, world_bboxes)
@@ -316,35 +340,18 @@ def build_single_brep_mesh(
     res_comp = build_comp_brep(comp, world_matrices)
     mask_comps, mask_setting = get_mask_comps(comp, union_geometries)
     mask_comps = build_mask_comps(mask_comps, world_matrices)
-    prio_breps = build_higher_priorities(higher_priority, world_matrices)
+    prio_breps = build_higher_priorities(higher_priority, union_geometries, world_matrices)
     res_comp = subtract_higher_priorities(res_comp, prio_breps)
     res_comp = intersect_with_masks(res_comp, mask_comps, mask_setting)
     res_comp = clip_component(res_comp, clip)
 
-    mesh = brep_to_mesh(res_comp, deflection)
-    if mesh is None:
-        print(f"WARNING: empty mesh for {comp.name}")
-    return mesh
-
-
-def build_uncarved_brep_meshes(union_geometries, world_matrices, deflection=0.01):
-    """{name: mesh} of every component and mask on its own, without the
-    priority subtraction or mask intersection."""
-    return {
-        name: brep_to_mesh(build_comp_brep(comp, world_matrices), deflection)
-        for name, comp in union_geometries.items()
-    }
-
-
-def brep_to_mesh(shape, deflection=0.01):
-    """Triangulate a shape into a trimesh, or None when it has no faces."""
-    BRepMesh_IncrementalMesh(shape, deflection).Perform()
+    BRepMesh_IncrementalMesh(res_comp, deflection).Perform()
     vertices = []
     faces = []
 
     vertex_offset = 0
 
-    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    explorer = TopExp_Explorer(res_comp, TopAbs_FACE)
 
     while explorer.More():
         face = explorer.Current()
@@ -383,8 +390,15 @@ def brep_to_mesh(shape, deflection=0.01):
 
         explorer.Next()
     if len(vertices) == 0 or len(faces) == 0:
+        print(f"WARNING: empty mesh for {comp.name}")
         return None
-    return trimesh.Trimesh(vertices=vertices, faces=faces)
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    # OCC leaves zero-area triangles at the poles of spheres; they make an
+    # otherwise closed mesh non-watertight, so clipped exports can't be capped.
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.remove_unreferenced_vertices()
+
+    return mesh
 
 
 _CLASS_SPEC_ATTRS = (

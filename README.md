@@ -64,12 +64,12 @@ needs a working McStas install and compiler.
 
 Union volumes whose surfaces coincide confuse Union's ray tracing. Each time
 the viewer builds its meshes, it prints a warning in the terminal for every
-pair of Union components (masks included) whose surfaces share triangles in
-a common plane. The check meshes each component on its own with the brep
-mesher, without cutting out higher priorities, so a volume nested inside
-another is not reported, while touching volumes and faces flush with
-another volume's are. Coaxial cylinders of equal radius and identical
-spheres are found through their matching tessellation.
+pair of Union components whose surfaces share triangles in a common plane.
+The check uses the union mesher's surfaces without cut walls, which keep
+each surface only where its component has the highest priority: touching
+volumes are reported, while a volume nested inside another is not, and
+neither is a surface hidden just inside a higher-priority volume. Masks are
+not meshed, so they are not checked.
 
 If `unviz` reports `No module named coplanar`, your environment was
 installed before this module existed: run `python -m pip install -e .` again.

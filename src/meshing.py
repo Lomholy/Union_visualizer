@@ -5,6 +5,7 @@ from plot_union_cloud import sdf_normal
 from bounding_box import compute_world_bbox
 from dual_cont import build_mesh_dual
 from brep import build_brep_meshes, build_single_brep_mesh
+from union_clip import build_union_meshes
 
 
 # What each mesher's dock controls actually do.
@@ -12,18 +13,28 @@ MESHER_CAPABILITIES = {
     "mc": {
         "resolution": True,
         "deflection": False,
+        "close_cuts": False,
         "clip": True,
         "incremental_rebuild": True,
     },
     "dc": {
         "resolution": False,
         "deflection": False,
+        "close_cuts": False,
         "clip": True,
         "incremental_rebuild": False,
     },
     "brep": {
         "resolution": False,
         "deflection": True,
+        "close_cuts": False,
+        "clip": True,
+        "incremental_rebuild": True,
+    },
+    "union": {
+        "resolution": False,
+        "deflection": False,
+        "close_cuts": True,
         "clip": True,
         "incremental_rebuild": True,
     },
@@ -71,10 +82,16 @@ def build_mesh(
     mesher="mc",
     deflection=DEFAULT_BREP_DEFLECTION,
     world_bboxes=None,
+    close_cuts=False,
 ):
     if verbose:
         print(f"build single mesh! Building {comp.name}!")
     name = comp.name
+    if mesher == "union":
+        return build_union_meshes(
+            union_geometries, world_matrices, clip, verbose,
+            world_bboxes=world_bboxes, names=[name], close_cuts=close_cuts,
+        )[name]
     if comp.component_name == "Union_mesh":
         mesh = trimesh.load_mesh(comp.filename.strip('"'))
         if comp.coordinate_scale is None:
@@ -141,6 +158,7 @@ def build_all_meshes(
     mesher="brep",
     deflection=DEFAULT_BREP_DEFLECTION,
     world_bboxes=None,
+    close_cuts=False,
 ):
     meshes_dict = {}
     if mesher == "dc":
@@ -151,6 +169,11 @@ def build_all_meshes(
             world_matrices,
             out_file,
             meshes_dict,
+        )
+    if mesher == "union":
+        meshes_dict = build_union_meshes(
+            union_geometries, world_matrices, clip, verbose, world_bboxes=world_bboxes,
+            close_cuts=close_cuts,
         )
     if mesher == "brep":
         meshes_dict = build_brep_meshes(

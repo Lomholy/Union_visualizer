@@ -23,12 +23,6 @@ AT (0,0,0) RELATIVE sample
 COMPONENT touch_b = Union_box(priority = 20, xwidth = 0.1, yheight = 0.1, zdepth = 0.1, material_string = "mat")
 AT (0.1,0,0) RELATIVE sample
 
-COMPONENT apart = Union_box(priority = 30, xwidth = 0.1, yheight = 0.1, zdepth = 0.1, material_string = "mat")
-AT (0,0.3,0) RELATIVE sample
-
-COMPONENT apart_mask = Union_box(priority = 40, xwidth = 0.1, yheight = 0.1, zdepth = 0.1, mask_string = "apart", mask_setting = "ALL")
-AT (0,0.3,0.1) RELATIVE sample
-
 COMPONENT nested_outer = Union_box(priority = 50, xwidth = 0.2, yheight = 0.2, zdepth = 0.2, material_string = "mat")
 AT (0,-0.5,0) RELATIVE sample
 

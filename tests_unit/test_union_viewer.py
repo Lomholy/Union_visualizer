@@ -1,5 +1,6 @@
-"""Tests for union_viewer.py's non-GUI logic: compute_trace_data, the
-worker-process side of the trace pool, needs no display to run.
+"""Tests for the viewer's non-GUI logic (pipeline.py, scene_objects.py,
+camera.py): compute_trace_data, the worker-process side of the trace pool,
+needs no display to run.
 
 The GUI itself is not unit-testable without a display, so its own wiring
 was exercised interactively with QT_QPA_PLATFORM=offscreen against real
@@ -19,56 +20,41 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-import union_viewer as uv  # noqa: E402
+import pipeline  # noqa: E402
+import scene_objects  # noqa: E402
+import pygfx as gfx  # noqa: E402
+from camera import (  # noqa: E402
+    CAMERA_FAR,
+    CAMERA_NEAR,
+    fit_camera_to_scene,
+    update_camera_depth_range,
+)
 from logger_output import LoggerCounts  # noqa: E402
 
 
-class BuildRayGroupStylingTest(unittest.TestCase):
-    @staticmethod
-    def _rays():
-        from mcstas_trace import STATE, SCATTER, ABSORB
-        from types import SimpleNamespace
-        return SimpleNamespace(
-            n_rays=1,
-            points=np.array([[0, 0, 0], [0, 0, 1], [0, 0, 2]], dtype=float),
-            ray_offsets=np.array([0, 3]),
-            kind=np.array([STATE, SCATTER, ABSORB]),
-            speed=np.ones(3), weight=np.ones(3), time=np.ones(3),
-        )
-
-    def test_custom_colors_and_sizes_are_applied(self):
-        group, _ = uv.build_ray_group(
-            self._rays(), np.array([0]), "Uniform",
-            colors={"scatter": "#112233", "absorb": "#445566"},
-            marker_sizes={"scatter": 11, "absorb": 13},
-        )
-        self.assertEqual(group.scatter_points.material.size, 11)
-        self.assertEqual(group.absorb_points.material.size, 13)
-        self.assertEqual(group.scatter_points.material.color.hex, "#112233")
-        self.assertEqual(group.absorb_points.material.color.hex, "#445566")
-
-    def test_defaults_when_unspecified(self):
-        group, _ = uv.build_ray_group(self._rays(), np.array([0]), "Uniform")
-        self.assertEqual(group.scatter_points.material.size, uv.SCATTER_MARKER_SIZE)
-        self.assertEqual(group.absorb_points.material.size, uv.ABSORB_MARKER_SIZE)
-
-
-@unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")
 class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
-    def test_coinciding_faces_are_warned_about(self):
+    def warned(self, close_cuts):
         instr = ROOT / "tests_unit" / "data" / "coincident_faces_test.instr"
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            uv.compute_mesh_data(str(instr), uv.NO_CLIP, verbose=False)
-        warned = [
+            pipeline.compute_mesh_data(
+                str(instr), pipeline.NO_CLIP, verbose=False, mesher="union", close_cuts=close_cuts
+            )
+        return sorted(
             line.split("'")[1:4:2] for line in out.getvalue().splitlines()
             if line.startswith("Warning: Union components")
-        ]
-        # nested_inner sits inside nested_outer without touching its faces,
-        # so the cavity cut out of nested_outer must not count.
-        self.assertEqual(sorted(warned), [["apart", "apart_mask"], ["touch_a", "touch_b"]])
+        )
+
+    def test_touching_volumes_are_warned_about_but_nested_ones_are_not(self):
+        # nested_inner sits inside nested_outer without touching its faces, so
+        # the hole it leaves in nested_outer, closed by a wall with close_cuts,
+        # must not count.
+        for close_cuts in (False, True):
+            with self.subTest(close_cuts=close_cuts):
+                self.assertEqual(self.warned(close_cuts), [["touch_a", "touch_b"]])
 
 
+@unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")
 class ComputeTraceDataTest(unittest.TestCase):
     def test_all_requested_rays_are_kept(self):
         # trace_instrument's own max_rays defaults to 1000 (meant for a
@@ -79,7 +65,7 @@ class ComputeTraceDataTest(unittest.TestCase):
             instr = os.path.join(tmp, "simple_test.instr")
             shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
             try:
-                _, rays = uv.compute_trace_data(instr, False, [], 1200, 7)
+                _, rays = pipeline.compute_trace_data(instr, False, [], 1200, 7)
             except Exception as e:
                 self.skipTest(f"mcrun could not compile here: {e}")
         self.assertEqual(rays.n_rays, 1200)
@@ -93,7 +79,7 @@ class BuildCountsGroupTest(unittest.TestCase):
         }
         world_matrices = {"logger_a": np.eye(4), "logger_b": np.eye(4)}
 
-        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
+        group, meshes, textures = scene_objects.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
 
         self.assertEqual(set(meshes), {"logger_a", "logger_b"})
         self.assertEqual(set(textures), {"logger_a", "logger_b"})
@@ -110,7 +96,7 @@ class BuildCountsGroupTest(unittest.TestCase):
         }
         world_matrices = {"matched": np.eye(4)}
 
-        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
+        group, meshes, textures = scene_objects.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
 
         self.assertEqual(set(meshes), {"matched"})
         self.assertEqual(len(group.children), 1)
@@ -121,7 +107,7 @@ class BuildCountsGroupTest(unittest.TestCase):
         }
         world_matrix = np.eye(4)
         world_matrix[:3, 3] = (10, 20, 30)  # pure translation
-        _, meshes, _ = uv.build_counts_group(counts, {"logger_a": world_matrix}, vmin=0, vmax=1)
+        _, meshes, _ = scene_objects.build_counts_group(counts, {"logger_a": world_matrix}, vmin=0, vmax=1)
 
         positions = meshes["logger_a"].geometry.positions.data
         # x in [-1, 1] -> world x in [9, 11]; y in [-2, 2] -> world y in
@@ -136,12 +122,12 @@ class BuildCountsGroupTest(unittest.TestCase):
         counts = {
             "strip": LoggerCounts("strip", "Monitor_nD", "y", None, (-1, 1), np.array([1.0, 2.0, 3.0])),
         }
-        group, meshes, textures = uv.build_counts_group(counts, {"strip": np.eye(4)}, vmin=0, vmax=3)
+        group, meshes, textures = scene_objects.build_counts_group(counts, {"strip": np.eye(4)}, vmin=0, vmax=3)
 
         self.assertEqual(set(meshes), {"strip"})
         self.assertNotIn("strip", textures)  # a line has no texture to restyle
         line = meshes["strip"]
-        self.assertIsInstance(line, uv.gfx.Line)
+        self.assertIsInstance(line, gfx.Line)
         positions = line.geometry.positions.data
         self.assertEqual(len(positions), 6)  # 3 bins -> 3 segments -> 6 endpoints
         np.testing.assert_allclose(positions[:, 1].min(), -1.0)
@@ -149,18 +135,6 @@ class BuildCountsGroupTest(unittest.TestCase):
         # x, z (the unlisted axes) are 0 in this identity-placed detector's world frame.
         np.testing.assert_array_equal(positions[:, 0], np.zeros(6))
         np.testing.assert_array_equal(positions[:, 2], np.zeros(6))
-
-    def test_1d_and_2d_detectors_can_be_mixed_in_one_group(self):
-        counts = {
-            "plane": LoggerCounts("plane", "PSD_monitor", "x", "y", (-1, 1, -1, 1), np.ones((2, 2))),
-            "line": LoggerCounts("line", "Monitor_nD", "x", None, (-1, 1), np.ones(2)),
-        }
-        world_matrices = {"plane": np.eye(4), "line": np.eye(4)}
-        group, meshes, textures = uv.build_counts_group(counts, world_matrices, vmin=0, vmax=1)
-
-        self.assertEqual(set(meshes), {"plane", "line"})
-        self.assertEqual(set(textures), {"plane"})
-        self.assertEqual(len(group.children), 2)
 
 
 class FitCameraToSceneTest(unittest.TestCase):
@@ -183,13 +157,149 @@ class FitCameraToSceneTest(unittest.TestCase):
         target = None
 
     def fit(self, bbox):
+        """Fit a camera to bbox, then set its depth range the way the
+        viewer's render loop does every frame."""
         camera = self.FakeCamera()
-        uv.fit_camera_to_scene(camera, self.FakeController(), self.FakeScene(np.array(bbox, dtype=float)))
+        controller = self.FakeController()
+        fit_camera_to_scene(camera, controller, self.FakeScene(np.array(bbox, dtype=float)))
+        update_camera_depth_range(camera, controller.target)
         return camera
 
     def test_near_plane_is_positive(self):
         camera = self.fit([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
         self.assertGreater(camera.depth_range[0], 0)
+        self.assertEqual(camera.depth_range[1], CAMERA_FAR)
+
+    def test_near_plane_grows_with_distance_to_the_target(self):
+        camera = self.FakeCamera()
+        camera.local.position = np.array([0.0, 0.0, 1.0])
+        update_camera_depth_range(camera, np.zeros(3))
+        self.assertEqual(camera.depth_range[0], CAMERA_NEAR)
+        camera.local.position = np.array([0.0, 0.0, 1000.0])
+        update_camera_depth_range(camera, np.zeros(3))
+        self.assertAlmostEqual(camera.depth_range[0], 10.0)
+
+
+class BuildGfxGroupOffsetTest(unittest.TestCase):
+    def test_coincident_opposite_faces_are_drawn_apart(self):
+        # A cavity wall and the surface it was cut from: same triangle,
+        # opposite winding. Drawn, they must no longer coincide.
+        import trimesh
+
+        vertices = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        surface = trimesh.Trimesh(vertices, [[0, 1, 2]], process=False)
+        cavity = trimesh.Trimesh(vertices, [[0, 2, 1]], process=False)
+        group = scene_objects.build_gfx_group(
+            {"Al": surface, "Air": cavity}, {"Al": False, "Air": False}, {}
+        )
+        z = {k: group.geometry_meshes[k].geometry.positions.data[:, 2] for k in ("Al", "Air")}
+        np.testing.assert_allclose(z["Al"] - z["Air"], 2 * scene_objects.RENDER_OFFSET, atol=1e-7)
+
+
+class FeatureEdgesTest(unittest.TestCase):
+    def test_box_has_its_twelve_edges(self):
+        import trimesh
+
+        mesh = trimesh.creation.box()
+        edges = scene_objects.feature_edges(mesh)
+        self.assertEqual(len(edges), 12)
+        lengths = np.linalg.norm(np.diff(mesh.vertices[edges], axis=1)[:, 0], axis=1)
+        np.testing.assert_allclose(lengths, 1.0)
+
+    def test_smooth_sphere_has_none_and_draws_no_lines(self):
+        import trimesh
+
+        mesh = trimesh.creation.icosphere(subdivisions=3)
+        self.assertEqual(len(scene_objects.feature_edges(mesh)), 0)
+        group = scene_objects.build_gfx_group({"Al": mesh}, {"Al": False}, {})
+        self.assertEqual(group.edge_lines, [])
+
+    def test_open_boundary_is_drawn(self):
+        import trimesh
+
+        triangle = trimesh.Trimesh([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]], process=False)
+        self.assertEqual(len(scene_objects.feature_edges(triangle)), 3)
+
+
+class RulerTest(unittest.TestCase):
+    def _box_pick(self, target):
+        """A unit box viewed down -z and a pick at the pixel showing target
+        (a point on its +z face), as renderer.get_pick_info would give."""
+        import trimesh
+
+        mesh = gfx.Mesh(gfx.geometry_from_trimesh(trimesh.creation.box()), gfx.MeshBasicMaterial())
+        camera = gfx.PerspectiveCamera(50)
+        camera.local.position = (0.3, -0.2, 4)
+        camera.look_at((0, 0, 0))
+        camera.set_view_size(400, 300)
+        clip = camera.camera_matrix @ np.array([*target, 1.0])
+        ndc = clip[:3] / clip[3]
+        indices = mesh.geometry.indices.data
+        corners = mesh.geometry.positions.data[indices]
+        for face_index, tri in enumerate(corners):
+            if np.allclose(tri[:, 2], 0.5):
+                coord = np.linalg.lstsq(np.vstack([tri[:, :2].T, np.ones(3)]), [*target[:2], 1.0], rcond=None)[0]
+                if np.all(coord >= -1e-9):
+                    break
+        pick = {"world_object": mesh, "face_index": face_index, "face_coord": tuple(np.round(coord * 511) / 511)}
+        return pick, camera, ndc[:2]
+
+    def test_pick_lands_exactly_on_the_surface(self):
+        target = np.array([0.123, -0.271, 0.5])
+        pick, camera, ndc = self._box_pick(target)
+        point = scene_objects.pick_world_point(pick, camera, ndc)
+        np.testing.assert_allclose(point, target, atol=1e-6)
+
+    def test_pick_snaps_to_the_undrawn_surface(self):
+        import trimesh
+
+        target = np.array([0.123, -0.271, 0.5])
+        pick, camera, ndc = self._box_pick(target)
+        smaller = trimesh.creation.box((0.9, 0.9, 0.9))
+        point = scene_objects.pick_world_point(pick, camera, ndc, (smaller.vertices, smaller.faces))
+        self.assertAlmostEqual(point[2], 0.45, places=9)
+        origin, direction = scene_objects.view_ray(camera, ndc)
+        np.testing.assert_allclose(np.cross(point - origin, direction), 0, atol=1e-9)
+
+    def test_pick_follows_the_mesh_transform(self):
+        target = np.array([0.2, 0.1, 0.5])
+        pick, camera, ndc = self._box_pick(target)
+        pick["world_object"].local.position = (0, 0, 0)  # identity: same answer
+        point = scene_objects.pick_world_point(pick, camera, ndc)
+        np.testing.assert_allclose(point, target, atol=1e-6)
+
+    def test_non_mesh_pick_is_ignored(self):
+        self.assertIsNone(scene_objects.pick_world_point({"world_object": None}, gfx.PerspectiveCamera(), (0, 0)))
+
+
+class TriangleLinesTest(unittest.TestCase):
+    """Settings > Show triangle lines: a black wireframe over every Union mesh."""
+
+    def build(self):
+        import trimesh
+
+        meshes = {"a": trimesh.creation.box(), "b": trimesh.creation.icosphere()}
+        return scene_objects.build_gfx_group(meshes, {"a": False, "b": False}, {})
+
+    def wireframes(self, group):
+        return [c for m in group.geometry_meshes.values() for c in m.children
+                if getattr(c.material, "wireframe", False)]
+
+    def test_every_mesh_gets_a_hidden_black_wireframe(self):
+        group = self.build()
+        wires = self.wireframes(group)
+        self.assertEqual(len(wires), 2)
+        for wire, mesh in zip(wires, group.geometry_meshes.values()):
+            self.assertFalse(wire.visible)
+            self.assertIs(wire.geometry, mesh.geometry)
+            self.assertEqual(tuple(wire.material.color)[:3], (0.0, 0.0, 0.0))
+
+    def test_toggle_shows_and_hides_them(self):
+        group = self.build()
+        scene_objects.set_triangle_lines(group, True)
+        self.assertTrue(all(w.visible for w in self.wireframes(group)))
+        scene_objects.set_triangle_lines(group, False)
+        self.assertFalse(any(w.visible for w in self.wireframes(group)))
 
 
 if __name__ == "__main__":
