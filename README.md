@@ -60,6 +60,17 @@ component (sources, guides, slits, monitors, ...) is included too, drawn
 the same way the GUI's "Show McStas components" option draws them, so it
 needs a working McStas install and compiler.
 
+### Checking for coplanar faces
+
+Union volumes whose flat faces lie in the same plane and overlap confuse
+Union's ray tracing. To list every such pair of volumes, run:
+
+```console
+python -m coplanar my_mcstas_instr.instr
+```
+
+It checks box faces, cylinder and cone end caps, and mesh triangles. Curved
+surfaces are not checked. The command exits with status 1 when it finds a pair.
 
 ## GUI options
 

@@ -23,6 +23,7 @@ py-modules = [
     "brep",
     "cli",
     "clipping",
+    "coplanar",
     "dual_cont",
     "gui_helpers",
     "logger_output",
