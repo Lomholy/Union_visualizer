@@ -227,6 +227,39 @@ class TestIncrementalRebuild(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class TestCloseCuts(unittest.TestCase):
+    # Mesher Options > Close cut surfaces: walls where higher priorities and masks cut a component
+    def build_closed(self, comps, matrices=None, close_cuts=True):
+        geoms = {c.name: c for c in comps}
+        world = {name: (matrices or {}).get(name, np.eye(4)) for name in geoms}
+        with contextlib.redirect_stdout(io.StringIO()):
+            return meshing.build_all_meshes(
+                geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union", close_cuts=close_cuts,
+            )
+
+    def test_cut_box_is_closed_by_a_wall(self):
+        # A (cube of side 2) with x > 0.1 taken by B: the wall at x = 0.1 closes it
+        a = box("a", 2, 2, 2, priority=1)
+        b = box("b", 2, 2.5, 2.5, priority=2)
+        mesh = self.build_closed([a, b], {"b": translation(x=1.1)}).get("a")
+        self.assertAlmostEqual(area(mesh) / (4 + 4 * 2 * 1.1 + 4), 1, delta=5e-4)
+        self.assertAlmostEqual(mesh.volume / (2 * 2 * 1.1), 1, delta=5e-4)
+
+    def test_masked_box_is_closed_by_its_masks(self):
+        # A masked by M1 (x < -0.1) and M2 (y < -0.1), ALL: a closed 0.9 x 0.9 x 2 block
+        a = box("a", 2, 2, 2, priority=1)
+        m1 = box("m1", 2, 3, 3, mask_string="a")
+        m2 = box("m2", 3, 2, 3, mask_string="a")
+        mesh = self.build_closed([a, m1, m2], {"m1": translation(x=-1.1), "m2": translation(y=-1.1)}).get("a")
+        self.assertAlmostEqual(mesh.volume / (0.9 * 0.9 * 2), 1, delta=5e-4)
+        self.assertAlmostEqual(area(mesh) / (2 * 0.9 * 0.9 + 4 * 0.9 * 2), 1, delta=5e-4)
+
+    def test_off_by_default(self):
+        a = box("a", 2, 2, 2, priority=1)
+        b = box("b", 2, 2.5, 2.5, priority=2)
+        self.assertAlmostEqual(area(build([a, b], {"b": translation(x=1.1)}).get("a")), 4 + 4 * 2 * 1.1, places=6)
+
+
 class TestClipBox(unittest.TestCase):
     # R4: the clip plane removes its side of every component
     def test_clip_removes_side(self):
