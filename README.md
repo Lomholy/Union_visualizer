@@ -71,6 +71,8 @@ python -m coplanar my_mcstas_instr.instr
 
 It checks box faces, cylinder and cone end caps, and mesh triangles. Curved
 surfaces are not checked. The command exits with status 1 when it finds a pair.
+If Python reports `No module named coplanar`, your environment was installed
+before this module existed: run `python -m pip install -e .` again.
 
 ## GUI options
 
