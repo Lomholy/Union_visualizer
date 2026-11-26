@@ -56,7 +56,7 @@ from panels import (
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self, input_file=None, settings=None):
+    def __init__(self, input_file=None, settings=None, mesher="brep"):
         super().__init__()
         self.settings = settings or QtCore.QSettings("unviz", "union_viewer")
         self.setWindowTitle("Union Viewer")
@@ -174,7 +174,7 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
         self.settings_panel = SettingsPanel()
         self.params_panel = ParametersPanel()
-        self.mesher_panel = MesherPanel()
+        self.mesher_panel = MesherPanel(mesher)
         self.clipping_panel = ClippingPanel()
         self.ruler_panel = RulerPanel()
         self.rays_panel = RaysPanel()
@@ -1019,13 +1019,13 @@ def parse():
     return parser
 
 
-def launch(input_file=None):
+def launch(input_file=None, mesher="brep"):
     """Create the application and open the interactive Union viewer."""
     app = QtWidgets.QApplication([sys.argv[0]])
 
     app.setAttribute(QtCore.Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
 
-    viewer = Viewer(input_file=input_file)
+    viewer = Viewer(input_file=input_file, mesher=mesher)
     viewer.show()
     return app.exec()
 
