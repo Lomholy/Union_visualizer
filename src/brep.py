@@ -321,13 +321,30 @@ def build_single_brep_mesh(
     res_comp = intersect_with_masks(res_comp, mask_comps, mask_setting)
     res_comp = clip_component(res_comp, clip)
 
-    BRepMesh_IncrementalMesh(res_comp, deflection).Perform()
+    mesh = brep_to_mesh(res_comp, deflection)
+    if mesh is None:
+        print(f"WARNING: empty mesh for {comp.name}")
+    return mesh
+
+
+def build_uncarved_brep_meshes(union_geometries, world_matrices, deflection=0.01):
+    """{name: mesh} of every component and mask on its own, without the
+    priority subtraction or mask intersection."""
+    return {
+        name: brep_to_mesh(build_comp_brep(comp, world_matrices), deflection)
+        for name, comp in union_geometries.items()
+    }
+
+
+def brep_to_mesh(shape, deflection=0.01):
+    """Triangulate a shape into a trimesh, or None when it has no faces."""
+    BRepMesh_IncrementalMesh(shape, deflection).Perform()
     vertices = []
     faces = []
 
     vertex_offset = 0
 
-    explorer = TopExp_Explorer(res_comp, TopAbs_FACE)
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
 
     while explorer.More():
         face = explorer.Current()
@@ -366,11 +383,8 @@ def build_single_brep_mesh(
 
         explorer.Next()
     if len(vertices) == 0 or len(faces) == 0:
-        print(f"WARNING: empty mesh for {comp.name}")
         return None
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-
-    return mesh
+    return trimesh.Trimesh(vertices=vertices, faces=faces)
 
 
 _CLASS_SPEC_ATTRS = (

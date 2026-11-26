@@ -13,7 +13,7 @@ from preprocess import preprocess, instrument_parameters
 from clipping import resolve_clip_frame
 from signed_distance_functions import build_sdfs
 from meshing import build_all_meshes, build_mesh, MESHER_CAPABILITIES, DEFAULT_BREP_DEFLECTION
-from brep import build_many_brep_meshes
+from brep import build_many_brep_meshes, build_uncarved_brep_meshes
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
 from coplanar import find_coincident_faces
 from gui_helpers import (
@@ -194,7 +194,11 @@ def compute_mesh_data(
                 )
     dependencies = new_dependencies
 
-    for a, b, shared in find_coincident_faces(meshes):
+    # The displayed meshes have higher priorities cut out, which leaves every
+    # cavity coinciding with its cutter, and mc/dc only approximate surfaces;
+    # uncarved brep meshes have exact flat faces.
+    uncarved = build_uncarved_brep_meshes(union_geometries, world_matrices, deflection)
+    for a, b, shared in find_coincident_faces(uncarved):
         print(
             f"Warning: Union components '{a}' and '{b}' have coinciding faces "
             f"in {len(shared)} plane(s); Union's ray tracing is ambiguous there."

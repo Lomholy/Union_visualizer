@@ -6,6 +6,8 @@ was exercised interactively with QT_QPA_PLATFORM=offscreen against real
 test instruments while implementing changes to it.
 """
 
+import contextlib
+import io
 import os
 import shutil
 import sys
@@ -52,6 +54,21 @@ class BuildRayGroupStylingTest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("mcrun"), "mcrun not on PATH")
+class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
+    def test_coinciding_faces_are_warned_about(self):
+        instr = ROOT / "tests_unit" / "data" / "coincident_faces_test.instr"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            uv.compute_mesh_data(str(instr), uv.NO_CLIP, verbose=False)
+        warned = [
+            line.split("'")[1:4:2] for line in out.getvalue().splitlines()
+            if line.startswith("Warning: Union components")
+        ]
+        # nested_inner sits inside nested_outer without touching its faces,
+        # so the cavity cut out of nested_outer must not count.
+        self.assertEqual(sorted(warned), [["apart", "apart_mask"], ["touch_a", "touch_b"]])
+
+
 class ComputeTraceDataTest(unittest.TestCase):
     def test_all_requested_rays_are_kept(self):
         # trace_instrument's own max_rays defaults to 1000 (meant for a

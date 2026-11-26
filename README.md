@@ -62,28 +62,17 @@ needs a working McStas install and compiler.
 
 ### Checking for coincident surfaces
 
-Union volumes whose surfaces coincide confuse Union's ray tracing. To list
-every such pair of volumes and masks, run:
+Union volumes whose surfaces coincide confuse Union's ray tracing. Each time
+the viewer builds its meshes, it prints a warning in the terminal for every
+pair of Union components (masks included) whose surfaces share triangles in
+a common plane. The check meshes each component on its own with the brep
+mesher, without cutting out higher priorities, so a volume nested inside
+another is not reported, while touching volumes and faces flush with
+another volume's are. Coaxial cylinders of equal radius and identical
+spheres are found through their matching tessellation.
 
-```console
-python -m coplanar my_mcstas_instr.instr
-```
-
-Flat faces (box faces, cylinder and cone end caps, mesh faces) are reported
-when they lie in the same plane and overlap. The check runs the instrument
-with `mcrun --trace=2` and compares the triangles of Union's own mesher, so
-faces hidden inside a higher-priority volume are ignored. Masks and volumes
-with `visualize=0`, which Union does not draw, are compared on their full
-shapes instead.
-
-Curved surfaces are reported when cylinder or cone sides share an axis line
-and radius along part of their length, or when two spheres have the same
-centre and radius. This is decided from the geometry parameters, so a
-curved surface hidden by a higher-priority volume is still reported.
-
-The command exits with status 1 when it finds a pair.
-If Python reports `No module named coplanar`, your environment was installed
-before this module existed: run `python -m pip install -e .` again.
+If `unviz` reports `No module named coplanar`, your environment was
+installed before this module existed: run `python -m pip install -e .` again.
 
 ## GUI options
 
