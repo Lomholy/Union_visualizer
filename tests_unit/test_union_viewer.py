@@ -35,15 +35,11 @@ from logger_output import LoggerCounts  # noqa: E402
 class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
     def warned(self, close_cuts):
         instr = ROOT / "tests_unit" / "data" / "coincident_faces_test.instr"
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            pipeline.compute_mesh_data(
+        with contextlib.redirect_stdout(io.StringIO()):
+            *_, instrument_info = pipeline.compute_mesh_data(
                 str(instr), pipeline.NO_CLIP, verbose=False, mesher="union", close_cuts=close_cuts
             )
-        return sorted(
-            line.split("'")[1:4:2] for line in out.getvalue().splitlines()
-            if line.startswith("Warning: Union components")
-        )
+        return sorted(warning.split("'")[1:4:2] for warning in instrument_info["warnings"])
 
     def test_touching_volumes_are_warned_about_but_nested_ones_are_not(self):
         # nested_inner sits inside nested_outer without touching its faces, so
