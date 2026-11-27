@@ -28,9 +28,8 @@ class Kernel:
         # plane it is farther than this from and not labelled on never changes
         self.margin = 2 * self.merge
         self.normal, self.offset = np.zeros((0, 3)), np.zeros(0)
-        self.pos, self.on = [], []
-        # pos as one array, rows past len(pos) unused
-        self.xyz = np.zeros((256, 3))
+        # vertex positions, rows past len(on) unused, and the planes each vertex lies on
+        self.xyz, self.on = np.zeros((256, 3)), []
         self.ids, self.lines, self.signs = {}, defaultdict(set), {}
         # by position, in cells of size merge: the cell's newest vertex id, and each vertex's
         # next older one in its cell (-1 at the end)
@@ -99,25 +98,20 @@ class Kernel:
             return self.ids[key]
         point = len(key) >= 3 and np.linalg.svd(self.normal[list(key)], compute_uv=False)[2] > 1e-9
         v = grid_find(self.grid, self.older, self.xyz, p, self.merge)
-        if v >= 0:
-            self.add_planes(v, planes)
-            if point:
-                self.ids[key] = v
-            return v
-        v = self.new_point(p)
-        grid_add(self.grid, self.older, p, self.merge, v)
+        if v < 0:
+            v = self.new_point(p)
+            grid_add(self.grid, self.older, p, self.merge, v)
+        self.add_planes(v, planes)
         if point:
             self.ids[key] = v
-        self.add_planes(v, planes)
         return v
 
     def new_point(self, p):
-        v = len(self.pos)
+        v = len(self.on)
         if v == len(self.xyz):
             self.xyz = np.vstack([self.xyz, np.zeros_like(self.xyz)])
             self.older = np.concatenate([self.older, np.full(v, -1)])
         self.xyz[v] = p
-        self.pos.append(p)
         self.on.append(set())
         return v
 
@@ -140,7 +134,7 @@ class Kernel:
             if p in self.on[v]:
                 s = 0
             else:
-                dist = self.pos[v] @ self.normal[p] - self.offset[p]
+                dist = self.xyz[v] @ self.normal[p] - self.offset[p]
                 s = 0 if abs(dist) < self.eps else (1 if dist > 0 else -1)
                 if s == 0:
                     self.add_planes(v, (p,))
@@ -168,9 +162,9 @@ class Kernel:
         key = frozenset(line | {p})
         if key in self.ids:
             return self.ids[key]
-        da = self.pos[a] @ self.normal[p] - self.offset[p]
-        db = self.pos[b] @ self.normal[p] - self.offset[p]
-        return self.vertex(self.pos[a] + (self.pos[b] - self.pos[a]) * (da / (da - db)), line | {p})
+        pa, pb = self.xyz[a], self.xyz[b]
+        da, db = pa @ self.normal[p] - self.offset[p], pb @ self.normal[p] - self.offset[p]
+        return self.vertex(pa + (pb - pa) * (da / (da - db)), line | {p})
 
     def split(self, poly, p, side):
         """(inside, outside) parts of a polygon that straddles the half-space."""
@@ -191,7 +185,7 @@ class Kernel:
     def refine(self, poly, plane, half):
         """poly as (piece, inside) pieces: each lies inside every half-space (on them at
         most) or outside one. A half-space on poly's own plane is skipped."""
-        half = [(p, s) for p, s in half if p != plane]
+        half = [(p, s) for p, s in half.items() if p != plane]
         if not half:
             return [(poly, True)]
         ids, sides = np.array(half).T
@@ -293,7 +287,7 @@ class Kernel:
         n = len(poly)
         if not any(len(self.on[poly[i - 1]] & self.on[poly[i]] & self.on[poly[(i + 1) % n]]) > 1 for i in range(n)):
             return [(poly[0], poly[i], poly[i + 1]) for i in range(1, n - 1)]
-        c = self.new_point(np.mean([self.pos[v] for v in poly], 0))
+        c = self.new_point(self.xyz[poly].mean(0))
         return [(c, poly[i], poly[(i + 1) % n]) for i in range(n)]
 
 
@@ -495,7 +489,7 @@ def facet_geometry(shape):
 class Faceted:
     """A shape's facets in a kernel as (vertex loop, plane id, side), side -1 where the
     facet faces against its plane's stored normal, and its bounds. A convex shape gives
-    the half-spaces (plane id, side) whose intersection is the shape; a mesh gives its
+    the half-spaces as {plane id: side}, whose intersection is the shape; a mesh gives its
     triangles as (vertex ids, plane id, the plane ids of the triangles sharing an edge
     with it). The clip box gives its half-spaces only. geometry is facet_geometry(shape)."""
 
@@ -504,8 +498,7 @@ class Faceted:
         self.facets, self.tris, self.half = [], [], None
         if not hasattr(shape, "facets"):
             ids, sides = kernel.planes(shape.normals, shape.offsets)
-            self.half = [(int(p), int(s)) for p, s in zip(ids, sides)]
-            self.half_map = dict(self.half)
+            self.half = dict(zip(ids.tolist(), sides.tolist()))
             self.lo, self.hi = np.full(3, -np.inf), np.full(3, np.inf)
             return
         points, loops, normals, offsets, faces_at, self.loop_of = geometry
@@ -531,8 +524,7 @@ class Faceted:
         vid = {i: kernel.vertex(points[i], planes) for i, planes in incident.items()}
         self.facets = [([vid[i] for i in loop], int(ids[f]), int(sides[f])) for f, loop in enumerate(loops)]
         if self.mesh is None:
-            self.half = [(int(p), int(s)) for p, s in zip(ids, sides)]
-            self.half_map = dict(self.half)
+            self.half = dict(zip(ids.tolist(), sides.tolist()))
         else:
             self.tris = []
             for f, (poly, plane, _) in enumerate(self.facets):
@@ -585,13 +577,11 @@ def closed_cut(own, cutters, clip_box=None, geometry=None):
     def dead(j, inside, plane):
         if not inside:
             return j == own_i or j in all_masks
-        return j in plain_cutters and plane not in shapes[j].half_map
+        return j in plain_cutters and plane not in shapes[j].half
 
     pieces = []
     for k in range(owners):
-        bounds = [np.array([kernel.pos[v] for v in poly]) for poly, _, _ in shapes[k].facets]
-        facet_lo = np.array([b.min(0) for b in bounds]).reshape(-1, 3)
-        facet_hi = np.array([b.max(0) for b in bounds]).reshape(-1, 3)
+        facet_lo, facet_hi = kernel.boxes([(poly, None) for poly, _, _ in shapes[k].facets])
         near = {j: triangles_near(other, facet_lo, facet_hi, kernel.eps)
                 for j, other in enumerate(shapes) if j != k and other.mesh is not None}
         for f, (poly, plane, _) in enumerate(shapes[k].facets):
@@ -618,7 +608,7 @@ def closed_cut(own, cutters, clip_box=None, geometry=None):
         return np.zeros((0, 3)), np.zeros((0, 3), int)
     faces = np.array(faces)
     used, faces = np.unique(faces, return_inverse=True)
-    return np.array(kernel.pos)[used], faces.reshape(-1, 3)
+    return kernel.xyz[used], faces.reshape(-1, 3)
 
 
 def triangles_near(mesh, lo, hi, eps):
@@ -675,7 +665,7 @@ def classify_pieces(kernel, shapes, pieces, region, scale):
                 above.append(False)
                 below.append(False)
             else:
-                s = shape.half_map.get(plane, 0)
+                s = shape.half.get(plane, 0)
                 above.append(s <= 0)
                 below.append(s >= 0)
         if any(above[j] != below[j] for j in range(k)):
