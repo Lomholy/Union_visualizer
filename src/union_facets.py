@@ -779,8 +779,9 @@ class Faceted:
     """A shape's facets in a kernel as (vertex loop, plane id, side), side -1 where the
     facet faces against its plane's stored normal, and its bounds. A convex shape gives
     the half-spaces as {plane id: side}, whose intersection is the shape; a mesh gives its
-    triangles as (vertex ids, plane id, the plane ids of the triangles sharing an edge
-    with it). The clip box gives its half-spaces only. geometry is facet_geometry(shape)."""
+    triangles' vertex ids (tri_v, one row each) and plane ids (tri_p), and the plane ids of
+    the triangles sharing an edge with triangle t as around[around_start[t]:around_start[t + 1]].
+    The clip box gives its half-spaces only. geometry is facet_geometry(shape)."""
 
     def __init__(self, kernel, shape, geometry):
         self.mesh = None if shape.convex else shape
