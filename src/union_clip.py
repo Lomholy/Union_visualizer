@@ -122,8 +122,8 @@ class BVH:
         return np.concatenate(found_q), np.concatenate(found_tri)
 
 
-def ray_triangle(origin, direction, tri, t_max, barycentric=False):
-    """Moller-Trumbore for paired rays and triangles: (hit mask, t), plus (u, v) if asked."""
+def ray_triangle(origin, direction, tri, t_max):
+    """Moller-Trumbore for paired rays and triangles: (hit mask, t)."""
     v0 = tri[:, 0]
     e1, e2 = tri[:, 1] - v0, tri[:, 2] - v0
     p = np.cross(direction, e2)
@@ -136,7 +136,7 @@ def ray_triangle(origin, direction, tri, t_max, barycentric=False):
     v = f * (direction * q).sum(1)
     t = f * (e2 * q).sum(1)
     hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0) & (t < t_max)
-    return (hit, t, u, v) if barycentric else (hit, t)
+    return hit, t
 
 
 @njit(cache=True)
