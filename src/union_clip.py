@@ -70,6 +70,30 @@ class BVH:
         self.stop = np.array([n[5] for n in nodes])
         self.order = order
 
+    def gather(self, q, node, found_q, found_tri):
+        """Append the (query, triangle) pairs of leaf nodes."""
+        count = self.stop[node] - self.start[node]
+        found_q.append(np.repeat(q, count))
+        offset = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+        found_tri.append(self.order[np.repeat(self.start[node], count) + offset])
+
+    def overlaps(self, lo, hi):
+        """(box, triangle) pairs whose boxes overlap, for a batch of boxes lo..hi."""
+        q = np.arange(len(lo))
+        node = np.zeros(len(lo), np.int64)
+        found_q, found_tri = [], []
+        while len(q):
+            hit = np.all((lo[q] <= self.hi[node]) & (hi[q] >= self.lo[node]), axis=1)
+            q, node = q[hit], node[hit]
+            leaf = self.child[node] < 0
+            if leaf.any():
+                self.gather(q[leaf], node[leaf], found_q, found_tri)
+            q, node = q[~leaf], node[~leaf]
+            q, node = np.concatenate([q, q]), np.concatenate([self.child[node], self.second[node]])
+        if not found_q:
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+        return np.concatenate(found_q), np.concatenate(found_tri)
+
     def candidates(self, origin, direction, t_max):
         q = np.arange(len(origin))
         node = np.zeros(len(origin), np.int64)
@@ -89,11 +113,7 @@ class BVH:
             q, node = q[hit], node[hit]
             leaf = self.child[node] < 0
             if leaf.any():
-                lq, ln = q[leaf], node[leaf]
-                count = self.stop[ln] - self.start[ln]
-                found_q.append(np.repeat(lq, count))
-                offset = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
-                found_tri.append(self.order[np.repeat(self.start[ln], count) + offset])
+                self.gather(q[leaf], node[leaf], found_q, found_tri)
             q, node = q[~leaf], node[~leaf]
             q, node = np.concatenate([q, q]), np.concatenate([self.child[node], self.second[node]])
         if not found_q:
@@ -653,10 +673,10 @@ def _masked(comp, shapes, union_geometries):
     return Masked(shapes[comp.name], [shapes[m.name] for m in masks], mask_mode_any(masks))
 
 
-def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False):
+def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False, geometry=None):
     """Triangles (T, 3, 3) of comp's surface where it has the highest priority or, with
     walls, (vertices, faces) of that surface closed by walls where higher-priority
-    components and masks cut it, from closed_cut."""
+    components and masks cut it, from closed_cut (geometry is its facet cache)."""
     candidates = [
         c.name for c in union_geometries.values()
         if not is_mask(c) and shapes.get(c.name) is not None and c.priority > comp.priority
@@ -665,7 +685,7 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=Fal
                for n in overlapping(comp.name, candidates, world_bboxes)]
     own = _masked(comp, shapes, union_geometries)
     if walls:
-        return closed_cut(own, cutters, ClipBox(clip) if clip.get("enable") else None)
+        return closed_cut(own, cutters, ClipBox(clip) if clip.get("enable") else None, geometry)
     sources = list(own.masks)
     for cutter in cutters:
         sources += [cutter.shape, *cutter.masks]
@@ -707,7 +727,7 @@ def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, wo
             world_matrices,
         )
     shapes = build_shapes(union_geometries, world_matrices)
-    meshes = {}
+    meshes, geometry = {}, {}
     for name in union_geometries if names is None else names:
         comp = union_geometries[name]
         if is_mask(comp) or shapes[name] is None:
@@ -715,7 +735,7 @@ def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, wo
                 print(f"{name} is a mask, and is therefore not meshed.")
             meshes[name] = None
             continue
-        result = clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts)
+        result = clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts, geometry)
         if isinstance(result, tuple):
             meshes[name] = trimesh.Trimesh(*result, process=False) if len(result[1]) else None
         else:
