@@ -11,6 +11,8 @@ from collections import defaultdict
 from itertools import chain, combinations
 
 import numpy as np
+from numba import njit, types
+from numba.extending import intrinsic
 
 # distances relative to the own shape's size
 ON_PLANE = 1e-9
@@ -290,16 +292,8 @@ class Kernel:
             out.append(a)
             between = self.on_line(self.on[a] & self.on[b]) - {a, b}
             if between:
-                pa, d = self.pos[a], self.pos[b] - self.pos[a]
-                length = d @ d
-                tol = self.merge / np.sqrt(length)
-                vs = np.fromiter(between, int, len(between))
-                t = (self.xyz[vs] - pa) @ d / length
-                # near-parallel planes share vertices off any one line
-                off = self.xyz[vs] - pa - t[:, None] * d
-                inside = (tol < t) & (t < 1 - tol) & (np.einsum("ij,ij->i", off, off) < self.merge ** 2)
-                vs, t = vs[inside], t[inside]
-                out += vs[np.lexsort((vs, t))].tolist()
+                vs = np.fromiter(between, np.int64, len(between))
+                out += on_edge(self.xyz, a, b, vs, self.merge, self.merge ** 2).tolist()
         return out
 
     def fan(self, poly):
@@ -309,6 +303,93 @@ class Kernel:
             return [(poly[0], poly[i], poly[i + 1]) for i in range(1, n - 1)]
         c = self.new_point(np.mean([self.pos[v] for v in poly], 0))
         return [(c, poly[i], poly[(i + 1) % n]) for i in range(n)]
+
+
+@intrinsic
+def fma(typingctx, x, y, z):
+    """x * y + z rounded once."""
+    def codegen(context, builder, signature, args):
+        return builder.fma(*args)
+    return types.float64(types.float64, types.float64, types.float64), codegen
+
+
+@njit(cache=True)
+def on_edge(xyz, a, b, vs, merge, merge2):
+    """The vertices vs lying on edge a-b strictly between its ends, within merge of it,
+    sorted by position along it then id; merge2 is merge ** 2. Dot products round as
+    numpy's BLAS does (x0 y0, then two fused steps), the squared distance as its einsum
+    does (z fused onto x, plus y)."""
+    d0, d1, d2 = xyz[b, 0] - xyz[a, 0], xyz[b, 1] - xyz[a, 1], xyz[b, 2] - xyz[a, 2]
+    length = fma(d2, d2, fma(d1, d1, d0 * d0))
+    tol = merge / np.sqrt(length)
+    t = np.empty(len(vs))
+    keep = np.zeros(len(vs), np.bool_)
+    for k in range(len(vs)):
+        r0, r1, r2 = xyz[vs[k], 0] - xyz[a, 0], xyz[vs[k], 1] - xyz[a, 1], xyz[vs[k], 2] - xyz[a, 2]
+        t[k] = fma(r2, d2, fma(r1, d1, r0 * d0)) / length
+        # near-parallel planes share vertices off any one line
+        o0, o1, o2 = r0 - t[k] * d0, r1 - t[k] * d1, r2 - t[k] * d2
+        keep[k] = tol < t[k] and t[k] < 1 - tol and fma(o2, o2, o0 * o0) + o1 * o1 < merge2
+    vs, t = vs[keep], t[keep]
+    order = np.argsort(vs)
+    vs, t = vs[order], t[order]
+    return vs[np.argsort(t, kind="mergesort")]
+
+
+@njit(cache=True)
+def piece_geometry(xyz, ids, start):
+    """(sum of the cross products of consecutive points, mean point, perimeter) of each
+    polygon ids[start[i]:start[i + 1]] of points xyz, in numpy's rounding: rows summed in
+    order, edge lengths summed pairwise."""
+    m = len(start) - 1
+    n, centre, perimeter = np.zeros((m, 3)), np.zeros((m, 3)), np.zeros(m)
+    edge = np.empty(len(ids))
+    for i in range(m):
+        lo, k = start[i], start[i + 1] - start[i]
+        for r in range(lo, lo + k):
+            p, q = ids[r], ids[lo + (r - lo + 1) % k]
+            c0 = xyz[p, 1] * xyz[q, 2] - xyz[p, 2] * xyz[q, 1]
+            c1 = xyz[p, 2] * xyz[q, 0] - xyz[p, 0] * xyz[q, 2]
+            c2 = xyz[p, 0] * xyz[q, 1] - xyz[p, 1] * xyz[q, 0]
+            if r == lo:
+                n[i, 0], n[i, 1], n[i, 2] = c0, c1, c2
+                centre[i, 0], centre[i, 1], centre[i, 2] = xyz[p, 0], xyz[p, 1], xyz[p, 2]
+            else:
+                n[i, 0] += c0
+                n[i, 1] += c1
+                n[i, 2] += c2
+                centre[i, 0] += xyz[p, 0]
+                centre[i, 1] += xyz[p, 1]
+                centre[i, 2] += xyz[p, 2]
+            e0, e1, e2 = xyz[p, 0] - xyz[q, 0], xyz[p, 1] - xyz[q, 1], xyz[p, 2] - xyz[q, 2]
+            edge[r] = np.sqrt(e0 * e0 + e1 * e1 + e2 * e2)
+        centre[i] /= k
+        perimeter[i] = pairwise_sum(edge, lo, k)
+    return n, centre, perimeter
+
+
+@njit(cache=True)
+def pairwise_sum(a, lo, n):
+    """a[lo:lo + n].sum() as numpy computes it."""
+    if n < 8:
+        res = -0.0
+        for i in range(lo, lo + n):
+            res += a[i]
+        return res
+    if n <= 128:
+        r = a[lo:lo + 8].copy()
+        i = 8
+        while i < n - n % 8:
+            for j in range(8):
+                r[j] += a[lo + i + j]
+            i += 8
+        res = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]))
+        for j in range(lo + i, lo + n):
+            res += a[j]
+        return res
+    half = n // 2
+    half -= half % 8
+    return pairwise_sum(a, lo, half) + pairwise_sum(a, lo + half, n - half)
 
 
 def distinct(loop):
@@ -499,21 +580,19 @@ def classify_pieces(kernel, shapes, pieces, region, scale):
     shape is taken just above and just below its plane: exactly from its labels for a
     convex shape, by the mesh's own inside test for a mesh. A piece lying on the
     surface of a shape listed before its own is left to that shape."""
-    kept, centre, step, normal = [], [], [], []
-    for q, plane, k, lab in pieces:
-        pts = np.array([kernel.pos[v] for v in q])
-        n = np.cross(pts, np.roll(pts, -1, 0)).sum(0)
-        area = 0.5 * np.linalg.norm(n)
-        if area <= kernel.merge ** 2:
-            continue
-        perimeter = np.linalg.norm(pts - np.roll(pts, -1, 0), axis=1).sum()
-        kept.append((q, plane, k, lab, n))
-        centre.append(pts.mean(0))
-        step.append(min(1e-6 * scale, 0.2 * area / perimeter))
-        normal.append(kernel.normal[plane])
-    if not kept:
+    if not pieces:
         return []
-    centre, offset = np.array(centre), np.array(step)[:, None] * np.array(normal)
+    lens = [len(q) for q, _, _, _ in pieces]
+    ids = np.fromiter(chain.from_iterable(q for q, _, _, _ in pieces), np.int64, sum(lens))
+    n, centre, perimeter = piece_geometry(kernel.xyz, ids, np.concatenate([[0], np.cumsum(lens)]))
+    area = 0.5 * np.sqrt(np.vecdot(n, n))
+    keep = np.flatnonzero(~(area <= kernel.merge ** 2))
+    if not len(keep):
+        return []
+    kept = [(*pieces[i][:4], n[i]) for i in keep.tolist()]
+    centre = centre[keep]
+    step = np.minimum(1e-6 * scale, 0.2 * area[keep] / perimeter[keep])
+    offset = step[:, None] * kernel.normal[[pieces[i][1] for i in keep.tolist()]]
     statuses = []
     for j, shape in enumerate(shapes):
         if shape.mesh is None:
