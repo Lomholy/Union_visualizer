@@ -339,6 +339,126 @@ class TestClosedCut(unittest.TestCase):
                 self.assertAlmostEqual(meshes[name].area, surface, places=9)
 
 
+def rotation_y(degrees, **shift):
+    m = translation(**shift)
+    a = math.radians(degrees)
+    m[:3, :3] = [[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]]
+    return m
+
+
+class TestClosedCutGeneral(unittest.TestCase):
+    # Close cut surfaces with masks, meshes, meeting walls and degenerate positions
+    ICOSPHERE = str(DATA / "union_clip_icosphere.stl")
+    assert_closed = TestClosedCut.assert_closed
+    build_pair = TestClosedCut.build_pair
+    facet_volume_inside_a = TestClosedCut.facet_volume_inside_a
+
+    def build_closed(self, comps, matrices, close_cuts=True):
+        geoms = {c.name: c for c in comps}
+        world = {name: matrices.get(name, np.eye(4)) for name in geoms}
+        with contextlib.redirect_stdout(io.StringIO()):
+            return meshing.build_all_meshes(geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union",
+                                            close_cuts=close_cuts)
+
+    def masked(self, setting, close_cuts=True):
+        # a (cube of side 2) masked by m1 (x < -0.1) and m2 (y < -0.1)
+        comps = [box("a", 2, 2, 2), box("m1", 2, 3, 3, mask_string="a", mask_setting=setting),
+                 box("m2", 3, 2, 3, mask_string="a", mask_setting=setting)]
+        return self.build_closed(comps, {"m1": translation(x=-1.1), "m2": translation(y=-1.1)}, close_cuts)["a"]
+
+    def test_masks_close_watertight(self):
+        for setting, volume in (("All", 0.9 * 0.9 * 2), ("ANY", 8 - 1.1 * 1.1 * 2)):
+            with self.subTest(setting=setting):
+                mesh = self.masked(setting)
+                self.assert_closed(mesh)
+                self.assertAlmostEqual(mesh.volume, volume, places=9)
+
+    def test_masked_kept_area_matches_the_open_cut(self):
+        # R6
+        for setting in ("All", "ANY"):
+            with self.subTest(setting=setting):
+                closed = self.masked(setting)
+                kept = closed.area_faces[np.abs(closed.triangles_center).max(1) > 1 - 1e-9].sum()
+                self.assertAlmostEqual(kept / area(self.masked(setting, close_cuts=False)), 1, delta=0.01)
+
+    def test_walls_meeting_close_watertight(self):
+        # b's and c's walls in a meet along a line inside a
+        comps = [box("a", 2, 2, 2), box("b", 1, 1.5, 3, priority=2),
+                 FakeComp("Union_cylinder", "c", priority=3, radius=0.6, yheight=3)]
+        meshes = self.build_closed(comps, {"b": translation(x=0.9, y=0.7), "c": translation(x=0.5, z=0.85)})
+        for name, mesh in meshes.items():
+            with self.subTest(name=name):
+                self.assert_closed(mesh)
+
+    def test_icosphere_cutter_closes_watertight(self):
+        cutter = FakeComp("Union_mesh", "b", priority=2, filename=self.ICOSPHERE, coordinate_scale=0.02)
+        matrix = translation(x=0.93, y=0.11, z=0.07)
+        meshes = self.build_pair(cutter, matrix)
+        for mesh in meshes.values():
+            self.assert_closed(mesh)
+        self.assertAlmostEqual(meshes["a"].volume / (8 - self.facet_volume_inside_a(cutter, matrix)), 1, delta=5e-4)
+
+    def test_icosphere_cut_by_a_box_closes_watertight(self):
+        comps = [FakeComp("Union_mesh", "a", filename=self.ICOSPHERE, coordinate_scale=0.02),
+                 box("b", 1, 1, 1, priority=2)]
+        for mesh in self.build_closed(comps, {"b": translation(x=0.6, y=0.1)}).values():
+            self.assert_closed(mesh)
+
+    def test_cut_through_pole_and_along_facet_edges(self):
+        # the plane x = 0 holds the sphere's poles and two meridians of its facets
+        sphere = FakeComp("Union_sphere", "a", radius=0.7)
+        whole = self.build_closed([sphere], {})["a"].volume
+        mesh = self.build_closed([sphere, box("b", 1, 2, 2, priority=2)], {"b": translation(x=0.5)})["a"]
+        self.assert_closed(mesh)
+        self.assertAlmostEqual(mesh.volume, whole / 2, places=9)
+
+    def test_cut_through_cone_apex(self):
+        cone = FakeComp("Union_cone", "a", radius_bottom=0.6, radius_top=0.0, yheight=1)
+        tilt = math.radians(3)
+        mesh = self.build_closed([cone, box("b", 1, 2, 2, priority=2)],
+                                 {"b": rotation_y(3, x=0.5 * math.cos(tilt), z=-0.5 * math.sin(tilt))})["a"]
+        self.assert_closed(mesh)
+
+    def test_cutter_edge_lying_on_a_face(self):
+        # b's edge touches a's top face from outside: a stays whole
+        mesh = self.build_closed([box("a", 2, 2, 2), box("b", 1, 1, 1, priority=2)],
+                                 {"b": rotation_y(45, x=0.3, z=1 + 0.5 * math.sqrt(2))})["a"]
+        self.assert_closed(mesh)
+        self.assertAlmostEqual(mesh.area, 24.0, places=9)
+
+    def test_sphere_axis_lying_on_a_face(self):
+        # each band of b's facets has its planes meet at one point of b's axis, on a's face x = 1
+        meshes = self.build_pair(FakeComp("Union_sphere", "b", priority=2, radius=0.5), translation(x=1, y=0.13, z=0.07))
+        for mesh in meshes.values():
+            self.assert_closed(mesh)
+
+    def test_tapered_box_with_a_zero_width_face(self):
+        mesh = self.build_closed([box("a", 1, 1, 1, xwidth2=0.0, yheight2=1.0), box("b", 1, 1, 1, priority=2)],
+                                 {"b": translation(x=0.6)})["a"]
+        self.assert_closed(mesh)
+
+    def test_buried_component_has_no_mesh(self):
+        self.assertIsNone(self.build_closed([box("a", 1, 1, 1), box("b", 2, 2, 2, priority=2)], {})["a"])
+
+    def test_cavity_keeps_its_wall(self):
+        meshes = self.build_closed([box("a", 2, 2, 2), box("b", 0.5, 0.5, 0.5, priority=2)],
+                                   {"b": translation(x=0.13, y=0.07)})
+        self.assert_closed(meshes["a"])
+        self.assertAlmostEqual(meshes["a"].volume, 8 - 0.125, places=9)
+        self.assertAlmostEqual(meshes["a"].area, 24 + 1.5, places=9)
+
+    def test_open_mesh_cutter_builds(self):
+        # R1 error case: an open Union_mesh cutter never fails the build
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "open.stl"
+            mesh = trimesh.load_mesh(self.ICOSPHERE)
+            mesh.update_faces(np.arange(len(mesh.faces)) >= 3)
+            mesh.export(path)
+            cutter = FakeComp("Union_mesh", "b", priority=2, filename=str(path), coordinate_scale=0.02)
+            meshes = self.build_pair(cutter, translation(x=0.93, y=0.11, z=0.07))
+        self.assertGreater(area(meshes["a"]), 0)
+
+
 class TestClipBox(unittest.TestCase):
     # R4: the clip plane removes its side of every component
     def test_clip_removes_side(self):
