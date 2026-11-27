@@ -404,6 +404,22 @@ class TestClosedCutGeneral(unittest.TestCase):
         for mesh in self.build_closed(comps, {"b": translation(x=0.6, y=0.1)}).values():
             self.assert_closed(mesh)
 
+    def test_mesh_with_flat_faces_closes_watertight(self):
+        # own is an STL cube (side 2) whose flat faces hold 2, or after subdividing 8, coplanar triangles
+        cases = {"flush": (0, translation(x=1.5), 8.0),
+                 "crossing": (1, translation(x=0.93, y=0.31, z=-0.27), 8 - 0.57)}
+        for name, (subdivisions, matrix, volume) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "cube.stl"
+                cube = trimesh.creation.box(extents=(2, 2, 2))
+                for _ in range(subdivisions):
+                    cube = cube.subdivide()
+                cube.export(path)
+                own = FakeComp("Union_mesh", "a", filename=str(path), coordinate_scale=1.0)
+                mesh = self.build_closed([own, box("b", 1, 1, 1, priority=2)], {"b": matrix})["a"]
+                self.assert_closed(mesh)
+                self.assertAlmostEqual(mesh.volume, volume, places=9)
+
     def test_cut_through_pole_and_along_facet_edges(self):
         # the plane x = 0 holds the sphere's poles and two meridians of its facets
         sphere = FakeComp("Union_sphere", "a", radius=0.7)
