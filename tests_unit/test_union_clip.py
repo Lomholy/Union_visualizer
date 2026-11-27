@@ -508,5 +508,70 @@ class TestMcStasReference(unittest.TestCase):
                 self.assertAlmostEqual(area(meshes[name]) / mcstas_area, 1.0, delta=2e-3)
 
 
+class TestWatertightInstruments(unittest.TestCase):
+    # brep's watertight components per instrument, frozen while brep existed: a lower bound
+    def test_brep_watertight_components_are_closed(self):
+        import preprocess
+        import union_clip
+
+        expected = json.loads((DATA / "union_watertight_expected.json").read_text())
+        root = DATA.parent.parent
+        for inp, names in expected.items():
+            with contextlib.redirect_stdout(io.StringIO()):
+                _, world, geoms = preprocess.preprocess(str(root / inp), False)
+                meshes = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=True)
+            for name in names:
+                with self.subTest(instrument=inp, component=name):
+                    mesh = meshes[name]
+                    self.assertIsNotNone(mesh)
+                    self.assertTrue(mesh.is_watertight)
+                    self.assertTrue(mesh.is_winding_consistent)
+                    self.assertGreater(mesh.volume, 0)
+
+
+class TestClosedIncrementalRebuild(unittest.TestCase):
+    # moving the cylinder that cuts touch_a rebuilds only the components that depend on it
+    DRILL = """
+COMPONENT drill = Union_cylinder(priority = 30, radius = 0.03, yheight = 0.2, material_string = "mat")
+AT ({x},0.01,0.013) RELATIVE sample
+
+COMPONENT master"""
+
+    def write(self, tmp, x):
+        text = (DATA / "coincident_faces_test.instr").read_text()
+        path = Path(tmp) / "drilled.instr"
+        path.write_text(text.replace("\nCOMPONENT master", self.DRILL.format(x=x), 1))
+        return str(path)
+
+    def test_rebuilt_mesh_equals_full_rebuild(self):
+        import pipeline
+        import union_clip
+
+        rebuilt = []
+        real = union_clip.build_union_meshes
+
+        def recording(*args, **kwargs):
+            rebuilt.append(kwargs.get("names"))
+            return real(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            kw = dict(mesher="union", close_cuts=True)
+            _, _, meshes, deps, _ = pipeline.compute_mesh_data(self.write(tmp, -0.04), NO_CLIP, **kw)
+            moved = self.write(tmp, -0.03)
+            with mock.patch.object(pipeline, "build_union_meshes", recording):
+                _, _, incremental, _, _ = pipeline.compute_mesh_data(moved, NO_CLIP, meshes=dict(meshes),
+                                                                     dependencies=deps, **kw)
+            _, _, full, _, _ = pipeline.compute_mesh_data(moved, NO_CLIP, **kw)
+        self.assertEqual(sorted(rebuilt[0]), ["drill", "touch_a"])
+        self.assertTrue(full["touch_a"].is_watertight)
+        for name in full:
+            with self.subTest(component=name):
+                if full[name] is None:
+                    self.assertIsNone(incremental[name])
+                    continue
+                np.testing.assert_array_equal(incremental[name].vertices, full[name].vertices)
+                np.testing.assert_array_equal(incremental[name].faces, full[name].faces)
+
+
 if __name__ == "__main__":
     unittest.main()
