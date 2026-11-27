@@ -12,7 +12,6 @@ from itertools import chain, combinations
 
 import numpy as np
 from numba import njit, typed, types
-from numba.extending import intrinsic
 
 # distances relative to the own shape's size
 ON_PLANE = 1e-9
@@ -279,7 +278,7 @@ class Kernel:
             between = self.on_line(self.on[a] & self.on[b]) - {a, b}
             if between:
                 vs = np.fromiter(between, np.int64, len(between))
-                out += on_edge(self.xyz, a, b, vs, self.merge, self.merge ** 2).tolist()
+                out += on_edge(self.xyz, a, b, vs, self.merge).tolist()
         return out
 
     def fan(self, poly):
@@ -291,31 +290,21 @@ class Kernel:
         return [(c, poly[i], poly[(i + 1) % n]) for i in range(n)]
 
 
-@intrinsic
-def fma(typingctx, x, y, z):
-    """x * y + z rounded once."""
-    def codegen(context, builder, signature, args):
-        return builder.fma(*args)
-    return types.float64(types.float64, types.float64, types.float64), codegen
-
-
 @njit(cache=True)
-def on_edge(xyz, a, b, vs, merge, merge2):
+def on_edge(xyz, a, b, vs, merge):
     """The vertices vs lying on edge a-b strictly between its ends, within merge of it,
-    sorted by position along it then id; merge2 is merge ** 2. Dot products round as
-    numpy's BLAS does on arm64 (x0 y0, then two fused steps), the squared distance as its
-    einsum does there (z fused onto x, plus y); other platforms may differ in the last bit."""
+    sorted by position along it then id."""
     d0, d1, d2 = xyz[b, 0] - xyz[a, 0], xyz[b, 1] - xyz[a, 1], xyz[b, 2] - xyz[a, 2]
-    length = fma(d2, d2, fma(d1, d1, d0 * d0))
+    length = d0 * d0 + d1 * d1 + d2 * d2
     tol = merge / np.sqrt(length)
     t = np.empty(len(vs))
     keep = np.zeros(len(vs), np.bool_)
     for k in range(len(vs)):
         r0, r1, r2 = xyz[vs[k], 0] - xyz[a, 0], xyz[vs[k], 1] - xyz[a, 1], xyz[vs[k], 2] - xyz[a, 2]
-        t[k] = fma(r2, d2, fma(r1, d1, r0 * d0)) / length
+        t[k] = (r0 * d0 + r1 * d1 + r2 * d2) / length
         # near-parallel planes share vertices off any one line
         o0, o1, o2 = r0 - t[k] * d0, r1 - t[k] * d1, r2 - t[k] * d2
-        keep[k] = tol < t[k] and t[k] < 1 - tol and fma(o2, o2, o0 * o0) + o1 * o1 < merge2
+        keep[k] = tol < t[k] < 1 - tol and o0 * o0 + o1 * o1 + o2 * o2 < merge * merge
     vs, t = vs[keep], t[keep]
     order = np.argsort(vs)
     vs, t = vs[order], t[order]
@@ -325,64 +314,27 @@ def on_edge(xyz, a, b, vs, merge, merge2):
 @njit(cache=True)
 def piece_geometry(xyz, ids, start):
     """(sum of the cross products of consecutive points, mean point, perimeter) of each
-    polygon ids[start[i]:start[i + 1]] of points xyz, in numpy's rounding: rows summed in
-    order, edge lengths summed pairwise."""
+    polygon ids[start[i]:start[i + 1]] of points xyz."""
     m = len(start) - 1
     n, centre, perimeter = np.zeros((m, 3)), np.zeros((m, 3)), np.zeros(m)
-    edge = np.empty(len(ids))
     for i in range(m):
         lo, k = start[i], start[i + 1] - start[i]
         for r in range(lo, lo + k):
             p, q = ids[r], ids[lo + (r - lo + 1) % k]
-            c0 = xyz[p, 1] * xyz[q, 2] - xyz[p, 2] * xyz[q, 1]
-            c1 = xyz[p, 2] * xyz[q, 0] - xyz[p, 0] * xyz[q, 2]
-            c2 = xyz[p, 0] * xyz[q, 1] - xyz[p, 1] * xyz[q, 0]
-            if r == lo:
-                n[i, 0], n[i, 1], n[i, 2] = c0, c1, c2
-                centre[i, 0], centre[i, 1], centre[i, 2] = xyz[p, 0], xyz[p, 1], xyz[p, 2]
-            else:
-                n[i, 0] += c0
-                n[i, 1] += c1
-                n[i, 2] += c2
-                centre[i, 0] += xyz[p, 0]
-                centre[i, 1] += xyz[p, 1]
-                centre[i, 2] += xyz[p, 2]
+            n[i, 0] += xyz[p, 1] * xyz[q, 2] - xyz[p, 2] * xyz[q, 1]
+            n[i, 1] += xyz[p, 2] * xyz[q, 0] - xyz[p, 0] * xyz[q, 2]
+            n[i, 2] += xyz[p, 0] * xyz[q, 1] - xyz[p, 1] * xyz[q, 0]
+            centre[i] += xyz[p]
             e0, e1, e2 = xyz[p, 0] - xyz[q, 0], xyz[p, 1] - xyz[q, 1], xyz[p, 2] - xyz[q, 2]
-            edge[r] = np.sqrt(e0 * e0 + e1 * e1 + e2 * e2)
+            perimeter[i] += np.sqrt(e0 * e0 + e1 * e1 + e2 * e2)
         centre[i] /= k
-        perimeter[i] = pairwise_sum(edge, lo, k)
     return n, centre, perimeter
-
-
-@njit(cache=True)
-def pairwise_sum(a, lo, n):
-    """a[lo:lo + n].sum() as numpy computes it."""
-    if n < 8:
-        res = -0.0
-        for i in range(lo, lo + n):
-            res += a[i]
-        return res
-    if n <= 128:
-        r = a[lo:lo + 8].copy()
-        i = 8
-        while i < n - n % 8:
-            for j in range(8):
-                r[j] += a[lo + i + j]
-            i += 8
-        res = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]))
-        for j in range(lo + i, lo + n):
-            res += a[j]
-        return res
-    half = n // 2
-    half -= half % 8
-    return pairwise_sum(a, lo, half) + pairwise_sum(a, lo + half, n - half)
 
 
 @njit(cache=True)
 def grid_find(grid, older, xyz, p, merge):
     """The vertex within merge of p, or -1: the lowest id in the first of the 27 cells
-    around p's (in dx, dy, dz order) holding one. Distances round as numpy's norm does on
-    arm64."""
+    around p's (in dx, dy, dz order) holding one."""
     x, y, z = int(np.floor(p[0] / merge)), int(np.floor(p[1] / merge)), int(np.floor(p[2] / merge))
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
@@ -392,7 +344,7 @@ def grid_find(grid, older, xyz, p, merge):
                 found = -1
                 while v >= 0:
                     d0, d1, d2 = xyz[v, 0] - p[0], xyz[v, 1] - p[1], xyz[v, 2] - p[2]
-                    if np.sqrt(fma(d2, d2, fma(d1, d1, d0 * d0))) < merge:
+                    if np.sqrt(d0 * d0 + d1 * d1 + d2 * d2) < merge:
                         found = v
                     v = older[v]
                 if found >= 0:
@@ -410,15 +362,16 @@ def grid_add(grid, older, p, merge, v):
 @njit(cache=True)
 def box_test(lo, hi, normal, offset, margin):
     """Indices of the boxes lo..hi that some plane normal . p = offset passes within
-    margin of; products round as numpy's matmul does on arm64."""
+    margin of."""
     out = np.empty(len(lo), np.int64)
     n = 0
     for i in range(len(lo)):
         s0, s1, s2 = lo[i, 0] + hi[i, 0], lo[i, 1] + hi[i, 1], lo[i, 2] + hi[i, 2]
         w0, w1, w2 = hi[i, 0] - lo[i, 0], hi[i, 1] - lo[i, 1], hi[i, 2] - lo[i, 2]
         for j in range(len(offset)):
-            mid = fma(s2, normal[j, 2], fma(s1, normal[j, 1], s0 * normal[j, 0])) / 2 - offset[j]
-            reach = fma(w2, abs(normal[j, 2]), fma(w1, abs(normal[j, 1]), w0 * abs(normal[j, 0]))) / 2
+            n0, n1, n2 = normal[j, 0], normal[j, 1], normal[j, 2]
+            mid = (s0 * n0 + s1 * n1 + s2 * n2) / 2 - offset[j]
+            reach = (w0 * abs(n0) + w1 * abs(n1) + w2 * abs(n2)) / 2
             if not (mid - reach > margin or mid + reach < -margin):
                 out[n] = i
                 n += 1
@@ -429,8 +382,7 @@ def box_test(lo, hi, normal, offset, margin):
 @njit(cache=True)
 def vertex_clear(xyz, ids, start, normal, offset, margin):
     """Whether each polygon ids[start[i]:start[i + 1]] has all its vertices farther than
-    margin on one side of each plane normal . p = offset; products round as numpy's matmul
-    does on arm64."""
+    margin on one side of each plane normal . p = offset."""
     m = len(start) - 1
     clear = np.ones(m, np.bool_)
     for i in range(m):
@@ -438,7 +390,7 @@ def vertex_clear(xyz, ids, start, normal, offset, margin):
             lo, hi = np.inf, -np.inf
             for r in range(start[i], start[i + 1]):
                 v = ids[r]
-                d = fma(xyz[v, 2], normal[j, 2], fma(xyz[v, 1], normal[j, 1], xyz[v, 0] * normal[j, 0])) - offset[j]
+                d = xyz[v, 0] * normal[j, 0] + xyz[v, 1] * normal[j, 1] + xyz[v, 2] * normal[j, 2] - offset[j]
                 lo, hi = min(lo, d), max(hi, d)
             if not (lo > margin or hi < -margin):
                 clear[i] = False
