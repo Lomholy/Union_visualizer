@@ -317,8 +317,8 @@ def fma(typingctx, x, y, z):
 def on_edge(xyz, a, b, vs, merge, merge2):
     """The vertices vs lying on edge a-b strictly between its ends, within merge of it,
     sorted by position along it then id; merge2 is merge ** 2. Dot products round as
-    numpy's BLAS does (x0 y0, then two fused steps), the squared distance as its einsum
-    does (z fused onto x, plus y)."""
+    numpy's BLAS does on arm64 (x0 y0, then two fused steps), the squared distance as its
+    einsum does there (z fused onto x, plus y); other platforms may differ in the last bit."""
     d0, d1, d2 = xyz[b, 0] - xyz[a, 0], xyz[b, 1] - xyz[a, 1], xyz[b, 2] - xyz[a, 2]
     length = fma(d2, d2, fma(d1, d1, d0 * d0))
     tol = merge / np.sqrt(length)
