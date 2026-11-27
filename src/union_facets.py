@@ -1,10 +1,11 @@
-"""Closed cuts on faceted convex shapes: a component's kept surface and the walls
-that close it, cut along one shared set of vertices so the result is watertight.
+"""Closed cuts on faceted shapes: a component's kept surface and the walls that
+close it, cut along one shared set of vertices so the result is watertight.
 
-Every shape is its faceted display polyhedron, a list of convex planar facets.
-Coincident planes of different shapes share one plane id. A vertex is known by
-the planes it lies on, so a cut surface and the wall meeting it are built from
-the same vertices; each vertex is classified against each plane once."""
+Every shape is its faceted display polyhedron: convex planar facets for boxes and
+lathes, triangles for meshes; the clip box is half-spaces only. Coincident planes
+share one plane id. A vertex is known by the planes it lies on, or by its position
+where they do not fix a point, so a cut surface and the wall meeting it are built
+from the same vertices; each vertex is classified against each plane once."""
 
 from collections import defaultdict
 from itertools import combinations
@@ -30,6 +31,15 @@ class Kernel:
     def planes(self, normal, offset):
         """(plane ids, sides) for planes normal . p = offset; side is -1 where the
         stored plane of that id faces the other way."""
+        # coincident planes within the call: normals turned to point along their largest component
+        flip = np.where(np.take_along_axis(normal, np.abs(normal).argmax(1)[:, None], 1)[:, 0] < 0, -1, 1)
+        rounded = np.column_stack([np.round(normal * flip[:, None] * 1e8), np.round(offset * flip / self.eps)])
+        _, first, group = np.unique(rounded, axis=0, return_index=True, return_inverse=True)
+        group = group.ravel()
+        ids, sides = self.new_planes(normal[first], offset[first])
+        return ids[group], sides[group] * flip * flip[first][group]
+
+    def new_planes(self, normal, offset):
         ids, sides = np.zeros(len(offset), int), np.ones(len(offset), int)
         fresh = np.ones(len(offset), bool)
         if len(self.offset):
@@ -45,22 +55,26 @@ class Kernel:
         return ids, sides
 
     def vertex(self, p, planes):
-        """The vertex on these planes at p: an existing one within merge of p, or a new one."""
+        """The vertex on these planes at p: an existing one within merge of p, or a new one.
+        Only planes that fix a point are kept as the vertex's key."""
         key = frozenset(planes)
         if key in self.ids:
             return self.ids[key]
+        point = len(key) >= 3 and np.linalg.svd(self.normal[list(key)], compute_uv=False)[2] > 1e-9
         cell = np.floor(p / self.merge).astype(int)
         for d in np.ndindex(3, 3, 3):
             for v in self.grid.get(tuple(cell + d - 1), ()):
                 if np.linalg.norm(self.pos[v] - p) < self.merge:
                     self.add_planes(v, planes)
-                    self.ids[key] = v
+                    if point:
+                        self.ids[key] = v
                     return v
         v = len(self.pos)
         self.pos.append(p)
         self.on.append(set())
         self.grid[tuple(cell)].append(v)
-        self.ids[key] = v
+        if point:
+            self.ids[key] = v
         self.add_planes(v, planes)
         return v
 
@@ -215,6 +229,9 @@ class Faceted:
             if np.linalg.norm(n) > tiny:
                 loops.append(loop)
                 normals.append(n / np.linalg.norm(n))
+        self.tri_lo = self.tri_hi = np.zeros((0, 3))
+        if not loops:
+            return
         normals = np.array(normals)
         if self.mesh is None:
             interior = points.mean(0)
@@ -227,16 +244,26 @@ class Faceted:
         for f, loop in enumerate(loops):
             for i in loop:
                 incident[i].add(int(ids[f]))
+        if self.mesh is not None:
+            faces_at = defaultdict(set)
+            for f, loop in enumerate(loops):
+                for k in range(3):
+                    faces_at[frozenset((loop[k], loop[k - 1]))].add(f)
+            # an edge between coplanar triangles gets the plane through it across their plane
+            flat = [(tuple(e), next(iter(fs))) for e, fs in faces_at.items() if len({int(ids[f]) for f in fs}) == 1]
+            if flat:
+                across = np.array([np.cross(points[b] - points[a], normals[f]) for (a, b), f in flat])
+                across /= np.linalg.norm(across, axis=1)[:, None]
+                edge_ids, _ = kernel.planes(across, np.array([n @ points[a] for n, ((a, _), _) in zip(across, flat)]))
+                for ((a, b), _), q in zip(flat, edge_ids):
+                    incident[a].add(int(q))
+                    incident[b].add(int(q))
         vid = {i: kernel.vertex(points[i], planes) for i, planes in incident.items()}
         self.facets = [([vid[i] for i in loop], int(ids[f]), int(sides[f])) for f, loop in enumerate(loops)]
         if self.mesh is None:
             self.half = [(int(p), int(s)) for p, s in zip(ids, sides)]
             self.half_map = dict(self.half)
         else:
-            faces_at = defaultdict(set)
-            for f, loop in enumerate(loops):
-                for k in range(3):
-                    faces_at[frozenset((loop[k], loop[k - 1]))].add(f)
             self.tris = []
             for f, (poly, plane, _) in enumerate(self.facets):
                 loop = loops[f]
