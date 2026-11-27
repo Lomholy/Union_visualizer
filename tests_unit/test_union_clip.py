@@ -583,6 +583,24 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertEqual(len(set(ids.tolist())), 1)
         self.assertEqual(sides.tolist()[2], -sides.tolist()[0])
 
+    def test_vertex_lookup_takes_lowest_id_in_first_neighbour_cell(self):
+        from union_facets import Kernel
+        kernel = Kernel(1.0)
+        rng = np.random.default_rng(0)
+        cells, pos, got, want = {}, [], [], []
+        for p in rng.uniform(-2, 2, (400, 3)) * kernel.merge:
+            got.append(kernel.vertex(p, ()))
+            x, y, z = np.floor(p / kernel.merge).astype(int).tolist()
+            near = (v for d in np.ndindex(3, 3, 3) for v in cells.get((x + d[0] - 1, y + d[1] - 1, z + d[2] - 1), ())
+                    if np.linalg.norm(pos[v] - p) < kernel.merge)
+            v = next(near, len(pos))
+            if v == len(pos):
+                pos.append(p)
+                cells.setdefault((x, y, z), []).append(v)
+            want.append(v)
+        self.assertEqual(got, want)
+        self.assertLess(len(pos), 400)
+
 
 
 class TestNumbaDependency(unittest.TestCase):

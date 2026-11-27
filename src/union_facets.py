@@ -11,7 +11,7 @@ from collections import defaultdict
 from itertools import chain, combinations
 
 import numpy as np
-from numba import njit, types
+from numba import njit, typed, types
 from numba.extending import intrinsic
 
 # distances relative to the own shape's size
@@ -19,9 +19,6 @@ ON_PLANE = 1e-9
 SAME_POINT = 1e-8
 # largest 1 - |cos| between the normals of coincident planes
 PARALLEL = 1e-12
-
-
-NEIGHBOURS = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
 
 
 class Kernel:
@@ -35,8 +32,10 @@ class Kernel:
         # pos as one array, rows past len(pos) unused
         self.xyz = np.zeros((256, 3))
         self.ids, self.lines, self.signs = {}, defaultdict(set), {}
-        # vertex ids by position, in cells of size merge
-        self.grid = defaultdict(list)
+        # by position, in cells of size merge: the cell's newest vertex id, and each vertex's
+        # next older one in its cell (-1 at the end)
+        self.grid = typed.Dict.empty(types.UniTuple(types.int64, 3), types.int64)
+        self.older = np.full(256, -1)
 
     def planes(self, normal, offset):
         """(plane ids, sides) for planes normal . p = offset; side is -1 where the
@@ -99,17 +98,14 @@ class Kernel:
         if key in self.ids:
             return self.ids[key]
         point = len(key) >= 3 and np.linalg.svd(self.normal[list(key)], compute_uv=False)[2] > 1e-9
-        cell = np.floor(p / self.merge).astype(int)
-        x, y, z = cell.tolist()
-        for dx, dy, dz in NEIGHBOURS:
-            for v in self.grid.get((x + dx, y + dy, z + dz), ()):
-                if np.linalg.norm(self.pos[v] - p) < self.merge:
-                    self.add_planes(v, planes)
-                    if point:
-                        self.ids[key] = v
-                    return v
+        v = grid_find(self.grid, self.older, self.xyz, p, self.merge)
+        if v >= 0:
+            self.add_planes(v, planes)
+            if point:
+                self.ids[key] = v
+            return v
         v = self.new_point(p)
-        self.grid[tuple(cell)].append(v)
+        grid_add(self.grid, self.older, p, self.merge, v)
         if point:
             self.ids[key] = v
         self.add_planes(v, planes)
@@ -119,6 +115,7 @@ class Kernel:
         v = len(self.pos)
         if v == len(self.xyz):
             self.xyz = np.vstack([self.xyz, np.zeros_like(self.xyz)])
+            self.older = np.concatenate([self.older, np.full(v, -1)])
         self.xyz[v] = p
         self.pos.append(p)
         self.on.append(set())
@@ -241,23 +238,18 @@ class Kernel:
             cuts = [tp] if min(st) < 0 < max(st) or st.count(0) >= 2 else []
         if not cuts:
             return work, box
-        m = self.margin
         normal, offset = self.normal[cuts], self.offset[cuts]
         lo, hi = box
-        mid = (lo + hi) @ normal.T / 2 - offset
-        reach = (hi - lo) @ np.abs(normal).T / 2
-        test = np.flatnonzero(~((mid - reach > m) | (mid + reach < -m)).all(1))
-        if not len(test):
+        test = box_test(lo, hi, normal, offset, self.margin).tolist()
+        if not test:
             return work, box
         sub = [work[i] for i in test]
         lens = [len(q) for q, _ in sub]
-        ids = np.fromiter(chain.from_iterable(q for q, _ in sub), int, sum(lens))
-        start = np.concatenate([[0], np.cumsum(lens)[:-1]])
-        dist = self.xyz[ids] @ normal.T - offset
-        clear = ((np.minimum.reduceat(dist, start) > m) | (np.maximum.reduceat(dist, start) < -m)).all(1)
-        # a vertex labelled on a cut plane but farther than margin from it keeps its piece
-        labelled = np.array([[p in self.on[v] for p in cuts] for v in ids.tolist()])
-        clear &= ~np.logical_or.reduceat((labelled & (np.abs(dist) >= m)).any(1), start)
+        ids = np.fromiter(chain.from_iterable(q for q, _ in sub), np.int64, sum(lens))
+        clear = vertex_clear(self.xyz, ids, np.cumsum([0] + lens), normal, offset, self.margin).tolist()
+        # a vertex labelled on a cut plane keeps its piece
+        on = self.on
+        clear = [c and all(on[v].isdisjoint(cuts) for v in q) for c, (q, _) in zip(clear, sub)]
         changed = []
         for i, (q, lab), skip in zip(test, sub, clear):
             if skip:
@@ -390,6 +382,74 @@ def pairwise_sum(a, lo, n):
     half = n // 2
     half -= half % 8
     return pairwise_sum(a, lo, half) + pairwise_sum(a, lo + half, n - half)
+
+
+@njit(cache=True)
+def grid_find(grid, older, xyz, p, merge):
+    """The vertex within merge of p, or -1: the lowest id in the first of the 27 cells
+    around p's (in dx, dy, dz order) holding one. Distances round as numpy's norm does on
+    arm64."""
+    x, y, z = int(np.floor(p[0] / merge)), int(np.floor(p[1] / merge)), int(np.floor(p[2] / merge))
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                cell = (x + dx, y + dy, z + dz)
+                v = grid[cell] if cell in grid else -1
+                found = -1
+                while v >= 0:
+                    d0, d1, d2 = xyz[v, 0] - p[0], xyz[v, 1] - p[1], xyz[v, 2] - p[2]
+                    if np.sqrt(fma(d2, d2, fma(d1, d1, d0 * d0))) < merge:
+                        found = v
+                    v = older[v]
+                if found >= 0:
+                    return found
+    return -1
+
+
+@njit(cache=True)
+def grid_add(grid, older, p, merge, v):
+    cell = (int(np.floor(p[0] / merge)), int(np.floor(p[1] / merge)), int(np.floor(p[2] / merge)))
+    older[v] = grid[cell] if cell in grid else -1
+    grid[cell] = v
+
+
+@njit(cache=True)
+def box_test(lo, hi, normal, offset, margin):
+    """Indices of the boxes lo..hi that some plane normal . p = offset passes within
+    margin of; products round as numpy's matmul does on arm64."""
+    out = np.empty(len(lo), np.int64)
+    n = 0
+    for i in range(len(lo)):
+        s0, s1, s2 = lo[i, 0] + hi[i, 0], lo[i, 1] + hi[i, 1], lo[i, 2] + hi[i, 2]
+        w0, w1, w2 = hi[i, 0] - lo[i, 0], hi[i, 1] - lo[i, 1], hi[i, 2] - lo[i, 2]
+        for j in range(len(offset)):
+            mid = fma(s2, normal[j, 2], fma(s1, normal[j, 1], s0 * normal[j, 0])) / 2 - offset[j]
+            reach = fma(w2, abs(normal[j, 2]), fma(w1, abs(normal[j, 1]), w0 * abs(normal[j, 0]))) / 2
+            if not (mid - reach > margin or mid + reach < -margin):
+                out[n] = i
+                n += 1
+                break
+    return out[:n]
+
+
+@njit(cache=True)
+def vertex_clear(xyz, ids, start, normal, offset, margin):
+    """Whether each polygon ids[start[i]:start[i + 1]] has all its vertices farther than
+    margin on one side of each plane normal . p = offset; products round as numpy's matmul
+    does on arm64."""
+    m = len(start) - 1
+    clear = np.ones(m, np.bool_)
+    for i in range(m):
+        for j in range(len(offset)):
+            lo, hi = np.inf, -np.inf
+            for r in range(start[i], start[i + 1]):
+                v = ids[r]
+                d = fma(xyz[v, 2], normal[j, 2], fma(xyz[v, 1], normal[j, 1], xyz[v, 0] * normal[j, 0])) - offset[j]
+                lo, hi = min(lo, d), max(hi, d)
+            if not (lo > margin or hi < -margin):
+                clear[i] = False
+                break
+    return clear
 
 
 def distinct(loop):
