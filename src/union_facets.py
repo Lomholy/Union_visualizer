@@ -294,8 +294,9 @@ class Kernel:
 @njit(cache=True)
 def fixes_point(normal, ids):
     """Whether the planes ids meet in one point: the smallest singular value of their
-    normals above 1e-9. Its square is e3 / e2 of the normals' Gram matrix to within a
-    relative 1e-18, with e2 and e3 summed from squared 2x2 and 3x3 minors (Cauchy-Binet)."""
+    normals above 1e-9, taken as e3 / e2 of the normals' Gram matrix (the squared smallest
+    singular value up to a relative error of order its own square over the second
+    smallest's), with e2 and e3 summed from squared 2x2 and 3x3 minors (Cauchy-Binet)."""
     e2 = e3 = 0.0
     k = len(ids)
     for a in range(k):
