@@ -33,6 +33,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
+from union_clip import component_class_spec, register_component_classes
 from union_clip import mask_mode_any
 
 
@@ -401,47 +402,6 @@ def build_single_brep_mesh(
     return mesh
 
 
-_CLASS_SPEC_ATTRS = (
-    "parameter_names", "parameter_defaults", "parameter_types",
-    "parameter_units", "parameter_comments", "category", "line_limit",
-)
-
-
-def _component_class_spec(comp):
-    """Plain-data (str/list/dict/int only) snapshot of the attributes
-    mcstasscript's own dynamic class construction assigns - see
-    _register_component_classes for why this has to be plain data rather
-    than the Component instance itself."""
-    return {attr: getattr(comp, attr) for attr in _CLASS_SPEC_ATTRS}
-
-
-def _register_component_classes(class_specs):
-    """Runs once in each freshly spawned worker process, before it accepts
-    any real task. mcstasscript represents each Union_* component as a
-    class it creates *dynamically* at parse time (McStas_instr's
-    _create_component_instance), registering it into
-    mcstasscript.interface.instr's own module globals so a Component
-    instance of that type can be pickled - but that registration only
-    happens in whichever process actually parses an instrument file. A
-    worker spawned by this pool never does that itself, so without this,
-    unpickling a Component instance sent to it fails with an AttributeError
-    ("module ... has no attribute 'Union_box'"). This recreates an
-    equivalent class, matching mcstasscript's own construction, from a
-    plain-data spec built by _component_class_spec - it can't take a live
-    sample Component instead, because that instance would itself need to be
-    pickled to reach this initializer, hitting the same problem one level
-    earlier (unpickling the process's own spawn payload).
-    """
-    import mcstasscript.interface.instr as msi
-
-    for component_name, spec in class_specs.items():
-        if hasattr(msi, component_name):
-            continue
-        input_dict = {key: None for key in spec["parameter_names"]}
-        input_dict.update(spec)
-        setattr(msi, component_name, type(component_name, (msi.Component,), input_dict))
-
-
 # Reused across calls rather than recreated per call, so the worker
 # processes are spawned once (lazily, on first submit) and stay warm across
 # reloads instead of paying process-startup cost every time. Rebuilt (see
@@ -467,12 +427,12 @@ def _get_mesh_build_pool(union_geometries):
 
     if _mesh_build_pool is None:
         class_specs = {
-            name: _component_class_spec(comp)
+            name: component_class_spec(comp)
             for name, comp in sample_components.items()
         }
         _mesh_build_pool = ProcessPoolExecutor(
             max_workers=os.cpu_count() or 1,
-            initializer=_register_component_classes,
+            initializer=register_component_classes,
             initargs=(class_specs,),
         )
         _mesh_build_pool_component_types = needed_types

@@ -8,7 +8,11 @@ Every shape answers two questions in world space: which points are inside
 it, and where segments cross its surface. The clip plane is one more shape,
 a box on the removed side that takes priority over every component."""
 
+import os
+import pickle
 import re
+from concurrent.futures import ProcessPoolExecutor
+from itertools import count
 
 import numpy as np
 import trimesh
@@ -772,30 +776,119 @@ def build_shapes(union_geometries, world_matrices):
 
 
 def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, world_bboxes=None, names=None,
-                       close_cuts=False):
+                       close_cuts=False, parallel=True):
     """{name: trimesh or None} for names (default: every component). Masks, unknown
     shapes and fully hidden components map to None. close_cuts adds the walls
-    that close each component where higher priorities and masks cut it."""
+    that close each component where higher priorities and masks cut it. With
+    parallel, components are clipped in worker processes."""
     if world_bboxes is None:
         world_bboxes = compute_all_world_bboxes(
             {n: c for n, c in union_geometries.items() if c.component_name in KNOWN_SHAPES},
             world_matrices,
         )
     shapes = build_shapes(union_geometries, world_matrices)
-    meshes, geometry = {}, {}
-    for name in union_geometries if names is None else names:
+    names = list(union_geometries if names is None else names)
+    todo = []
+    for name in names:
         comp = union_geometries[name]
         if is_mask(comp) or shapes[name] is None:
             if verbose and is_mask(comp):
                 print(f"{name} is a mask, and is therefore not meshed.")
-            meshes[name] = None
             continue
-        result = clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts, geometry)
-        if isinstance(result, tuple):
+        todo.append(name)
+    if parallel and len(todo) > 1 and (os.cpu_count() or 1) > 1:
+        results = _clip_in_pool(todo, union_geometries, world_matrices, world_bboxes, clip, close_cuts)
+    else:
+        geometry = {}
+        results = {name: clip_component(union_geometries[name], union_geometries, shapes, world_bboxes, clip,
+                                        close_cuts, geometry) for name in todo}
+    meshes = {}
+    for name in names:
+        result = results.get(name)
+        if result is None:
+            meshes[name] = None
+        elif isinstance(result, tuple):
             meshes[name] = trimesh.Trimesh(*result, process=False) if len(result[1]) else None
         else:
             meshes[name] = _to_mesh(result)
     return meshes
+
+
+_pool = None
+_build_ids = count()
+# in a worker: (build id, union geometries, shapes, world bboxes, clip, facet geometry cache)
+# of the build it last clipped for
+_worker_build = None
+
+
+def _clip_in_pool(names, union_geometries, world_matrices, world_bboxes, clip, close_cuts):
+    """{name: clip_component result} with one task per component in a process pool
+    kept for the life of this process. The build goes to the workers pickled, with the
+    class specs they need to unpickle its components."""
+    global _pool
+    if _pool is None:
+        _pool = ProcessPoolExecutor(max_workers=os.cpu_count())
+    # only mcstasscript's dynamic component classes need recreating in a worker
+    specs = {c.component_name: component_class_spec(c) for c in union_geometries.values()
+             if hasattr(c, "parameter_names")}
+    build = (os.getpid(), next(_build_ids))
+    payload = pickle.dumps((union_geometries, world_matrices, world_bboxes, clip))
+    futures = [_pool.submit(_clip_in_worker, build, specs, payload, name, close_cuts) for name in names]
+    return {name: f.result() for name, f in zip(names, futures)}
+
+
+def _clip_in_worker(build, specs, payload, name, close_cuts):
+    """clip_component for one component of a build, reusing what this worker set up for
+    that build."""
+    global _worker_build
+    if _worker_build is None or _worker_build[0] != build:
+        register_component_classes(specs)
+        union_geometries, world_matrices, world_bboxes, clip = pickle.loads(payload)
+        _worker_build = (build, union_geometries, build_shapes(union_geometries, world_matrices), world_bboxes,
+                         clip, {})
+    _, union_geometries, shapes, world_bboxes, clip, geometry = _worker_build
+    return clip_component(union_geometries[name], union_geometries, shapes, world_bboxes, clip, close_cuts, geometry)
+
+
+_CLASS_SPEC_ATTRS = (
+    "parameter_names", "parameter_defaults", "parameter_types",
+    "parameter_units", "parameter_comments", "category", "line_limit",
+)
+
+
+def component_class_spec(comp):
+    """Plain-data (str/list/dict/int only) snapshot of the attributes
+    mcstasscript's own dynamic class construction assigns - see
+    register_component_classes for why this has to be plain data rather
+    than the Component instance itself."""
+    return {attr: getattr(comp, attr) for attr in _CLASS_SPEC_ATTRS}
+
+
+def register_component_classes(class_specs):
+    """Runs once in each freshly spawned worker process, before it accepts
+    any real task. mcstasscript represents each Union_* component as a
+    class it creates *dynamically* at parse time (McStas_instr's
+    _create_component_instance), registering it into
+    mcstasscript.interface.instr's own module globals so a Component
+    instance of that type can be pickled - but that registration only
+    happens in whichever process actually parses an instrument file. A
+    worker spawned by this pool never does that itself, so without this,
+    unpickling a Component instance sent to it fails with an AttributeError
+    ("module ... has no attribute 'Union_box'"). This recreates an
+    equivalent class, matching mcstasscript's own construction, from a
+    plain-data spec built by component_class_spec - it can't take a live
+    sample Component instead, because that instance would itself need to be
+    pickled to reach this initializer, hitting the same problem one level
+    earlier (unpickling the process's own spawn payload).
+    """
+    import mcstasscript.interface.instr as msi
+
+    for component_name, spec in class_specs.items():
+        if hasattr(msi, component_name):
+            continue
+        input_dict = {key: None for key in spec["parameter_names"]}
+        input_dict.update(spec)
+        setattr(msi, component_name, type(component_name, (msi.Component,), input_dict))
 
 
 KNOWN_SHAPES = ("Union_box", "Union_cylinder", "Union_cone", "Union_sphere", "Union_mesh")

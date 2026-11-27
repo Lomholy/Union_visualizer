@@ -529,6 +529,27 @@ class TestWatertightInstruments(unittest.TestCase):
                     self.assertGreater(mesh.volume, 0)
 
 
+class TestParallelBuild(unittest.TestCase):
+    # components clipped in worker processes give the serial meshes, with close cuts off and on
+    def test_pool_matches_serial(self):
+        import preprocess
+        import union_clip
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, world, geoms = preprocess.preprocess(str(DATA / "union_clip_shapes.instr"), False)
+        for close_cuts in (False, True):
+            serial = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=close_cuts, parallel=False)
+            pooled = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=close_cuts, parallel=True)
+            self.assertEqual(list(pooled), list(serial))
+            for name, mesh in serial.items():
+                with self.subTest(close_cuts=close_cuts, component=name):
+                    if mesh is None:
+                        self.assertIsNone(pooled[name])
+                        continue
+                    np.testing.assert_array_equal(pooled[name].vertices, mesh.vertices)
+                    np.testing.assert_array_equal(pooled[name].faces, mesh.faces)
+
+
 class TestClosedIncrementalRebuild(unittest.TestCase):
     # moving the cylinder that cuts touch_a rebuilds only the components that depend on it
     DRILL = """
