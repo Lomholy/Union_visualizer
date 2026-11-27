@@ -12,6 +12,7 @@ import re
 
 import numpy as np
 import trimesh
+from numba import njit
 
 from preprocess import box_dimensions
 from clipping import clip_plane
@@ -138,6 +139,67 @@ def ray_triangle(origin, direction, tri, t_max, barycentric=False):
     return (hit, t, u, v) if barycentric else (hit, t)
 
 
+@njit(cache=True)
+def mesh_parity(p, d, lo, hi, child, second, start, stop, order, tri, edge_tol):
+    """BVH walk plus Moller-Trumbore per ray from p along d, in ray_triangle's arithmetic:
+    (odd number of crossings, a hit within edge_tol of a triangle edge)."""
+    odd = np.zeros(len(p), np.bool_)
+    ambiguous = np.zeros(len(p), np.bool_)
+    inv = np.zeros(3)
+    for a in range(3):
+        if d[a] != 0:
+            inv[a] = 1.0 / d[a]
+    stack = np.empty(len(lo) + 1, np.int64)
+    for r in range(len(p)):
+        o0, o1, o2 = p[r, 0], p[r, 1], p[r, 2]
+        top = 0
+        stack[0] = 0
+        while top >= 0:
+            node = stack[top]
+            top -= 1
+            t_near, t_far = -np.inf, np.inf
+            for a in range(3):
+                if d[a] == 0:
+                    inside = lo[node, a] <= p[r, a] and p[r, a] <= hi[node, a]
+                    near, far = (-np.inf, np.inf) if inside else (np.inf, -np.inf)
+                else:
+                    t1 = (lo[node, a] - p[r, a]) * inv[a]
+                    t2 = (hi[node, a] - p[r, a]) * inv[a]
+                    near, far = min(t1, t2), max(t1, t2)
+                t_near, t_far = max(t_near, near), min(t_far, far)
+            if not (t_near <= t_far and t_far >= 0):
+                continue
+            if child[node] >= 0:
+                stack[top + 1] = child[node]
+                stack[top + 2] = second[node]
+                top += 2
+                continue
+            for k in range(start[node], stop[node]):
+                j = order[k]
+                v00, v01, v02 = tri[j, 0, 0], tri[j, 0, 1], tri[j, 0, 2]
+                e10, e11, e12 = tri[j, 1, 0] - v00, tri[j, 1, 1] - v01, tri[j, 1, 2] - v02
+                e20, e21, e22 = tri[j, 2, 0] - v00, tri[j, 2, 1] - v01, tri[j, 2, 2] - v02
+                p0 = d[1] * e22 - d[2] * e21
+                p1 = d[2] * e20 - d[0] * e22
+                p2 = d[0] * e21 - d[1] * e20
+                det = e10 * p0 + e11 * p1 + e12 * p2
+                if not abs(det) > 1e-300:
+                    continue
+                f = 1 / det
+                s0, s1, s2 = o0 - v00, o1 - v01, o2 - v02
+                u = f * (s0 * p0 + s1 * p1 + s2 * p2)
+                q0 = s1 * e12 - s2 * e11
+                q1 = s2 * e10 - s0 * e12
+                q2 = s0 * e11 - s1 * e10
+                v = f * (d[0] * q0 + d[1] * q1 + d[2] * q2)
+                t = f * (e20 * q0 + e21 * q1 + e22 * q2)
+                if u >= 0 and v >= 0 and u + v <= 1 and t > 0 and t < np.inf:
+                    odd[r] = not odd[r]
+                    if u < edge_tol or v < edge_tol or u + v > 1 - edge_tol:
+                        ambiguous[r] = True
+    return odd, ambiguous
+
+
 def orient_outward(tri, center):
     """Flip triangles of a convex surface whose normal points towards center."""
     normal = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
@@ -187,16 +249,9 @@ class MeshShape(Shape):
 
     def parity(self, p, direction):
         """(odd number of crossings, ray passed close to an edge) for rays from p."""
-        odd = np.zeros(len(p), bool)
-        ambiguous = np.zeros(len(p), bool)
-        d = np.broadcast_to(direction, p.shape)
-        i, j = self.bvh.candidates(p, d, np.inf)
-        if len(i):
-            hit, _, u, v = ray_triangle(p[i], d[i], self.tri[j], np.inf, barycentric=True)
-            np.logical_xor.at(odd, i[hit], True)
-            edge = hit & ((u < self.EDGE_TOL) | (v < self.EDGE_TOL) | (u + v > 1 - self.EDGE_TOL))
-            ambiguous[i[edge]] = True
-        return odd, ambiguous
+        b = self.bvh
+        return mesh_parity(p, direction, b.lo, b.hi, b.child, b.second, b.start, b.stop, b.order,
+                           self.tri, self.EDGE_TOL)
 
     def contains(self, p):
         """gmesh_inside: parity of the first ray, or the majority of three when it grazes an edge."""
