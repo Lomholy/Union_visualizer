@@ -573,5 +573,16 @@ COMPONENT master"""
                 np.testing.assert_array_equal(incremental[name].faces, full[name].faces)
 
 
+class TestKernelPlanes(unittest.TestCase):
+    def test_coincident_planes_in_one_call_share_an_id(self):
+        from union_facets import Kernel
+        kernel = Kernel(1.0)
+        # offsets in neighbouring rounding bins, closer than eps
+        ids, sides = kernel.planes(np.array([[0, 1.0, 0], [0, 1.0, 0], [0, -1.0, 0]]),
+                                   np.array([0.49, 0.51, -0.5]) * kernel.eps)
+        self.assertEqual(len(set(ids.tolist())), 1)
+        self.assertEqual(sides.tolist()[2], -sides.tolist()[0])
+
+
 if __name__ == "__main__":
     unittest.main()

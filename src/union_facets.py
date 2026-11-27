@@ -51,30 +51,44 @@ class Kernel:
         ids, sides = np.zeros(len(offset), int), np.ones(len(offset), int)
         fresh = np.ones(len(offset), bool)
         if len(self.offset):
-            # coincident planes have |offset| within eps: pair each new plane with the stored
-            # planes in that band of the |offset|-sorted list
-            # ponytail: many stored planes at one |offset| make the band O(n*m), a normal hash if that bites
-            order = np.argsort(np.abs(self.offset), kind="stable")
-            size = np.abs(self.offset[order])
-            lo = np.searchsorted(size, np.abs(offset) - self.eps, "left")
-            hi = np.searchsorted(size, np.abs(offset) + self.eps, "right")
-            count = hi - lo
-            new = np.repeat(np.arange(len(offset)), count)
-            old = order[np.arange(count.sum()) - np.repeat(np.cumsum(count) - count - lo, count)]
-            dot = np.einsum("ij,ij->i", normal[new], self.normal[old])
-            same = (1 - np.abs(dot) < PARALLEL) & (np.abs(offset[new] - np.sign(dot) * self.offset[old]) < self.eps)
-            new, old, dot = new[same], old[same], dot[same]
-            first = np.lexsort((old, new))
-            new, old, dot = new[first], old[first], dot[first]
-            keep = np.r_[True, new[1:] != new[:-1]][:len(new)]
-            hit = new[keep]
+            hit, old, dot = self.coincident(normal, offset, self.normal, self.offset)
             fresh[hit] = False
-            ids[hit] = old[keep]
-            sides[hit] = np.sign(dot[keep])
-        ids[fresh] = len(self.offset) + np.arange(fresh.sum())
-        self.normal = np.vstack([self.normal, normal[fresh]])
-        self.offset = np.concatenate([self.offset, offset[fresh]])
+            ids[hit] = old
+            sides[hit] = np.sign(dot)
+        # fresh planes coincident with an earlier fresh one take its id
+        f = np.flatnonzero(fresh)
+        rep, side = np.arange(len(f)), np.ones(len(f), int)
+        for i, j, d in zip(*self.coincident(normal[f], offset[f], normal[f], offset[f], earlier=True)):
+            rep[i], side[i] = rep[j], side[j] * np.sign(d)
+        own = rep == np.arange(len(f))
+        ids[f] = (len(self.offset) + np.cumsum(own) - 1)[rep]
+        sides[f] = side
+        self.normal = np.vstack([self.normal, normal[f[own]]])
+        self.offset = np.concatenate([self.offset, offset[f[own]]])
         return ids, sides
+
+    def coincident(self, normal, offset, s_normal, s_offset, earlier=False):
+        """(i, j, dot): each plane i matched to the first plane j of the s set coincident with
+        it (j < i only if earlier), and the dot product of their normals."""
+        # coincident planes have |offset| within eps: pair each plane with the s planes in
+        # that band of the |offset|-sorted list
+        # ponytail: many planes at one |offset| make the band O(n*m), a normal hash if that bites
+        order = np.argsort(np.abs(s_offset), kind="stable")
+        size = np.abs(s_offset[order])
+        lo = np.searchsorted(size, np.abs(offset) - self.eps, "left")
+        hi = np.searchsorted(size, np.abs(offset) + self.eps, "right")
+        count = hi - lo
+        new = np.repeat(np.arange(len(offset)), count)
+        old = order[np.arange(count.sum()) - np.repeat(np.cumsum(count) - count - lo, count)]
+        dot = np.einsum("ij,ij->i", normal[new], s_normal[old])
+        same = (1 - np.abs(dot) < PARALLEL) & (np.abs(offset[new] - np.sign(dot) * s_offset[old]) < self.eps)
+        if earlier:
+            same &= old < new
+        new, old, dot = new[same], old[same], dot[same]
+        first = np.lexsort((old, new))
+        new, old, dot = new[first], old[first], dot[first]
+        keep = np.r_[True, new[1:] != new[:-1]][:len(new)]
+        return new[keep], old[keep], np.sign(dot[keep]).astype(int)
 
     def vertex(self, p, planes):
         """The vertex on these planes at p: an existing one within merge of p, or a new one.
@@ -281,7 +295,9 @@ class Kernel:
                 tol = self.merge / np.sqrt(length)
                 vs = np.fromiter(between, int, len(between))
                 t = (self.xyz[vs] - pa) @ d / length
-                inside = (tol < t) & (t < 1 - tol)
+                # near-parallel planes share vertices off any one line
+                off = self.xyz[vs] - pa - t[:, None] * d
+                inside = (tol < t) & (t < 1 - tol) & (np.einsum("ij,ij->i", off, off) < self.merge ** 2)
                 vs, t = vs[inside], t[inside]
                 out += vs[np.lexsort((vs, t))].tolist()
         return out
