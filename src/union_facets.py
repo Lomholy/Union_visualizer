@@ -112,22 +112,6 @@ class Kernel:
         self.xyz = self.pts[0]
         return v
 
-    def new_point(self, p):
-        grow(self.pts, self.store, self.count)
-        self.xyz = self.pts[0]
-        v = int(self.count[0])
-        self.xyz[v] = p
-        self.count[0] += 1
-        return v
-
-    def common(self, vs):
-        """The planes every vertex of vs is labelled on, ascending."""
-        return common(self.store, self.is_on, np.asarray(vs, np.int64))
-
-    def on_line(self, planes):
-        """The vertices on the line of some two of planes (ascending ids), each once."""
-        return on_line(self.store, self.lines, np.asarray(planes, np.int64))
-
     def refine(self, ids, start, plane, half, keep):
         """The pieces ids[start[i]:start[i + 1]] each refined against the half-spaces of
         half (plane ids, sides), as (ids, start, source piece, inside) of the kept ones:
@@ -155,25 +139,15 @@ class Kernel:
         ids = np.fromiter(chain.from_iterable(q for q, _ in work), np.int64, sum(lens))
         return piece_bounds(self.xyz, ids, np.cumsum([0] + lens))
 
-    def repair(self, poly):
-        """poly with every vertex lying on one of its edges inserted into that edge."""
-        out = []
-        for i, a in enumerate(poly):
-            b = poly[(i + 1) % len(poly)]
-            out.append(a)
-            vs = self.on_line(self.common((a, b)))
-            vs = vs[(vs != a) & (vs != b)]
-            if len(vs):
-                out += on_edge(self.xyz, a, b, vs, self.merge).tolist()
+    def triangles(self, loops):
+        """Triangles of the convex polygons loops, each repaired then fanned, as rows of
+        vertex ids; fan centres are added as new vertices in loop order."""
+        lens = [len(q) for q in loops]
+        ids = np.fromiter(chain.from_iterable(loops), np.int64, sum(lens))
+        out = triangulate(self.pts, self.count, self.store, self.is_on, self.lines, self.merge, ids,
+                          np.cumsum([0] + lens))
+        self.xyz = self.pts[0]
         return out
-
-    def fan(self, poly):
-        """Triangles of a convex polygon; a fan from its centre when vertices lie on its sides."""
-        n = len(poly)
-        if not any(len(self.common((poly[i - 1], poly[i], poly[(i + 1) % n]))) > 1 for i in range(n)):
-            return [(poly[0], poly[i], poly[i + 1]) for i in range(1, n - 1)]
-        c = self.new_point(self.xyz[poly].mean(0))
-        return [(c, poly[i], poly[(i + 1) % n]) for i in range(n)]
 
 
 @njit(cache=True)
@@ -637,6 +611,49 @@ def on_edge(xyz, a, b, vs, merge):
 
 
 @njit(cache=True)
+def triangulate(pts, count, store, is_on, lines, merge, ids, start):
+    """Triangles of each convex polygon ids[start[i]:start[i + 1]] with every vertex lying
+    on one of its edges inserted into that edge: a fan from its first vertex, or from a new
+    vertex at its mean point when vertices lie on its sides."""
+    out = []
+    for i in range(len(start) - 1):
+        poly = ids[start[i]:start[i + 1]]
+        loop = []
+        for k in range(len(poly)):
+            a, b = poly[k], poly[(k + 1) % len(poly)]
+            loop.append(a)
+            vs = on_line(store, lines, common(store, is_on, np.array([a, b])))
+            vs = vs[(vs != a) & (vs != b)]
+            if len(vs):
+                for v in on_edge(pts[0], a, b, vs, merge):
+                    loop.append(v)
+        n = len(loop)
+        side = False
+        for k in range(n):
+            if len(common(store, is_on, np.array([loop[k - 1], loop[k], loop[(k + 1) % n]]))) > 1:
+                side = True
+                break
+        if not side:
+            for k in range(1, n - 1):
+                out.append((loop[0], loop[k], loop[k + 1]))
+            continue
+        centre = np.zeros(3)
+        for v in loop:
+            centre += pts[0][v]
+        centre /= n
+        grow(pts, store, count)
+        c = count[0]
+        pts[0][c] = centre
+        count[0] += 1
+        for k in range(n):
+            out.append((c, loop[k], loop[(k + 1) % n]))
+    faces = np.empty((len(out), 3), np.int64)
+    for k in range(len(out)):
+        faces[k, 0], faces[k, 1], faces[k, 2] = out[k]
+    return faces
+
+
+@njit(cache=True)
 def piece_geometry(xyz, ids, start):
     """(sum of the cross products of consecutive points, mean point, perimeter) of each
     polygon ids[start[i]:start[i + 1]] of points xyz."""
@@ -900,10 +917,9 @@ def closed_cut(own, cutters, clip_box=None, geometry=None):
             start = start.tolist()
             pieces += [(ids[a:b].tolist(), plane, k, lab) for a, b, lab in zip(start, start[1:], labs)]
     loops = classify_pieces(kernel, shapes, pieces, region, scale)
-    faces = [t for poly in loops for t in kernel.fan(kernel.repair(poly))]
-    if not faces:
+    faces = kernel.triangles(loops)
+    if not len(faces):
         return np.zeros((0, 3)), np.zeros((0, 3), int)
-    faces = np.array(faces)
     used, faces = np.unique(faces, return_inverse=True)
     return kernel.xyz[used], faces.reshape(-1, 3)
 

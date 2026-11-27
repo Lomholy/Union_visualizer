@@ -636,6 +636,24 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertEqual(kernel.vertex(np.full(3, 5.0), a.tolist()), first)
         self.assertEqual(kernel.vertex(np.full(3, 7.0), b.tolist()), second)
 
+    def test_triangles_repair_edges_and_fan_from_the_centre(self):
+        from union_facets import Kernel
+        kernel = Kernel(1.0)
+        ids, _ = kernel.planes(np.array([[0, 0, 1.0], [1.0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [0, 1.0, 0]]),
+                               np.array([0, 0, 1.0, 0, 1.0]))
+        z, x0, x1, y0, y1 = ids.tolist()
+        square = [kernel.vertex(p, planes) for p, planes in
+                  [([0, 0, 0], (z, x0, y0)), ([1, 0, 0], (z, x1, y0)), ([1, 1, 0], (z, x1, y1)),
+                   ([0, 1, 0], (z, x0, y1))]]
+        mid = kernel.vertex(np.array([0.5, 0, 0]), (z, y0))
+        triangle = [kernel.vertex(p, planes) for p, planes in
+                    [([0, 0, 1], (x0, y0)), ([1, 0, 1], (x1, y0)), ([0, 1, 1], (x0, y1))]]
+        faces = kernel.triangles([square, triangle])
+        c = kernel.count[0] - 1
+        loop = [square[0], mid] + square[1:]
+        self.assertEqual(faces.tolist(), [[c, loop[k], loop[(k + 1) % 5]] for k in range(5)] + [triangle])
+        np.testing.assert_allclose(kernel.xyz[c], [0.5, 0.4, 0])
+
 
 
 class TestNumbaDependency(unittest.TestCase):
