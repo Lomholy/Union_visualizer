@@ -260,6 +260,221 @@ class TestCloseCuts(unittest.TestCase):
         self.assertAlmostEqual(area(build([a, b], {"b": translation(x=1.1)}).get("a")), 4 + 4 * 2 * 1.1, places=6)
 
 
+class TestClosedCut(unittest.TestCase):
+    # Close cut surfaces on convex cutters: the kept surface and the walls share their cut vertices
+    CUTTERS = {
+        "box": (box("b", 2, 2.5, 2.5, priority=2), translation(x=1.1)),
+        "cylinder_side": (FakeComp("Union_cylinder", "b", priority=2, radius=0.5, yheight=3), translation(x=0.93, z=0.07)),
+        "cylinder_cap": (FakeComp("Union_cylinder", "b", priority=2, radius=0.5, yheight=1),
+                         translation(x=0.03, y=1.07, z=0.11)),
+        "cone": (FakeComp("Union_cone", "b", priority=2, radius_bottom=0.5, radius_top=0.2, yheight=1),
+                 translation(x=0.05, y=0.93, z=-0.12)),
+        "sphere": (FakeComp("Union_sphere", "b", priority=2, radius=0.5), translation(x=0.91, y=0.13, z=0.07)),
+    }
+
+    def build_pair(self, cutter, matrix, close_cuts=True):
+        geoms = {"a": box("a", 2, 2, 2, priority=1), "b": cutter}
+        with contextlib.redirect_stdout(io.StringIO()):
+            return meshing.build_all_meshes(geoms, {"a": np.eye(4), "b": matrix}, {}, {}, 64, NO_CLIP,
+                                            export=False, mesher="union", close_cuts=close_cuts)
+
+    def assert_closed(self, mesh):
+        self.assertTrue(mesh.is_watertight)
+        self.assertTrue(mesh.is_winding_consistent)
+        self.assertGreater(mesh.volume, 0)
+        edges = np.sort(mesh.faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1)
+        self.assertEqual(set(np.unique(edges, axis=0, return_counts=True)[1]), {2})
+        faces = np.sort(mesh.faces, axis=1)
+        self.assertEqual(len(np.unique(faces, axis=0)), len(faces))
+        self.assertFalse(np.any((faces[:, 0] == faces[:, 1]) | (faces[:, 1] == faces[:, 2])))
+
+    def facet_volume_inside_a(self, cutter, matrix):
+        # the cutter's display polyhedron cut by the six faces of a (a cube of side 2 at the origin)
+        import union_clip
+        solid = trimesh.Trimesh(union_clip.make_shape(cutter, matrix).triangles().reshape(-1, 3)).convex_hull
+        for axis in range(3):
+            for sign in (1, -1):
+                normal = np.zeros(3)
+                normal[axis] = -sign
+                solid = trimesh.intersections.slice_mesh_plane(solid, normal, -normal, cap=True)
+        return solid.volume
+
+    def test_convex_cutters_close_watertight(self):
+        for name, (cutter, matrix) in self.CUTTERS.items():
+            with self.subTest(cutter=name):
+                meshes = self.build_pair(cutter, matrix)
+                for mesh in meshes.values():
+                    self.assert_closed(mesh)
+                expected = 2 * 2 * 1.1 if name == "box" else 8 - self.facet_volume_inside_a(cutter, matrix)
+                self.assertAlmostEqual(meshes["a"].volume / expected, 1, delta=5e-4)
+
+    def test_kept_area_matches_the_open_cut(self):
+        # R6: the faceted cut keeps the open cut's area of a's own surface within 1%
+        for name in ("cylinder_side", "cylinder_cap", "cone", "sphere"):
+            with self.subTest(cutter=name):
+                closed = self.build_pair(*self.CUTTERS[name])["a"]
+                on_surface = np.abs(closed.triangles_center).max(1) > 1 - 1e-9
+                kept = closed.area_faces[on_surface].sum()
+                self.assertAlmostEqual(kept / area(self.build_pair(*self.CUTTERS[name], close_cuts=False)["a"]), 1,
+                                       delta=0.01)
+
+    def test_cutters_with_flush_faces_close_once(self):
+        # b and c share their y and z face planes, facing the same way: their walls overlap there
+        geoms = {c.name: c for c in (box("a", 2, 2, 2, priority=1), box("b", 1, 1, 1, priority=2),
+                                     box("c", 1, 1, 1, priority=3))}
+        world = {"a": np.eye(4), "b": translation(x=0.5), "c": translation(x=0.8)}
+        with contextlib.redirect_stdout(io.StringIO()):
+            mesh = meshing.build_all_meshes(geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union",
+                                            close_cuts=True)["a"]
+        self.assert_closed(mesh)
+        self.assertAlmostEqual(mesh.volume, 7.0, places=9)
+
+    def test_boxes_sharing_a_face_both_close(self):
+        # b touches a's +x face with its -x face: each keeps its own face, neither gets a wall there
+        meshes = self.build_pair(box("b", 2, 1.5, 1.5, priority=2), translation(x=2))
+        for name, volume, surface in (("a", 8.0, 24.0), ("b", 4.5, 4 * 2 * 1.5 + 2 * 1.5 * 1.5)):
+            with self.subTest(name=name):
+                self.assert_closed(meshes[name])
+                self.assertAlmostEqual(meshes[name].volume, volume, places=9)
+                self.assertAlmostEqual(meshes[name].area, surface, places=9)
+
+
+def rotation_y(degrees, **shift):
+    m = translation(**shift)
+    a = math.radians(degrees)
+    m[:3, :3] = [[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]]
+    return m
+
+
+class TestClosedCutGeneral(unittest.TestCase):
+    # Close cut surfaces with masks, meshes, meeting walls and degenerate positions
+    ICOSPHERE = str(DATA / "union_clip_icosphere.stl")
+    assert_closed = TestClosedCut.assert_closed
+    build_pair = TestClosedCut.build_pair
+    facet_volume_inside_a = TestClosedCut.facet_volume_inside_a
+
+    def build_closed(self, comps, matrices, close_cuts=True):
+        geoms = {c.name: c for c in comps}
+        world = {name: matrices.get(name, np.eye(4)) for name in geoms}
+        with contextlib.redirect_stdout(io.StringIO()):
+            return meshing.build_all_meshes(geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union",
+                                            close_cuts=close_cuts)
+
+    def masked(self, setting, close_cuts=True):
+        # a (cube of side 2) masked by m1 (x < -0.1) and m2 (y < -0.1)
+        comps = [box("a", 2, 2, 2), box("m1", 2, 3, 3, mask_string="a", mask_setting=setting),
+                 box("m2", 3, 2, 3, mask_string="a", mask_setting=setting)]
+        return self.build_closed(comps, {"m1": translation(x=-1.1), "m2": translation(y=-1.1)}, close_cuts)["a"]
+
+    def test_masks_close_watertight(self):
+        for setting, volume in (("All", 0.9 * 0.9 * 2), ("ANY", 8 - 1.1 * 1.1 * 2)):
+            with self.subTest(setting=setting):
+                mesh = self.masked(setting)
+                self.assert_closed(mesh)
+                self.assertAlmostEqual(mesh.volume, volume, places=9)
+
+    def test_masked_kept_area_matches_the_open_cut(self):
+        # R6
+        for setting in ("All", "ANY"):
+            with self.subTest(setting=setting):
+                closed = self.masked(setting)
+                kept = closed.area_faces[np.abs(closed.triangles_center).max(1) > 1 - 1e-9].sum()
+                self.assertAlmostEqual(kept / area(self.masked(setting, close_cuts=False)), 1, delta=0.01)
+
+    def test_walls_meeting_close_watertight(self):
+        # b's and c's walls in a meet along a line inside a
+        comps = [box("a", 2, 2, 2), box("b", 1, 1.5, 3, priority=2),
+                 FakeComp("Union_cylinder", "c", priority=3, radius=0.6, yheight=3)]
+        meshes = self.build_closed(comps, {"b": translation(x=0.9, y=0.7), "c": translation(x=0.5, z=0.85)})
+        for name, mesh in meshes.items():
+            with self.subTest(name=name):
+                self.assert_closed(mesh)
+
+    def test_icosphere_cutter_closes_watertight(self):
+        cutter = FakeComp("Union_mesh", "b", priority=2, filename=self.ICOSPHERE, coordinate_scale=0.02)
+        matrix = translation(x=0.93, y=0.11, z=0.07)
+        meshes = self.build_pair(cutter, matrix)
+        for mesh in meshes.values():
+            self.assert_closed(mesh)
+        self.assertAlmostEqual(meshes["a"].volume / (8 - self.facet_volume_inside_a(cutter, matrix)), 1, delta=5e-4)
+
+    def test_icosphere_cut_by_a_box_closes_watertight(self):
+        comps = [FakeComp("Union_mesh", "a", filename=self.ICOSPHERE, coordinate_scale=0.02),
+                 box("b", 1, 1, 1, priority=2)]
+        for mesh in self.build_closed(comps, {"b": translation(x=0.6, y=0.1)}).values():
+            self.assert_closed(mesh)
+
+    def test_mesh_with_flat_faces_closes_watertight(self):
+        # own is an STL cube (side 2) whose flat faces hold 2, or after subdividing 8, coplanar triangles
+        cases = {"flush": (0, translation(x=1.5), 8.0),
+                 "crossing": (1, translation(x=0.93, y=0.31, z=-0.27), 8 - 0.57)}
+        for name, (subdivisions, matrix, volume) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "cube.stl"
+                cube = trimesh.creation.box(extents=(2, 2, 2))
+                for _ in range(subdivisions):
+                    cube = cube.subdivide()
+                cube.export(path)
+                own = FakeComp("Union_mesh", "a", filename=str(path), coordinate_scale=1.0)
+                mesh = self.build_closed([own, box("b", 1, 1, 1, priority=2)], {"b": matrix})["a"]
+                self.assert_closed(mesh)
+                self.assertAlmostEqual(mesh.volume, volume, places=9)
+
+    def test_cut_through_pole_and_along_facet_edges(self):
+        # the plane x = 0 holds the sphere's poles and two meridians of its facets
+        sphere = FakeComp("Union_sphere", "a", radius=0.7)
+        whole = self.build_closed([sphere], {})["a"].volume
+        mesh = self.build_closed([sphere, box("b", 1, 2, 2, priority=2)], {"b": translation(x=0.5)})["a"]
+        self.assert_closed(mesh)
+        self.assertAlmostEqual(mesh.volume, whole / 2, places=9)
+
+    def test_cut_through_cone_apex(self):
+        cone = FakeComp("Union_cone", "a", radius_bottom=0.6, radius_top=0.0, yheight=1)
+        tilt = math.radians(3)
+        mesh = self.build_closed([cone, box("b", 1, 2, 2, priority=2)],
+                                 {"b": rotation_y(3, x=0.5 * math.cos(tilt), z=-0.5 * math.sin(tilt))})["a"]
+        self.assert_closed(mesh)
+
+    def test_cutter_edge_lying_on_a_face(self):
+        # b's edge touches a's top face from outside: a stays whole
+        mesh = self.build_closed([box("a", 2, 2, 2), box("b", 1, 1, 1, priority=2)],
+                                 {"b": rotation_y(45, x=0.3, z=1 + 0.5 * math.sqrt(2))})["a"]
+        self.assert_closed(mesh)
+        self.assertAlmostEqual(mesh.area, 24.0, places=9)
+
+    def test_sphere_axis_lying_on_a_face(self):
+        # each band of b's facets has its planes meet at one point of b's axis, on a's face x = 1
+        meshes = self.build_pair(FakeComp("Union_sphere", "b", priority=2, radius=0.5), translation(x=1, y=0.13, z=0.07))
+        for mesh in meshes.values():
+            self.assert_closed(mesh)
+
+    def test_tapered_box_with_a_zero_width_face(self):
+        mesh = self.build_closed([box("a", 1, 1, 1, xwidth2=0.0, yheight2=1.0), box("b", 1, 1, 1, priority=2)],
+                                 {"b": translation(x=0.6)})["a"]
+        self.assert_closed(mesh)
+
+    def test_buried_component_has_no_mesh(self):
+        self.assertIsNone(self.build_closed([box("a", 1, 1, 1), box("b", 2, 2, 2, priority=2)], {})["a"])
+
+    def test_cavity_keeps_its_wall(self):
+        meshes = self.build_closed([box("a", 2, 2, 2), box("b", 0.5, 0.5, 0.5, priority=2)],
+                                   {"b": translation(x=0.13, y=0.07)})
+        self.assert_closed(meshes["a"])
+        self.assertAlmostEqual(meshes["a"].volume, 8 - 0.125, places=9)
+        self.assertAlmostEqual(meshes["a"].area, 24 + 1.5, places=9)
+
+    def test_open_mesh_cutter_builds(self):
+        # R1 error case: an open Union_mesh cutter never fails the build
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "open.stl"
+            mesh = trimesh.load_mesh(self.ICOSPHERE)
+            mesh.update_faces(np.arange(len(mesh.faces)) >= 3)
+            mesh.export(path)
+            cutter = FakeComp("Union_mesh", "b", priority=2, filename=str(path), coordinate_scale=0.02)
+            meshes = self.build_pair(cutter, translation(x=0.93, y=0.11, z=0.07))
+        self.assertGreater(area(meshes["a"]), 0)
+
+
 class TestClipBox(unittest.TestCase):
     # R4: the clip plane removes its side of every component
     def test_clip_removes_side(self):
@@ -291,6 +506,134 @@ class TestMcStasReference(unittest.TestCase):
         for name, mcstas_area in reference.items():
             with self.subTest(name=name):
                 self.assertAlmostEqual(area(meshes[name]) / mcstas_area, 1.0, delta=2e-3)
+
+
+class TestWatertightInstruments(unittest.TestCase):
+    # brep's watertight components per instrument, frozen while brep existed: a lower bound
+    def test_brep_watertight_components_are_closed(self):
+        import preprocess
+        import union_clip
+
+        expected = json.loads((DATA / "union_watertight_expected.json").read_text())
+        root = DATA.parent.parent
+        for inp, names in expected.items():
+            with contextlib.redirect_stdout(io.StringIO()):
+                _, world, geoms = preprocess.preprocess(str(root / inp), False)
+                meshes = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=True)
+            for name in names:
+                with self.subTest(instrument=inp, component=name):
+                    mesh = meshes[name]
+                    self.assertIsNotNone(mesh)
+                    self.assertTrue(mesh.is_watertight)
+                    self.assertTrue(mesh.is_winding_consistent)
+                    self.assertGreater(mesh.volume, 0)
+
+
+class TestParallelBuild(unittest.TestCase):
+    # components clipped in worker processes give the serial meshes, with close cuts off and on
+    def test_pool_matches_serial(self):
+        import preprocess
+        import union_clip
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, world, geoms = preprocess.preprocess(str(DATA / "union_clip_shapes.instr"), False)
+        for close_cuts in (False, True):
+            serial = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=close_cuts, parallel=False)
+            pooled = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=close_cuts, parallel=True)
+            self.assertEqual(list(pooled), list(serial))
+            for name, mesh in serial.items():
+                with self.subTest(close_cuts=close_cuts, component=name):
+                    if mesh is None:
+                        self.assertIsNone(pooled[name])
+                        continue
+                    np.testing.assert_array_equal(pooled[name].vertices, mesh.vertices)
+                    np.testing.assert_array_equal(pooled[name].faces, mesh.faces)
+
+
+class TestClosedIncrementalRebuild(unittest.TestCase):
+    # moving the cylinder that cuts touch_a rebuilds only the components that depend on it
+    DRILL = """
+COMPONENT drill = Union_cylinder(priority = 30, radius = 0.03, yheight = 0.2, material_string = "mat")
+AT ({x},0.01,0.013) RELATIVE sample
+
+COMPONENT master"""
+
+    def write(self, tmp, x):
+        text = (DATA / "coincident_faces_test.instr").read_text()
+        path = Path(tmp) / "drilled.instr"
+        path.write_text(text.replace("\nCOMPONENT master", self.DRILL.format(x=x), 1))
+        return str(path)
+
+    def test_rebuilt_mesh_equals_full_rebuild(self):
+        import pipeline
+        import union_clip
+
+        rebuilt = []
+        real = union_clip.build_union_meshes
+
+        def recording(*args, **kwargs):
+            rebuilt.append(kwargs.get("names"))
+            return real(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            kw = dict(mesher="union", close_cuts=True)
+            _, _, meshes, deps, _ = pipeline.compute_mesh_data(self.write(tmp, -0.04), NO_CLIP, **kw)
+            moved = self.write(tmp, -0.03)
+            with mock.patch.object(pipeline, "build_union_meshes", recording):
+                _, _, incremental, _, _ = pipeline.compute_mesh_data(moved, NO_CLIP, meshes=dict(meshes),
+                                                                     dependencies=deps, **kw)
+            _, _, full, _, _ = pipeline.compute_mesh_data(moved, NO_CLIP, **kw)
+        self.assertEqual(sorted(rebuilt[0]), ["drill", "touch_a"])
+        self.assertTrue(full["touch_a"].is_watertight)
+        for name in full:
+            with self.subTest(component=name):
+                if full[name] is None:
+                    self.assertIsNone(incremental[name])
+                    continue
+                np.testing.assert_array_equal(incremental[name].vertices, full[name].vertices)
+                np.testing.assert_array_equal(incremental[name].faces, full[name].faces)
+
+
+class TestKernelPlanes(unittest.TestCase):
+    def test_coincident_planes_in_one_call_share_an_id(self):
+        from union_facets import Kernel
+        kernel = Kernel(1.0)
+        # offsets in neighbouring rounding bins, closer than eps
+        ids, sides = kernel.planes(np.array([[0, 1.0, 0], [0, 1.0, 0], [0, -1.0, 0]]),
+                                   np.array([0.49, 0.51, -0.5]) * kernel.eps)
+        self.assertEqual(len(set(ids.tolist())), 1)
+        self.assertEqual(sides.tolist()[2], -sides.tolist()[0])
+
+    def test_vertex_lookup_takes_lowest_id_in_first_neighbour_cell(self):
+        from union_facets import Kernel
+        kernel = Kernel(1.0)
+        rng = np.random.default_rng(0)
+        cells, pos, got, want = {}, [], [], []
+        for p in rng.uniform(-2, 2, (400, 3)) * kernel.merge:
+            got.append(kernel.vertex(p, ()))
+            x, y, z = np.floor(p / kernel.merge).astype(int).tolist()
+            near = (v for d in np.ndindex(3, 3, 3) for v in cells.get((x + d[0] - 1, y + d[1] - 1, z + d[2] - 1), ())
+                    if np.linalg.norm(pos[v] - p) < kernel.merge)
+            v = next(near, len(pos))
+            if v == len(pos):
+                pos.append(p)
+                cells.setdefault((x, y, z), []).append(v)
+            want.append(v)
+        self.assertEqual(got, want)
+        self.assertLess(len(pos), 400)
+
+
+
+class TestNumbaDependency(unittest.TestCase):
+    # R3 error case: without numba the mesher does not import
+    def test_import_without_numba_names_numba(self):
+        import importlib
+
+        with mock.patch.dict(sys.modules, {"numba": None}):
+            del sys.modules["union_clip"]
+            with self.assertRaises(ImportError) as ctx:
+                importlib.import_module("union_clip")
+        self.assertIn("numba", str(ctx.exception))
 
 
 if __name__ == "__main__":

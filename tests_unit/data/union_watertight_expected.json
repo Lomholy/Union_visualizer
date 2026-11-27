@@ -1,0 +1,83 @@
+{
+ "tests/crack_height.instr": [
+  "metal_cyl_env",
+  "vacuum_cyl_env"
+ ],
+ "tests/cryostat_test.instr": [
+  "orange_layer_0_layer",
+  "orange_layer_0_layer_vac",
+  "orange_layer_0_outer_cut_0",
+  "orange_layer_0_outer_cut_replace_0",
+  "orange_layer_1_layer",
+  "orange_layer_1_layer_vac",
+  "orange_layer_2_layer",
+  "orange_layer_2_layer_vac",
+  "orange_layer_2_outer_cut_0",
+  "orange_layer_2_outer_cut_replace_0",
+  "orange_layer_3_layer",
+  "orange_layer_3_layer_vac",
+  "orange_layer_3_outer_cut_0",
+  "orange_layer_3_outer_cut_replace_0",
+  "sample",
+  "sample_rod",
+  "top",
+  "vertical"
+ ],
+ "tests/fuel_cell.instr": [
+  "Bubble_1",
+  "Bubble_2",
+  "hydro_tube_",
+  "hydro_tube_0",
+  "hydro_tube_1",
+  "hydro_tube_2",
+  "hydro_tube_3",
+  "hydro_tube_4",
+  "hydro_tube_5",
+  "inlet_tube_",
+  "inlet_tube_0",
+  "inlet_tube_1",
+  "inlet_tube_2",
+  "inlet_tube_3",
+  "inlet_tube_4",
+  "inlet_tube_5",
+  "outlet_tube_",
+  "outlet_tube_0",
+  "outlet_tube_1",
+  "outlet_tube_2",
+  "outlet_tube_3",
+  "outlet_tube_5"
+ ],
+ "tests/mask_test.instr": [
+  "box_left",
+  "box_right"
+ ],
+ "tests/simple_test.instr": [
+  "box_left",
+  "box_lefttwo"
+ ],
+ "tests/test.instr": [
+  "box_left",
+  "box_mid",
+  "box_right",
+  "box_schlong",
+  "cone_left",
+  "cone_right",
+  "sphere_mid"
+ ],
+ "tests_unit/data/coincident_faces_test.instr": [
+  "nested_inner",
+  "nested_outer",
+  "touch_a",
+  "touch_b"
+ ],
+ "tests_unit/data/union_clip_shapes.instr": [
+  "base",
+  "cone",
+  "cylinder",
+  "icosphere",
+  "masked_all",
+  "masked_any",
+  "sphere",
+  "tapered"
+ ]
+}

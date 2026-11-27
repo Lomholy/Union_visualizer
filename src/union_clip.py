@@ -8,14 +8,20 @@ Every shape answers two questions in world space: which points are inside
 it, and where segments cross its surface. The clip plane is one more shape,
 a box on the removed side that takes priority over every component."""
 
+import os
+import pickle
 import re
+from concurrent.futures import ProcessPoolExecutor
+from itertools import count
 
 import numpy as np
 import trimesh
+from numba import njit
 
 from preprocess import box_dimensions
 from clipping import clip_plane
 from bounding_box import compute_all_world_bboxes, overlapping
+from union_facets import closed_cut
 
 # Split budget in half levels: a split in 4 costs 2, a split in 2 costs 1
 TRI_DEPTH = 12
@@ -69,6 +75,30 @@ class BVH:
         self.stop = np.array([n[5] for n in nodes])
         self.order = order
 
+    def gather(self, q, node, found_q, found_tri):
+        """Append the (query, triangle) pairs of leaf nodes."""
+        count = self.stop[node] - self.start[node]
+        found_q.append(np.repeat(q, count))
+        offset = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+        found_tri.append(self.order[np.repeat(self.start[node], count) + offset])
+
+    def overlaps(self, lo, hi):
+        """(box, triangle) pairs whose boxes overlap, for a batch of boxes lo..hi."""
+        q = np.arange(len(lo))
+        node = np.zeros(len(lo), np.int64)
+        found_q, found_tri = [], []
+        while len(q):
+            hit = np.all((lo[q] <= self.hi[node]) & (hi[q] >= self.lo[node]), axis=1)
+            q, node = q[hit], node[hit]
+            leaf = self.child[node] < 0
+            if leaf.any():
+                self.gather(q[leaf], node[leaf], found_q, found_tri)
+            q, node = q[~leaf], node[~leaf]
+            q, node = np.concatenate([q, q]), np.concatenate([self.child[node], self.second[node]])
+        if not found_q:
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+        return np.concatenate(found_q), np.concatenate(found_tri)
+
     def candidates(self, origin, direction, t_max):
         q = np.arange(len(origin))
         node = np.zeros(len(origin), np.int64)
@@ -88,11 +118,7 @@ class BVH:
             q, node = q[hit], node[hit]
             leaf = self.child[node] < 0
             if leaf.any():
-                lq, ln = q[leaf], node[leaf]
-                count = self.stop[ln] - self.start[ln]
-                found_q.append(np.repeat(lq, count))
-                offset = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
-                found_tri.append(self.order[np.repeat(self.start[ln], count) + offset])
+                self.gather(q[leaf], node[leaf], found_q, found_tri)
             q, node = q[~leaf], node[~leaf]
             q, node = np.concatenate([q, q]), np.concatenate([self.child[node], self.second[node]])
         if not found_q:
@@ -100,8 +126,8 @@ class BVH:
         return np.concatenate(found_q), np.concatenate(found_tri)
 
 
-def ray_triangle(origin, direction, tri, t_max, barycentric=False):
-    """Moller-Trumbore for paired rays and triangles: (hit mask, t), plus (u, v) if asked."""
+def ray_triangle(origin, direction, tri, t_max):
+    """Moller-Trumbore for paired rays and triangles: (hit mask, t)."""
     v0 = tri[:, 0]
     e1, e2 = tri[:, 1] - v0, tri[:, 2] - v0
     p = np.cross(direction, e2)
@@ -114,7 +140,68 @@ def ray_triangle(origin, direction, tri, t_max, barycentric=False):
     v = f * (direction * q).sum(1)
     t = f * (e2 * q).sum(1)
     hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0) & (t < t_max)
-    return (hit, t, u, v) if barycentric else (hit, t)
+    return hit, t
+
+
+@njit(cache=True)
+def mesh_parity(p, d, lo, hi, child, second, start, stop, order, tri, edge_tol):
+    """BVH walk plus Moller-Trumbore per ray from p along d, in ray_triangle's arithmetic:
+    (odd number of crossings, a hit within edge_tol of a triangle edge)."""
+    odd = np.zeros(len(p), np.bool_)
+    ambiguous = np.zeros(len(p), np.bool_)
+    inv = np.zeros(3)
+    for a in range(3):
+        if d[a] != 0:
+            inv[a] = 1.0 / d[a]
+    stack = np.empty(len(lo) + 1, np.int64)
+    for r in range(len(p)):
+        o0, o1, o2 = p[r, 0], p[r, 1], p[r, 2]
+        top = 0
+        stack[0] = 0
+        while top >= 0:
+            node = stack[top]
+            top -= 1
+            t_near, t_far = -np.inf, np.inf
+            for a in range(3):
+                if d[a] == 0:
+                    inside = lo[node, a] <= p[r, a] and p[r, a] <= hi[node, a]
+                    near, far = (-np.inf, np.inf) if inside else (np.inf, -np.inf)
+                else:
+                    t1 = (lo[node, a] - p[r, a]) * inv[a]
+                    t2 = (hi[node, a] - p[r, a]) * inv[a]
+                    near, far = min(t1, t2), max(t1, t2)
+                t_near, t_far = max(t_near, near), min(t_far, far)
+            if not (t_near <= t_far and t_far >= 0):
+                continue
+            if child[node] >= 0:
+                stack[top + 1] = child[node]
+                stack[top + 2] = second[node]
+                top += 2
+                continue
+            for k in range(start[node], stop[node]):
+                j = order[k]
+                v00, v01, v02 = tri[j, 0, 0], tri[j, 0, 1], tri[j, 0, 2]
+                e10, e11, e12 = tri[j, 1, 0] - v00, tri[j, 1, 1] - v01, tri[j, 1, 2] - v02
+                e20, e21, e22 = tri[j, 2, 0] - v00, tri[j, 2, 1] - v01, tri[j, 2, 2] - v02
+                p0 = d[1] * e22 - d[2] * e21
+                p1 = d[2] * e20 - d[0] * e22
+                p2 = d[0] * e21 - d[1] * e20
+                det = e10 * p0 + e11 * p1 + e12 * p2
+                if not abs(det) > 1e-300:
+                    continue
+                f = 1 / det
+                s0, s1, s2 = o0 - v00, o1 - v01, o2 - v02
+                u = f * (s0 * p0 + s1 * p1 + s2 * p2)
+                q0 = s1 * e12 - s2 * e11
+                q1 = s2 * e10 - s0 * e12
+                q2 = s0 * e11 - s1 * e10
+                v = f * (d[0] * q0 + d[1] * q1 + d[2] * q2)
+                t = f * (e20 * q0 + e21 * q1 + e22 * q2)
+                if u >= 0 and v >= 0 and u + v <= 1 and t > 0 and t < np.inf:
+                    odd[r] = not odd[r]
+                    if u < edge_tol or v < edge_tol or u + v > 1 - edge_tol:
+                        ambiguous[r] = True
+    return odd, ambiguous
 
 
 def orient_outward(tri, center):
@@ -156,6 +243,9 @@ class MeshShape(Shape):
     def triangles(self):
         return self.tri.copy()
 
+    def facets(self):
+        return self.mesh.vertices, self.mesh.faces
+
     # gmesh_inside's fixed oblique ray directions
     RAYS = np.array([[0.4719, 0.6213, 0.6254], [0.8017, -0.3259, 0.5012], [-0.2263, 0.9147, -0.3349]])
     # a hit this close to a triangle edge (in barycentric terms) may be counted twice or not at all
@@ -163,16 +253,9 @@ class MeshShape(Shape):
 
     def parity(self, p, direction):
         """(odd number of crossings, ray passed close to an edge) for rays from p."""
-        odd = np.zeros(len(p), bool)
-        ambiguous = np.zeros(len(p), bool)
-        d = np.broadcast_to(direction, p.shape)
-        i, j = self.bvh.candidates(p, d, np.inf)
-        if len(i):
-            hit, _, u, v = ray_triangle(p[i], d[i], self.tri[j], np.inf, barycentric=True)
-            np.logical_xor.at(odd, i[hit], True)
-            edge = hit & ((u < self.EDGE_TOL) | (v < self.EDGE_TOL) | (u + v > 1 - self.EDGE_TOL))
-            ambiguous[i[edge]] = True
-        return odd, ambiguous
+        b = self.bvh
+        return mesh_parity(p, direction, b.lo, b.hi, b.child, b.second, b.start, b.stop, b.order,
+                           self.tri, self.EDGE_TOL)
 
     def contains(self, p):
         """gmesh_inside: parity of the first ray, or the majority of three when it grazes an edge."""
@@ -227,7 +310,8 @@ class BoxShape(ConvexShape):
         local = np.array([[sx * w / 2, sy * h / 2, sz]
                           for sz, w, h in ((-z, x1, y1), (z, x2, y2))
                           for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
-        s = self.to_world(local).reshape(2, 4, 3)
+        self.corners = self.to_world(local)
+        s = self.corners.reshape(2, 4, 3)
         # two triangles per face, in McStas's order, so tri[::2] holds one per face
         tri = []
         for j in range(2):
@@ -244,6 +328,10 @@ class BoxShape(ConvexShape):
 
     def triangles(self):
         return self.tri.copy()
+
+    def facets(self):
+        """(points, polygons): the six faces as loops of corner indices."""
+        return self.corners, [[0, 1, 2, 3], [4, 5, 6, 7]] + [[i, (i + 1) % 4, 4 + (i + 1) % 4, 4 + i] for i in range(4)]
 
 
 class ClipBox(ConvexShape):
@@ -284,15 +372,38 @@ class LatheShape(Shape):
         self.profile_y = np.array([-self.half, self.half])
         self.profile_r = np.array([r_bottom, r_top])
 
-    def triangles(self):
-        y, r, n = self.profile_y, self.profile_r, LATHE_SEGMENTS
-        angle = 2 * np.pi * np.arange(n + 1) / n
-        # McStas's point_on_circle: rings start at axis x (0,1,0), or axis x (1,0,0) near y;
-        # a sphere's axis is the world y axis whatever its rotation
+    def frame(self):
+        """McStas's point_on_circle: rings start at axis x (0,1,0), or axis x (1,0,0) near y;
+        a sphere's axis is the world y axis whatever its rotation."""
         axis = np.array([0.0, 1.0, 0.0]) if self.radius is not None else self.rot[:, 1]
         e1 = np.cross(axis, [1.0, 0.0, 0.0] if axis[1] > 0.9 else [0.0, 1.0, 0.0])
         e1 /= np.linalg.norm(e1)
-        e2 = np.cross(axis, e1)
+        return axis, e1, np.cross(axis, e1)
+
+    def facets(self):
+        """(points, polygons) of the surface triangles() draws, with one vertex per ring
+        point (the ring closes on its first point) and one at each pole or apex."""
+        n = LATHE_SEGMENTS
+        axis, e1, e2 = self.frame()
+        angle = 2 * np.pi * np.arange(n) / n
+        circle = np.cos(angle)[:, None] * e1 + np.sin(angle)[:, None] * e2
+        points, rings = [], []
+        for y, r in zip(self.profile_y, self.profile_r):
+            rings.append(len(points) + (np.arange(n) if r > 0 else np.zeros(n, int)))
+            points.extend(y * axis + r * circle if r > 0 else [y * axis])
+        polygons = []
+        for low, high in zip(rings[:-1], rings[1:]):
+            for i in range(n):
+                j = (i + 1) % n
+                loop = [low[i], low[j], high[j], high[i]]
+                polygons.append([v for k, v in enumerate(loop) if v != loop[k - 1]])
+        polygons += [list(ring) for ring, r in ((rings[0], self.profile_r[0]), (rings[-1], self.profile_r[-1])) if r > 0]
+        return np.array(points) + self.center, polygons
+
+    def triangles(self):
+        y, r, n = self.profile_y, self.profile_r, LATHE_SEGMENTS
+        angle = 2 * np.pi * np.arange(n + 1) / n
+        axis, e1, e2 = self.frame()
 
         def ring(k, i):
             return (y[k] * axis + r[k] * (np.cos(angle[i])[:, None] * e1 + np.sin(angle[i])[:, None] * e2))
@@ -422,12 +533,13 @@ class Masked:
 class Clipper:
     """union_tri_add for one component against everything that can hide it."""
 
-    def __init__(self, own_masks, cutters, sources, status=None):
+    def __init__(self, own_masks, cutters, sources):
         self.own_masks = own_masks
         self.cutters = cutters
         self.sources = sources
-        # status(p, shift) -> keep; by default the point moved by shift has the highest priority
-        self.status = status or (lambda p, shift: self.highest(p + shift))
+
+    def status(self, p, shift):
+        return self.highest(p + shift)
 
     def highest(self, p):
         """r_has_highest_priority: in the component's masks, and inside no cutter."""
@@ -620,9 +732,10 @@ def _masked(comp, shapes, union_geometries):
     return Masked(shapes[comp.name], [shapes[m.name] for m in masks], mask_mode_any(masks))
 
 
-def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False):
-    """Triangles (T, 3, 3) of comp's surface where it has the highest priority and,
-    with walls, the walls closing it where higher-priority components and masks cut it."""
+def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=False, geometry=None):
+    """Triangles (T, 3, 3) of comp's surface where it has the highest priority or, with
+    walls, (vertices, faces) of that surface closed by walls where higher-priority
+    components and masks cut it, from closed_cut (geometry is its facet cache)."""
     candidates = [
         c.name for c in union_geometries.values()
         if not is_mask(c) and shapes.get(c.name) is not None and c.priority > comp.priority
@@ -630,6 +743,8 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=Fal
     cutters = [_masked(union_geometries[n], shapes, union_geometries)
                for n in overlapping(comp.name, candidates, world_bboxes)]
     own = _masked(comp, shapes, union_geometries)
+    if walls:
+        return closed_cut(own, cutters, ClipBox(clip) if clip.get("enable") else None, geometry)
     sources = list(own.masks)
     for cutter in cutters:
         sources += [cutter.shape, *cutter.masks]
@@ -640,67 +755,7 @@ def clip_component(comp, union_geometries, shapes, world_bboxes, clip, walls=Fal
     clipper = Clipper(own if own.masks else None, cutters, sources)
     tri = own.shape.triangles()
     tri = clipper.run(tri, own.shape.depth, inward_shift(own.shape, tri))
-    tri = orient_outward(tri, own.shape.center) if own.shape.convex else tri
-    if not walls:
-        return tri
-    return np.concatenate([tri, *cut_walls(own, cutters, sources, clip)])
-
-
-def cut_walls(own, cutters, sources, clip):
-    """The walls that close comp's shown surface, as the brep mesher's solids have:
-    the parts of every surface bounding the region where comp is present and on top
-    (its masks, each cutter and each cutter's masks) with that region on one side
-    only, facing away from it. The clip plane gets no wall."""
-    def inside(shape, p, side):
-        # the wall's own surface is decided by the side tested, not by its exact shape:
-        # a cylinder's 32-sided display surface lies inside the true cylinder
-        return np.full(len(p), side[1]) if shape is side[0] else shape.contains(p)
-
-    def present(masked, p, side):
-        ok = inside(masked.shape, p, side)
-        if masked.masks:
-            status = [inside(m, p, side) for m in masked.masks]
-            ok &= np.any(status, 0) if masked.any_mode else np.all(status, 0)
-        return ok
-
-    def region(p, side):
-        ok = present(own, p, side)
-        for cutter in cutters:
-            idx = np.flatnonzero(ok)
-            if len(idx) == 0:
-                break
-            ok[idx] = ~present(cutter, p[idx], side)
-        return ok
-
-    real_cutters = cutters[:-1] if clip.get("enable") else cutters
-    surfaces = list(own.masks) + [shape for c in real_cutters for shape in (c.shape, *c.masks)]
-    own_tri = own.shape.triangles()
-    lo, hi = own_tri.min((0, 1)), own_tri.max((0, 1))
-    walls = []
-    for surface in surfaces:
-        out_side, in_side = (surface, False), (surface, True)
-
-        # p + shift lies just outside the surface, p - shift just inside it
-        def one_side(p, h, o=out_side, i=in_side):
-            return region(p + h, o) != region(p - h, i)
-
-        tri = surface.triangles()
-        # only triangles reaching into comp's bounding box can bound its region
-        tri = tri[np.all((tri.max(1) >= lo) & (tri.min(1) <= hi), axis=1)]
-        if len(tri) == 0:
-            continue
-        wall = Clipper(None, [], sources + [own.shape], one_side).run(tri, surface.depth, -inward_shift(surface, tri))
-        if len(wall) == 0:
-            continue
-        # face away from the region: inwards where it lies outside the surface
-        outward = -inward_shift(surface, wall)
-        region_outside = region(wall.mean(1) + outward, out_side)
-        facing = np.where(region_outside[:, None], -outward, outward)
-        normal = np.cross(wall[:, 1] - wall[:, 0], wall[:, 2] - wall[:, 0])
-        flip = (normal * facing).sum(1) < 0
-        wall[flip] = wall[flip][:, [0, 2, 1]]
-        walls.append(wall)
-    return walls
+    return orient_outward(tri, own.shape.center) if own.shape.convex else tri
 
 
 def _to_mesh(tri):
@@ -721,26 +776,119 @@ def build_shapes(union_geometries, world_matrices):
 
 
 def build_union_meshes(union_geometries, world_matrices, clip, verbose=False, world_bboxes=None, names=None,
-                       close_cuts=False):
+                       close_cuts=False, parallel=True):
     """{name: trimesh or None} for names (default: every component). Masks, unknown
     shapes and fully hidden components map to None. close_cuts adds the walls
-    that close each component where higher priorities and masks cut it."""
+    that close each component where higher priorities and masks cut it. With
+    parallel, components are clipped in worker processes."""
     if world_bboxes is None:
         world_bboxes = compute_all_world_bboxes(
             {n: c for n, c in union_geometries.items() if c.component_name in KNOWN_SHAPES},
             world_matrices,
         )
     shapes = build_shapes(union_geometries, world_matrices)
-    meshes = {}
-    for name in union_geometries if names is None else names:
+    names = list(union_geometries if names is None else names)
+    todo = []
+    for name in names:
         comp = union_geometries[name]
         if is_mask(comp) or shapes[name] is None:
             if verbose and is_mask(comp):
                 print(f"{name} is a mask, and is therefore not meshed.")
-            meshes[name] = None
             continue
-        meshes[name] = _to_mesh(clip_component(comp, union_geometries, shapes, world_bboxes, clip, close_cuts))
+        todo.append(name)
+    if parallel and len(todo) > 1 and (os.cpu_count() or 1) > 1:
+        results = _clip_in_pool(todo, union_geometries, world_matrices, world_bboxes, clip, close_cuts)
+    else:
+        geometry = {}
+        results = {name: clip_component(union_geometries[name], union_geometries, shapes, world_bboxes, clip,
+                                        close_cuts, geometry) for name in todo}
+    meshes = {}
+    for name in names:
+        result = results.get(name)
+        if result is None:
+            meshes[name] = None
+        elif isinstance(result, tuple):
+            meshes[name] = trimesh.Trimesh(*result, process=False) if len(result[1]) else None
+        else:
+            meshes[name] = _to_mesh(result)
     return meshes
+
+
+_pool = None
+_build_ids = count()
+# in a worker: (build id, union geometries, shapes, world bboxes, clip, facet geometry cache)
+# of the build it last clipped for
+_worker_build = None
+
+
+def _clip_in_pool(names, union_geometries, world_matrices, world_bboxes, clip, close_cuts):
+    """{name: clip_component result} with one task per component in a process pool
+    kept for the life of this process. The build goes to the workers pickled, with the
+    class specs they need to unpickle its components."""
+    global _pool
+    if _pool is None:
+        _pool = ProcessPoolExecutor(max_workers=os.cpu_count())
+    # only mcstasscript's dynamic component classes need recreating in a worker
+    specs = {c.component_name: component_class_spec(c) for c in union_geometries.values()
+             if hasattr(c, "parameter_names")}
+    build = (os.getpid(), next(_build_ids))
+    payload = pickle.dumps((union_geometries, world_matrices, world_bboxes, clip))
+    futures = [_pool.submit(_clip_in_worker, build, specs, payload, name, close_cuts) for name in names]
+    return {name: f.result() for name, f in zip(names, futures)}
+
+
+def _clip_in_worker(build, specs, payload, name, close_cuts):
+    """clip_component for one component of a build, reusing what this worker set up for
+    that build."""
+    global _worker_build
+    if _worker_build is None or _worker_build[0] != build:
+        register_component_classes(specs)
+        union_geometries, world_matrices, world_bboxes, clip = pickle.loads(payload)
+        _worker_build = (build, union_geometries, build_shapes(union_geometries, world_matrices), world_bboxes,
+                         clip, {})
+    _, union_geometries, shapes, world_bboxes, clip, geometry = _worker_build
+    return clip_component(union_geometries[name], union_geometries, shapes, world_bboxes, clip, close_cuts, geometry)
+
+
+_CLASS_SPEC_ATTRS = (
+    "parameter_names", "parameter_defaults", "parameter_types",
+    "parameter_units", "parameter_comments", "category", "line_limit",
+)
+
+
+def component_class_spec(comp):
+    """Plain-data (str/list/dict/int only) snapshot of the attributes
+    mcstasscript's own dynamic class construction assigns - see
+    register_component_classes for why this has to be plain data rather
+    than the Component instance itself."""
+    return {attr: getattr(comp, attr) for attr in _CLASS_SPEC_ATTRS}
+
+
+def register_component_classes(class_specs):
+    """Runs once in each freshly spawned worker process, before it accepts
+    any real task. mcstasscript represents each Union_* component as a
+    class it creates *dynamically* at parse time (McStas_instr's
+    _create_component_instance), registering it into
+    mcstasscript.interface.instr's own module globals so a Component
+    instance of that type can be pickled - but that registration only
+    happens in whichever process actually parses an instrument file. A
+    worker spawned by this pool never does that itself, so without this,
+    unpickling a Component instance sent to it fails with an AttributeError
+    ("module ... has no attribute 'Union_box'"). This recreates an
+    equivalent class, matching mcstasscript's own construction, from a
+    plain-data spec built by component_class_spec - it can't take a live
+    sample Component instead, because that instance would itself need to be
+    pickled to reach this initializer, hitting the same problem one level
+    earlier (unpickling the process's own spawn payload).
+    """
+    import mcstasscript.interface.instr as msi
+
+    for component_name, spec in class_specs.items():
+        if hasattr(msi, component_name):
+            continue
+        input_dict = {key: None for key in spec["parameter_names"]}
+        input_dict.update(spec)
+        setattr(msi, component_name, type(component_name, (msi.Component,), input_dict))
 
 
 KNOWN_SHAPES = ("Union_box", "Union_cylinder", "Union_cone", "Union_sphere", "Union_mesh")
