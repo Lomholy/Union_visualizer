@@ -8,7 +8,7 @@ where they do not fix a point, so a cut surface and the wall meeting it are buil
 from the same vertices; each vertex is classified against each plane once."""
 
 from collections import defaultdict
-from itertools import chain, combinations
+from itertools import chain
 
 import numpy as np
 from numba import njit, typed, types
@@ -18,6 +18,8 @@ ON_PLANE = 1e-9
 SAME_POINT = 1e-8
 # largest 1 - |cos| between the normals of coincident planes
 PARALLEL = 1e-12
+# the kernel's entry lists
+ON, LINE, KEY = 0, 1, 2
 
 
 class Kernel:
@@ -27,9 +29,22 @@ class Kernel:
         # plane it is farther than this from and not labelled on never changes
         self.margin = 2 * self.merge
         self.normal, self.offset = np.zeros((0, 3)), np.zeros(0)
-        # vertex positions, rows past len(on) unused, and the planes each vertex lies on
-        self.xyz, self.on = np.zeros((256, 3)), []
-        self.ids, self.lines, self.signs = {}, defaultdict(set), {}
+        # vertex positions, rows past count[0] unused
+        self.xyz, self.count = np.zeros((256, 3)), np.zeros(1, np.int64)
+        # entry lists, used[k] of store[k] filled: the planes each vertex lies on, (next entry,
+        # plane) in store[ON] from each vertex's newest in head (-1 at the end), with is_on
+        # holding pair(v, p) for each; the vertices on each line pair(p, q), p < q, (next
+        # entry, vertex) in store[LINE] from its newest in lines; the vertex of each key of
+        # planes fixing a point, (next entry, vertex, number of planes, planes ascending) in
+        # store[KEY] from the newest of its key_hash in ids
+        self.store = typed.List([np.zeros(1024, np.int64) for _ in range(3)])
+        self.used = np.zeros(3, np.int64)
+        self.head = np.full(256, -1)
+        self.is_on = typed.Dict.empty(types.int64, types.boolean)
+        self.lines = typed.Dict.empty(types.int64, types.int64)
+        self.ids = typed.Dict.empty(types.int64, types.int64)
+        # the first sign given for each pair(v, p)
+        self.signs = typed.Dict.empty(types.int64, types.int8)
         # by position, in cells of size merge: the cell's newest vertex id, and each vertex's
         # next older one in its cell (-1 at the end)
         self.grid = typed.Dict.empty(types.UniTuple(types.int64, 3), types.int64)
@@ -92,83 +107,57 @@ class Kernel:
     def vertex(self, p, planes):
         """The vertex on these planes at p: an existing one within merge of p, or a new one.
         Only planes that fix a point are kept as the vertex's key."""
-        key = frozenset(planes)
-        if key in self.ids:
-            return self.ids[key]
-        point = len(key) >= 3 and fixes_point(self.normal, np.fromiter(key, np.int64, len(key)))
-        v = grid_find(self.grid, self.older, self.xyz, p, self.merge)
-        if v < 0:
-            v = self.new_point(p)
-            grid_add(self.grid, self.older, p, self.merge, v)
-        self.add_planes(v, planes)
-        if point:
-            self.ids[key] = v
-        return v
+        self.reserve()
+        return vertex(self.xyz, self.older, self.head, self.count, self.grid, self.merge, self.normal, self.store,
+                      self.used, self.is_on, self.lines, self.ids, np.asarray(p, float),
+                      np.fromiter(planes, np.int64, len(planes)))
 
-    def new_point(self, p):
-        v = len(self.on)
+    def reserve(self):
+        """Room in xyz for one more vertex."""
+        v = self.count[0]
         if v == len(self.xyz):
             self.xyz = np.vstack([self.xyz, np.zeros_like(self.xyz)])
             self.older = np.concatenate([self.older, np.full(v, -1)])
+            self.head = np.concatenate([self.head, np.full(v, -1)])
+
+    def new_point(self, p):
+        self.reserve()
+        v = int(self.count[0])
         self.xyz[v] = p
-        self.on.append(set())
+        self.count[0] += 1
         return v
 
-    def add_planes(self, v, planes):
-        for p in planes:
-            if p not in self.on[v]:
-                for q in self.on[v]:
-                    self.lines[(min(p, q), max(p, q))].add(v)
-                self.on[v].add(p)
+    def common(self, vs):
+        """The planes every vertex of vs is labelled on, ascending."""
+        return common(self.head, self.store, self.is_on, np.asarray(vs, np.int64))
 
     def on_line(self, planes):
-        found = set()
-        for p, q in combinations(sorted(planes), 2):
-            found |= self.lines.get((p, q), set())
-        return found
+        """The vertices on the line of some two of planes (ascending ids), each once."""
+        return on_line(self.store, self.lines, np.asarray(planes, np.int64))
 
-    def sign(self, v, p):
-        s = self.signs.get((v, p))
-        if s is None:
-            if p in self.on[v]:
-                s = 0
-            else:
-                dist = self.xyz[v] @ self.normal[p] - self.offset[p]
-                s = 0 if abs(dist) < self.eps else (1 if dist > 0 else -1)
-                if s == 0:
-                    self.add_planes(v, (p,))
-            self.signs[(v, p)] = s
-        return s
+    def sign(self, vs, p):
+        """sign(v, p) for each vertex v of vs: 0 where v is labelled on p or within eps of
+        it (labelling it), the first answer for (v, p) once given."""
+        return sign_of(self.xyz, self.normal, self.offset, self.eps, self.head, self.store, self.used, self.is_on,
+                       self.lines, self.signs, np.asarray(vs, np.int64), p)
 
     def sign_matrix(self, poly, planes):
-        """sign(v, p) for every vertex of poly (rows) and plane (columns), computed in one
-        numpy pass where the vertex is farther than margin from a plane it is not labelled on."""
-        planes = np.asarray(planes)
-        dist = self.xyz[poly] @ self.normal[planes].T - self.offset[planes]
-        s = np.sign(dist).astype(int)
-        near = np.abs(dist) < self.margin
-        col = {int(p): c for c, p in enumerate(planes)}
-        for r, v in enumerate(poly):
-            for p in self.on[v] & col.keys():
-                near[r, col[p]] = True
-        for r, c in zip(*np.nonzero(near)):
-            s[r, c] = self.sign(poly[r], int(planes[c]))
-        return s
+        """sign(v, p) for every vertex of poly (rows) and plane (columns), computed directly
+        where the vertex is farther than margin from a plane it is not labelled on."""
+        return sign_matrix(self.xyz, self.normal, self.offset, self.eps, self.margin, self.head, self.store,
+                           self.used, self.is_on, self.lines, self.signs, np.asarray(poly, np.int64),
+                           np.asarray(planes, np.int64))
 
     def crossing(self, a, b, p):
         """The vertex where edge a-b crosses plane p, shared by every edge through that point."""
-        line = self.on[a] & self.on[b]
-        key = frozenset(line | {p})
-        if key in self.ids:
-            return self.ids[key]
-        pa, pb = self.xyz[a], self.xyz[b]
-        da, db = pa @ self.normal[p] - self.offset[p], pb @ self.normal[p] - self.offset[p]
-        return self.vertex(pa + (pb - pa) * (da / (da - db)), line | {p})
+        self.reserve()
+        return crossing(self.xyz, self.older, self.head, self.count, self.grid, self.merge, self.normal,
+                        self.offset, self.store, self.used, self.is_on, self.lines, self.ids, a, b, p)
 
     def split(self, poly, p, side):
         """(inside, outside) parts of a polygon that straddles the half-space."""
         inside, outside = [], []
-        s = [side * self.sign(v, p) for v in poly]
+        s = (side * self.sign(poly, p)).tolist()
         for i, a in enumerate(poly):
             j = (i + 1) % len(poly)
             if s[i] <= 0:
@@ -196,9 +185,9 @@ class Kernel:
             return [(poly, True)]
         out = []
         for p, s in half:
-            signs = [s * self.sign(v, p) for v in poly]
-            if max(signs) > 0:
-                if min(signs) >= 0:
+            signs = s * self.sign(poly, p)
+            if signs.max() > 0:
+                if signs.min() >= 0:
                     return out + [(poly, False)]
                 poly, outside = self.split(poly, p, s)
                 if len(outside) >= 3:
@@ -228,7 +217,7 @@ class Kernel:
         if tp == plane:
             cuts = around
         else:
-            st = [self.sign(v, plane) for v in vids]
+            st = self.sign(vids, plane).tolist()
             cuts = [tp] if min(st) < 0 < max(st) or st.count(0) >= 2 else []
         if not cuts:
             return work, box
@@ -240,10 +229,10 @@ class Kernel:
         sub = [work[i] for i in test]
         lens = [len(q) for q, _ in sub]
         ids = np.fromiter(chain.from_iterable(q for q, _ in sub), np.int64, sum(lens))
-        clear = vertex_clear(self.xyz, ids, np.cumsum([0] + lens), normal, offset, self.margin).tolist()
+        start = np.cumsum([0] + lens)
         # a vertex labelled on a cut plane keeps its piece
-        on = self.on
-        clear = [c and all(on[v].isdisjoint(cuts) for v in q) for c, (q, _) in zip(clear, sub)]
+        clear = (vertex_clear(self.xyz, ids, start, normal, offset, self.margin)
+                 & ~any_on(self.is_on, ids, start, np.asarray(cuts, np.int64))).tolist()
         changed = []
         for i, (q, lab), skip in zip(test, sub, clear):
             if skip:
@@ -252,8 +241,8 @@ class Kernel:
             for p in cuts:
                 split = []
                 for r in pieces:
-                    signs = [self.sign(v, p) for v in r]
-                    split += [x for x in self.split(r, p, 1) if len(x) >= 3] if min(signs) < 0 < max(signs) else [r]
+                    signs = self.sign(r, p)
+                    split += [x for x in self.split(r, p, 1) if len(x) >= 3] if signs.min() < 0 < signs.max() else [r]
                 pieces = split
             if pieces != [q]:
                 changed.append((i, [(r, lab) for r in pieces]))
@@ -276,19 +265,207 @@ class Kernel:
         for i, a in enumerate(poly):
             b = poly[(i + 1) % len(poly)]
             out.append(a)
-            between = self.on_line(self.on[a] & self.on[b]) - {a, b}
-            if between:
-                vs = np.fromiter(between, np.int64, len(between))
+            vs = self.on_line(self.common((a, b)))
+            vs = vs[(vs != a) & (vs != b)]
+            if len(vs):
                 out += on_edge(self.xyz, a, b, vs, self.merge).tolist()
         return out
 
     def fan(self, poly):
         """Triangles of a convex polygon; a fan from its centre when vertices lie on its sides."""
         n = len(poly)
-        if not any(len(self.on[poly[i - 1]] & self.on[poly[i]] & self.on[poly[(i + 1) % n]]) > 1 for i in range(n)):
+        if not any(len(self.common((poly[i - 1], poly[i], poly[(i + 1) % n]))) > 1 for i in range(n)):
             return [(poly[0], poly[i], poly[i + 1]) for i in range(1, n - 1)]
         c = self.new_point(self.xyz[poly].mean(0))
         return [(c, poly[i], poly[(i + 1) % n]) for i in range(n)]
+
+
+@njit(cache=True)
+def pair(a, b):
+    """One int64 key for a pair of non-negative ids below 2**31."""
+    return a << 32 | b
+
+
+@njit(cache=True)
+def push(store, used, k, x):
+    """Append x to the entry list store[k], doubling it when full; its index."""
+    n = used[k]
+    if n == len(store[k]):
+        grown = np.empty(2 * n, np.int64)
+        grown[:n] = store[k]
+        store[k] = grown
+    store[k][n] = x
+    used[k] = n + 1
+    return n
+
+
+@njit(cache=True)
+def add_planes(head, store, used, is_on, lines, v, planes):
+    """Label vertex v on planes, adding it to the line of each new pair of its planes."""
+    for p in planes:
+        if pair(v, p) in is_on:
+            continue
+        on = store[ON]
+        e = head[v]
+        while e >= 0:
+            q = on[e + 1]
+            line = pair(min(p, q), max(p, q))
+            lines[line] = push(store, used, LINE, lines[line] if line in lines else -1)
+            push(store, used, LINE, v)
+            e = on[e]
+        head[v] = push(store, used, ON, head[v])
+        push(store, used, ON, p)
+        is_on[pair(v, p)] = True
+
+
+@njit(cache=True)
+def common(head, store, is_on, vs):
+    """The planes every vertex of vs is labelled on, ascending."""
+    on = store[ON]
+    out = []
+    e = head[vs[0]]
+    while e >= 0:
+        p = on[e + 1]
+        shared = True
+        for k in range(1, len(vs)):
+            if pair(vs[k], p) not in is_on:
+                shared = False
+                break
+        if shared:
+            out.append(p)
+        e = on[e]
+    return np.sort(np.array(out, np.int64))
+
+
+@njit(cache=True)
+def on_line(store, lines, planes):
+    """The vertices on the line of some two of planes (ascending ids), each once."""
+    entries = store[LINE]
+    heads = []
+    n = 0
+    for i in range(len(planes)):
+        for j in range(i + 1, len(planes)):
+            line = pair(planes[i], planes[j])
+            if line in lines:
+                e = lines[line]
+                heads.append(e)
+                while e >= 0:
+                    n += 1
+                    e = entries[e]
+    out = np.empty(n, np.int64)
+    n = 0
+    for e in heads:
+        while e >= 0:
+            out[n] = entries[e + 1]
+            n += 1
+            e = entries[e]
+    # a vertex is on each line once, so only several lines can repeat it
+    return np.unique(out) if len(heads) > 1 else out
+
+
+@njit(cache=True)
+def sign(xyz, normal, offset, eps, head, store, used, is_on, lines, signs, v, p):
+    """The side of plane p vertex v lies on: 0 if labelled on it or within eps of it
+    (labelling it), the first answer for (v, p) once given."""
+    key = pair(v, p)
+    if key in signs:
+        return np.int64(signs[key])
+    s = 0
+    if key not in is_on:
+        dist = np.dot(xyz[v], normal[p]) - offset[p]
+        s = 0 if abs(dist) < eps else (1 if dist > 0 else -1)
+        if s == 0:
+            add_planes(head, store, used, is_on, lines, v, np.array([p]))
+    signs[key] = np.int8(s)
+    return s
+
+
+@njit(cache=True)
+def sign_of(xyz, normal, offset, eps, head, store, used, is_on, lines, signs, vs, p):
+    out = np.empty(len(vs), np.int64)
+    for k in range(len(vs)):
+        out[k] = sign(xyz, normal, offset, eps, head, store, used, is_on, lines, signs, vs[k], p)
+    return out
+
+
+@njit(cache=True)
+def sign_matrix(xyz, normal, offset, eps, margin, head, store, used, is_on, lines, signs, poly, planes):
+    """sign of every vertex of poly (rows) against every plane (columns), taken from the
+    distance where the vertex is farther than margin from a plane it is not labelled on;
+    the others are given by sign in row-major order."""
+    s = np.empty((len(poly), len(planes)), np.int64)
+    near = np.zeros((len(poly), len(planes)), np.bool_)
+    for r in range(len(poly)):
+        for c in range(len(planes)):
+            dist = np.dot(xyz[poly[r]], normal[planes[c]]) - offset[planes[c]]
+            s[r, c] = 1 if dist > 0 else (-1 if dist < 0 else 0)
+            near[r, c] = abs(dist) < margin or pair(poly[r], planes[c]) in is_on
+    for r in range(len(poly)):
+        for c in range(len(planes)):
+            if near[r, c]:
+                s[r, c] = sign(xyz, normal, offset, eps, head, store, used, is_on, lines, signs, poly[r], planes[c])
+    return s
+
+
+@njit(cache=True)
+def key_hash(planes):
+    h = len(planes)
+    for p in planes:
+        h = h * 1000003 + p
+    return h
+
+
+@njit(cache=True)
+def vertex(xyz, older, head, count, grid, merge, normal, store, used, is_on, lines, ids, p, planes):
+    """The vertex on planes at p: the one keyed by them, else an existing one within merge
+    of p, else a new one at xyz[count[0]] (a free row). It gets labelled on planes; planes
+    that fix a point become its key."""
+    planes = np.unique(planes)
+    h = key_hash(planes)
+    keys = store[KEY]
+    e = ids[h] if h in ids else -1
+    while e >= 0:
+        if keys[e + 2] == len(planes) and np.all(keys[e + 3:e + 3 + len(planes)] == planes):
+            return keys[e + 1]
+        e = keys[e]
+    point = len(planes) >= 3 and fixes_point(normal, planes)
+    v = grid_find(grid, older, xyz, p, merge)
+    if v < 0:
+        v = count[0]
+        count[0] += 1
+        xyz[v] = p
+        grid_add(grid, older, p, merge, v)
+    add_planes(head, store, used, is_on, lines, v, planes)
+    if point:
+        ids[h] = push(store, used, KEY, ids[h] if h in ids else -1)
+        push(store, used, KEY, v)
+        push(store, used, KEY, len(planes))
+        for q in planes:
+            push(store, used, KEY, q)
+    return v
+
+
+@njit(cache=True)
+def crossing(xyz, older, head, count, grid, merge, normal, offset, store, used, is_on, lines, ids, a, b, p):
+    """The vertex where edge a-b crosses plane p, on p and the planes a and b share."""
+    planes = np.append(common(head, store, is_on, np.array([a, b])), p)
+    pa, pb = xyz[a], xyz[b]
+    da, db = np.dot(pa, normal[p]) - offset[p], np.dot(pb, normal[p]) - offset[p]
+    return vertex(xyz, older, head, count, grid, merge, normal, store, used, is_on, lines, ids,
+                  pa + (pb - pa) * (da / (da - db)), planes)
+
+
+@njit(cache=True)
+def any_on(is_on, ids, start, planes):
+    """Whether some vertex of each polygon ids[start[i]:start[i + 1]] is labelled on one of planes."""
+    m = len(start) - 1
+    out = np.zeros(m, np.bool_)
+    for i in range(m):
+        for r in range(start[i], start[i + 1]):
+            for p in planes:
+                if pair(ids[r], p) in is_on:
+                    out[i] = True
+    return out
 
 
 @njit(cache=True)

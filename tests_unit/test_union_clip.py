@@ -622,6 +622,20 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertEqual(got, want)
         self.assertLess(len(pos), 400)
 
+    def test_vertex_keys_with_one_hash_stay_apart(self):
+        from union_facets import Kernel, key_hash
+        kernel = Kernel(1.0)
+        a, b = np.array([0, 2, 5]), np.array([0, 1, 1000008])
+        self.assertEqual(key_hash(a), key_hash(b))
+        rng = np.random.default_rng(2)
+        kernel.normal = rng.normal(size=(1000009, 3))
+        kernel.offset = np.zeros(1000009)
+        first = kernel.vertex(np.zeros(3), a.tolist())
+        second = kernel.vertex(np.ones(3), b.tolist())
+        self.assertNotEqual(first, second)
+        self.assertEqual(kernel.vertex(np.full(3, 5.0), a.tolist()), first)
+        self.assertEqual(kernel.vertex(np.full(3, 7.0), b.tolist()), second)
+
 
 
 class TestNumbaDependency(unittest.TestCase):
