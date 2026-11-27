@@ -584,5 +584,18 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertEqual(sides.tolist()[2], -sides.tolist()[0])
 
 
+
+class TestNumbaDependency(unittest.TestCase):
+    # R3 error case: without numba the mesher does not import
+    def test_import_without_numba_names_numba(self):
+        import importlib
+
+        with mock.patch.dict(sys.modules, {"numba": None}):
+            del sys.modules["union_clip"]
+            with self.assertRaises(ImportError) as ctx:
+                importlib.import_module("union_clip")
+        self.assertIn("numba", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
