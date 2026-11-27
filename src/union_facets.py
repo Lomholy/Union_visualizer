@@ -32,8 +32,6 @@ class Kernel:
         self.pos, self.on = [], []
         # pos as one array, rows past len(pos) unused
         self.xyz = np.zeros((256, 3))
-        # vertices labelled on each plane
-        self.on_plane = defaultdict(set)
         self.ids, self.lines, self.signs = {}, defaultdict(set), {}
         # vertex ids by position, in cells of size merge
         self.grid = defaultdict(list)
@@ -53,12 +51,26 @@ class Kernel:
         ids, sides = np.zeros(len(offset), int), np.ones(len(offset), int)
         fresh = np.ones(len(offset), bool)
         if len(self.offset):
-            dot = normal @ self.normal.T
-            same = (1 - np.abs(dot) < PARALLEL) & (np.abs(offset[:, None] - np.sign(dot) * self.offset) < self.eps)
-            fresh = ~same.any(1)
-            hit = np.flatnonzero(~fresh)
-            ids[hit] = same[hit].argmax(1)
-            sides[hit] = np.sign(dot[hit, ids[hit]])
+            # coincident planes have |offset| within eps: pair each new plane with the stored
+            # planes in that band of the |offset|-sorted list
+            # ponytail: many stored planes at one |offset| make the band O(n*m), a normal hash if that bites
+            order = np.argsort(np.abs(self.offset), kind="stable")
+            size = np.abs(self.offset[order])
+            lo = np.searchsorted(size, np.abs(offset) - self.eps, "left")
+            hi = np.searchsorted(size, np.abs(offset) + self.eps, "right")
+            count = hi - lo
+            new = np.repeat(np.arange(len(offset)), count)
+            old = order[np.arange(count.sum()) - np.repeat(np.cumsum(count) - count - lo, count)]
+            dot = np.einsum("ij,ij->i", normal[new], self.normal[old])
+            same = (1 - np.abs(dot) < PARALLEL) & (np.abs(offset[new] - np.sign(dot) * self.offset[old]) < self.eps)
+            new, old, dot = new[same], old[same], dot[same]
+            first = np.lexsort((old, new))
+            new, old, dot = new[first], old[first], dot[first]
+            keep = np.r_[True, new[1:] != new[:-1]][:len(new)]
+            hit = new[keep]
+            fresh[hit] = False
+            ids[hit] = old[keep]
+            sides[hit] = np.sign(dot[keep])
         ids[fresh] = len(self.offset) + np.arange(fresh.sum())
         self.normal = np.vstack([self.normal, normal[fresh]])
         self.offset = np.concatenate([self.offset, offset[fresh]])
@@ -102,7 +114,6 @@ class Kernel:
                 for q in self.on[v]:
                     self.lines[(min(p, q), max(p, q))].add(v)
                 self.on[v].add(p)
-                self.on_plane[p].add(v)
 
     def on_line(self, planes):
         found = set()
@@ -190,35 +201,50 @@ class Kernel:
                     return out
         return out + [(poly, True)]
 
-    def cut_pieces(self, work, plane, tri):
-        """The (piece, label) pieces of work on plane split along the planes carrying the
-        trace of a mesh triangle (vertex ids, plane id, its neighbours' plane ids) on that
-        plane: the triangle's own plane where it meets that plane in a segment, its
-        neighbours' planes where it lies on it. Pieces clearly on one side of every such
-        plane, in one numpy pass, are passed through unchanged."""
+    def boxes(self, work):
+        """(lo, hi) bounds of each piece of work, one row per piece."""
+        if not work:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+        pts = [self.xyz[q] for q, _ in work]
+        return np.array([x.min(0) for x in pts]), np.array([x.max(0) for x in pts])
+
+    def cut_pieces(self, work, box, plane, tri):
+        """(work, box) with the (piece, label) pieces of work on plane split along the
+        planes carrying the trace of a mesh triangle (vertex ids, plane id, its neighbours'
+        plane ids) on that plane: the triangle's own plane where it meets that plane in a
+        segment, its neighbours' planes where it lies on it. box is boxes(work). Pieces
+        whose box, or whose vertices, lie clearly on one side of every such plane are
+        passed through unchanged."""
         vids, tp, around = tri
         if not work:
-            return work
+            return work, box
         if tp == plane:
             cuts = around
         else:
             st = [self.sign(v, plane) for v in vids]
             cuts = [tp] if min(st) < 0 < max(st) or st.count(0) >= 2 else []
         if not cuts:
-            return work
-        lens = [len(q) for q, _ in work]
-        ids = np.fromiter(chain.from_iterable(q for q, _ in work), int, sum(lens))
-        start = np.concatenate([[0], np.cumsum(lens)[:-1]])
-        dist = self.xyz[ids] @ self.normal[cuts].T - self.offset[cuts]
+            return work, box
         m = self.margin
+        normal, offset = self.normal[cuts], self.offset[cuts]
+        lo, hi = box
+        mid = (lo + hi) @ normal.T / 2 - offset
+        reach = (hi - lo) @ np.abs(normal).T / 2
+        test = np.flatnonzero(~((mid - reach > m) | (mid + reach < -m)).all(1))
+        if not len(test):
+            return work, box
+        sub = [work[i] for i in test]
+        lens = [len(q) for q, _ in sub]
+        ids = np.fromiter(chain.from_iterable(q for q, _ in sub), int, sum(lens))
+        start = np.concatenate([[0], np.cumsum(lens)[:-1]])
+        dist = self.xyz[ids] @ normal.T - offset
         clear = ((np.minimum.reduceat(dist, start) > m) | (np.maximum.reduceat(dist, start) < -m)).all(1)
-        far = [v for p in cuts for v in self.on_plane[p] if abs(self.xyz[v] @ self.normal[p] - self.offset[p]) >= m]
-        if far:
-            clear &= ~np.logical_or.reduceat(np.isin(ids, far), start)
-        out = []
-        for (q, lab), skip in zip(work, clear):
+        # a vertex labelled on a cut plane but farther than margin from it keeps its piece
+        labelled = np.array([[p in self.on[v] for p in cuts] for v in ids.tolist()])
+        clear &= ~np.logical_or.reduceat((labelled & (np.abs(dist) >= m)).any(1), start)
+        changed = []
+        for i, (q, lab), skip in zip(test, sub, clear):
             if skip:
-                out.append((q, lab))
                 continue
             pieces = [q]
             for p in cuts:
@@ -227,8 +253,20 @@ class Kernel:
                     signs = [self.sign(v, p) for v in r]
                     split += [x for x in self.split(r, p, 1) if len(x) >= 3] if min(signs) < 0 < max(signs) else [r]
                 pieces = split
-            out += [(r, lab) for r in pieces]
-        return out
+            if pieces != [q]:
+                changed.append((i, [(r, lab) for r in pieces]))
+        if not changed:
+            return work, box
+        out, los, his, prev = [], [], [], 0
+        for i, pieces in changed:
+            out += work[prev:i]
+            out += pieces
+            new_lo, new_hi = self.boxes(pieces)
+            los += [lo[prev:i], new_lo]
+            his += [hi[prev:i], new_hi]
+            prev = i + 1
+        out += work[prev:]
+        return out, (np.concatenate(los + [lo[prev:]]), np.concatenate(his + [hi[prev:]]))
 
     def repair(self, poly):
         """poly with every vertex lying on one of its edges inserted into that edge."""
@@ -413,8 +451,9 @@ def closed_cut(own, cutters, clip_box=None, geometry=None):
                     work = [(r, {**lab, j: inside}) for q, lab in work
                             for r, inside in kernel.refine(q, plane, other.half) if not dead(j, inside, plane)]
                     continue
+                box = kernel.boxes(work)
                 for t in near[j][f]:
-                    work = kernel.cut_pieces(work, plane, other.tris[t])
+                    work, box = kernel.cut_pieces(work, box, plane, other.tris[t])
             pieces += [(q, plane, k, lab) for q, lab in work]
     loops = classify_pieces(kernel, shapes, pieces, region, scale)
     faces = [t for poly in loops for t in kernel.fan(kernel.repair(poly))]
