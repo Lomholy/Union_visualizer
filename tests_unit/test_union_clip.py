@@ -636,5 +636,48 @@ class TestNumbaDependency(unittest.TestCase):
         self.assertIn("numba", str(ctx.exception))
 
 
+class TestKernelHelpers(unittest.TestCase):
+    def test_fixes_point_matches_the_smallest_singular_value(self):
+        from union_facets import fixes_point
+        rng = np.random.default_rng(1)
+        normals = rng.normal(size=(40, 3))
+        normals /= np.linalg.norm(normals, axis=1)[:, None]
+        # planes sharing a line: normals in one plane, nearly so, and repeated
+        flat = np.array([[1.0, 0, 0], [0, 1.0, 0], [np.sqrt(0.5), np.sqrt(0.5), 0], [0.6, 0.8, 1e-12]])
+        normals = np.vstack([normals, flat])
+        cases = [np.array(c) for c in ([40, 41, 42], [40, 41, 42, 43], [40, 40, 41], [0, 1, 2], [3, 4, 5, 6, 7])]
+        cases += [rng.choice(40, size=rng.integers(3, 6), replace=False) for _ in range(200)]
+        for ids in cases:
+            with self.subTest(ids=ids.tolist()):
+                self.assertEqual(fixes_point(normals, ids), np.linalg.svd(normals[ids], compute_uv=False)[2] > 1e-9)
+
+    def test_boxes_of_no_pieces(self):
+        from union_facets import Kernel
+        lo, hi = Kernel(1.0).boxes([])
+        self.assertEqual((lo.shape, hi.shape), ((0, 3), (0, 3)))
+
+    def test_triangle_facets_match_the_polygon_path_and_drop_degenerate_ones(self):
+        from union_facets import facet_geometry
+        mesh = trimesh.creation.icosphere(subdivisions=1)
+        # a repeated corner and a zero-area sliver
+        faces = np.vstack([mesh.faces, [[0, 0, 1], [0, 1, 0]]])
+
+        class Shape:
+            convex = False
+
+            def __init__(self, polygons):
+                self.polygons = polygons
+
+            def facets(self):
+                return mesh.vertices, self.polygons
+        batched = facet_geometry(Shape(faces))
+        looped = facet_geometry(Shape(faces.tolist()))
+        self.assertEqual(batched[1], looped[1])
+        np.testing.assert_array_equal(batched[2], looped[2])
+        np.testing.assert_array_equal(batched[3], looped[3])
+        np.testing.assert_array_equal(batched[5], looped[5])
+        self.assertEqual(batched[5][-2:].tolist(), [-1, -1])
+
+
 if __name__ == "__main__":
     unittest.main()

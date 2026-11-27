@@ -95,7 +95,7 @@ class Kernel:
         key = frozenset(planes)
         if key in self.ids:
             return self.ids[key]
-        point = len(key) >= 3 and np.linalg.svd(self.normal[list(key)], compute_uv=False)[2] > 1e-9
+        point = len(key) >= 3 and fixes_point(self.normal, np.fromiter(key, np.int64, len(key)))
         v = grid_find(self.grid, self.older, self.xyz, p, self.merge)
         if v < 0:
             v = self.new_point(p)
@@ -211,8 +211,9 @@ class Kernel:
         """(lo, hi) bounds of each piece of work, one row per piece."""
         if not work:
             return np.zeros((0, 3)), np.zeros((0, 3))
-        pts = [self.xyz[q] for q, _ in work]
-        return np.array([x.min(0) for x in pts]), np.array([x.max(0) for x in pts])
+        lens = [len(q) for q, _ in work]
+        ids = np.fromiter(chain.from_iterable(q for q, _ in work), np.int64, sum(lens))
+        return piece_bounds(self.xyz, ids, np.cumsum([0] + lens))
 
     def cut_pieces(self, work, box, plane, tri):
         """(work, box) with the (piece, label) pieces of work on plane split along the
@@ -288,6 +289,40 @@ class Kernel:
             return [(poly[0], poly[i], poly[i + 1]) for i in range(1, n - 1)]
         c = self.new_point(self.xyz[poly].mean(0))
         return [(c, poly[i], poly[(i + 1) % n]) for i in range(n)]
+
+
+@njit(cache=True)
+def fixes_point(normal, ids):
+    """Whether the planes ids meet in one point: the smallest singular value of their
+    normals above 1e-9. Its square is e3 / e2 of the normals' Gram matrix to within a
+    relative 1e-18, with e2 and e3 summed from squared 2x2 and 3x3 minors (Cauchy-Binet)."""
+    e2 = e3 = 0.0
+    k = len(ids)
+    for a in range(k):
+        p = normal[ids[a]]
+        for b in range(a + 1, k):
+            q = normal[ids[b]]
+            c0, c1, c2 = p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0]
+            e2 += c0 * c0 + c1 * c1 + c2 * c2
+            for c in range(b + 1, k):
+                r = normal[ids[c]]
+                d = c0 * r[0] + c1 * r[1] + c2 * r[2]
+                e3 += d * d
+    return e3 > 1e-18 * e2
+
+
+@njit(cache=True)
+def piece_bounds(xyz, ids, start):
+    """(lo, hi) bounds of each polygon ids[start[i]:start[i + 1]] of points xyz."""
+    m = len(start) - 1
+    lo, hi = np.empty((m, 3)), np.empty((m, 3))
+    for i in range(m):
+        for d in range(3):
+            lo[i, d], hi[i, d] = np.inf, -np.inf
+            for r in range(start[i], start[i + 1]):
+                lo[i, d] = min(lo[i, d], xyz[ids[r], d])
+                hi[i, d] = max(hi[i, d], xyz[ids[r], d])
+    return lo, hi
 
 
 @njit(cache=True)
@@ -414,14 +449,26 @@ def facet_geometry(shape):
     tiny = 1e-12 * (size @ size)
     loops, normals = [], []
     loop_of = np.full(len(polygons), -1)
-    for g, poly in enumerate(polygons):
-        loop = distinct([int(inverse[i]) for i in poly])
-        p = points[loop]
-        n = np.cross(p, np.roll(p, -1, 0)).sum(0) if len(loop) >= 3 else np.zeros(3)
-        if np.linalg.norm(n) > tiny:
-            loop_of[g] = len(loops)
-            loops.append(loop)
-            normals.append(n / np.linalg.norm(n))
+    if isinstance(polygons, np.ndarray) and polygons.ndim == 2 and polygons.shape[1] == 3:
+        # triangles: a repeated corner gives a zero normal, as distinct() would
+        tri = inverse[polygons]
+        p = points[tri]
+        cross = np.cross(p, np.roll(p, -1, 1)).sum(1)
+        for g, n in enumerate(cross):
+            length = np.linalg.norm(n)
+            if length > tiny:
+                loop_of[g] = len(loops)
+                loops.append(tri[g].tolist())
+                normals.append(n / length)
+    else:
+        for g, poly in enumerate(polygons):
+            loop = distinct([int(inverse[i]) for i in poly])
+            p = points[loop]
+            n = np.cross(p, np.roll(p, -1, 0)).sum(0) if len(loop) >= 3 else np.zeros(3)
+            if np.linalg.norm(n) > tiny:
+                loop_of[g] = len(loops)
+                loops.append(loop)
+                normals.append(n / np.linalg.norm(n))
     normals = np.array(normals).reshape(-1, 3)
     if shape.convex:
         interior = points.mean(0)
