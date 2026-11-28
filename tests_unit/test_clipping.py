@@ -1,6 +1,6 @@
 """Tests for clipping.py: the viewer's clip plane, optionally taken in a
 component's coordinate system, as one world-space plane shared by the
-meshers, the pygfx view and STL export."""
+mesher, the pygfx view and STL export."""
 
 import sys
 import unittest
@@ -10,7 +10,6 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from clipping import clip_plane, resolve_clip_frame  # noqa: E402
-from signed_distance_functions import sdf_plane  # noqa: E402
 
 
 def clip(axis="Z", mode="Above", position=0.0, frame=None):
@@ -37,13 +36,6 @@ class ClipPlaneTest(unittest.TestCase):
     def test_unknown_frame_falls_back_to_world(self):
         resolved = resolve_clip_frame(clip(frame="gone"), {})
         np.testing.assert_allclose(resolved["matrix"], np.eye(4))
-
-    def test_sdf_plane_is_negative_on_kept_side(self):
-        normal, point = clip_plane(clip("X", "Above", 1.0))
-        f = sdf_plane(normal, point)
-        values = f(np.array([[2.0, 0, 0, 1], [0.0, 0, 0, 1]]))
-        self.assertLess(values[0], 0)
-        self.assertGreater(values[1], 0)
 
 
 if __name__ == "__main__":

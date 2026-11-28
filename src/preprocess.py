@@ -111,8 +111,8 @@ def _clear_pygen_unset_string_defaults(instr):
     reads back as the Component class's own default of None. pygen's
     generated code instead assigns every declared parameter explicitly,
     including that literal '0' sentinel for the ones the instrument never
-    set - and code elsewhere (e.g. brep.py's `hasattr(comp, 'mask_string')
-    and comp.mask_string != None` mask check) relies on the "still None"
+    set - and code elsewhere (e.g. the mask checks on mask_string) relies
+    on the "still None"
     state to know a parameter was never given a real value. Rewriting
     each such sentinel back to None makes pygen-loaded components behave
     like natively-read ones for every one of those checks."""
@@ -1172,7 +1172,7 @@ def resolve_mesh_filenames(union_geometries, input_file):
     working directory, which silently depends on where unviz was invoked
     from. Rewrite each filename to be resolved against the
     instrument file's own directory instead, up front, so every downstream
-    mesh loader (meshing.py, signed_distance_functions.py, bounding_box.py)
+    mesh loader (union_clip.py, bounding_box.py)
     gets a working, unambiguous path regardless of invocation cwd."""
     base_dir = os.path.dirname(os.path.abspath(input_file))
     for comp in union_geometries.values():

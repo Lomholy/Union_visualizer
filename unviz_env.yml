@@ -5,9 +5,8 @@ dependencies:
   - pyqt
   - mcstas
   - trimesh
-  - scikit-image
+  - networkx
   - pygfx
-  - pythonocc-core
   - shapely
   - mapbox_earcut
   - numba
