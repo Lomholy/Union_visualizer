@@ -190,7 +190,7 @@ class Viewer(QtWidgets.QMainWindow):
             ("Neutron Rays", self.rays_panel),
             ("Detector Counts", self.counts_panel),
         ):
-            dock = self._add_dock(title, panel, collapsed=False)
+            dock = self._add_dock(title, panel, collapsed=False, closable=True)
             dock.hide()
             tool_bar.addAction(dock.toggleViewAction())
             dock.visibilityChanged.connect(self.rebalance_docks)
@@ -254,12 +254,15 @@ class Viewer(QtWidgets.QMainWindow):
         geometry.set_components_shown(settings.components_checkbox.isChecked())
         rays.setEnabled(settings.rays_checkbox.isChecked())
 
-    def _add_dock(self, title, panel, collapsed=True, stretch=True):
+    def _add_dock(self, title, panel, collapsed=True, stretch=True, closable=False):
         """Put panel in a collapsible, left-docked QDockWidget titled
         `title` (collapsed at first unless collapsed=False) that only takes
         the height its contents need. With stretch=True, extra space goes
-        below the panel. Returns the dock."""
+        below the panel. With closable=True its title bar has a close
+        button. Returns the dock."""
         dock = QtWidgets.QDockWidget(title, self)
+        if not closable:
+            dock.setFeatures(dock.features() & ~QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetClosable)
         dock.setAllowedAreas(
             QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
             | QtCore.Qt.DockWidgetArea.RightDockWidgetArea

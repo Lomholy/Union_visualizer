@@ -54,6 +54,16 @@ class CollapsibleTitleBar(QtWidgets.QWidget):
         float_button.clicked.connect(lambda: dock.setFloating(not dock.isFloating()))
         layout.addWidget(float_button)
 
+        if dock.features() & QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetClosable:
+            close_button = QtWidgets.QToolButton()
+            close_button.setAutoRaise(True)
+            close_button.setIcon(
+                self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_TitleBarCloseButton)
+            )
+            close_button.setToolTip("Close this panel; reopen it from the top bar")
+            close_button.clicked.connect(dock.close)
+            layout.addWidget(close_button)
+
         self.collapsed = False
         self.set_collapsed(
             settings.value(self.settings_key, collapsed_by_default, type=bool), notify=False
