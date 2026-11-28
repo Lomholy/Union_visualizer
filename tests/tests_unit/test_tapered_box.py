@@ -6,8 +6,8 @@ cross-section interpolates linearly along local z. See Union_box.comp: the
 parameters default to -1, its INITIALIZE treats any negative value as "same
 as xwidth/yheight", and it rejects a value that is <= 0 but not exactly -1.
 
-This directory is intentionally NOT under tests/, since
-.github/workflows/run-tests.yml feeds every file in tests/* to
+This directory is intentionally NOT under tests/test_instruments/, since
+.github/workflows/run-tests.yml feeds every file in tests/test_instruments/* to
 unviz --export as a pipeline smoke test; a plain assertion script
 there would break that loop.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 import preprocess  # noqa: E402
 import bounding_box  # noqa: E402
 
@@ -33,7 +33,7 @@ class FakeBox:
     under test only ever reads .name/.xwidth/.yheight/.zdepth and the two
     optional taper parameters, so a plain object keeps these tests runnable
     (and fast) wherever CI happens to run. The mcstasscript-backed path is
-    covered end to end by tests/box_taper_test.instr instead."""
+    covered end to end by tests/test_instruments/box_taper_test.instr instead."""
 
     component_name = "Union_box"
 

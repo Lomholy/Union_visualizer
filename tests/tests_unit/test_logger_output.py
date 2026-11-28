@@ -4,7 +4,7 @@ ordinary McStas monitors like PSD_monitor/Monitor_nD) into world-placeable
 counts - a 2D heatmap plane, or a 1D line.
 
 Fakes stand in for mcstasscript's McStasDataBinned/McStasDataEvent (mirrors
-tests_unit/test_gui_helpers.py's FakeComponent), covering only the
+tests/tests_unit/test_gui_helpers.py's FakeComponent), covering only the
 attributes logger_output.py actually reads, so these tests need neither a
 McStas install nor real .dat/mccode.sim files on disk.
 """
@@ -16,7 +16,7 @@ from unittest import mock
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 import logger_output  # noqa: E402
 
 

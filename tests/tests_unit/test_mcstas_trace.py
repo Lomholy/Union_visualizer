@@ -1,10 +1,10 @@
 """Tests for mcstas_trace.py: parsing mcrun --trace=2 output into
 world-space McStas component geometry and neutron rays.
 
-The fixtures in tests_unit/data/ are real `mcrun <instr> --trace=2
---no-output-files -n 0 -y` output for tests/simple_test.instr and
-tests/rotated_previous_test.instr, plus a 3-ray `-n 3 --seed=1234` run of
-tests/simple_test.instr, so the parser tests need no McStas installation. The end-to-end test at the bottom runs mcrun itself and is
+The fixtures in tests/tests_unit/data/ are real `mcrun <instr> --trace=2
+--no-output-files -n 0 -y` output for tests/test_instruments/simple_test.instr and
+tests/test_instruments/rotated_previous_test.instr, plus a 3-ray `-n 3 --seed=1234` run of
+tests/test_instruments/simple_test.instr, so the parser tests need no McStas installation. The end-to-end test at the bottom runs mcrun itself and is
 skipped when it isn't on PATH.
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 import mcstas_trace  # noqa: E402
 from mcstas_trace import (  # noqa: E402
@@ -89,7 +89,7 @@ class WorldMatrixTest(unittest.TestCase):
         meshes would not line up."""
         try:
             from preprocess import preprocess
-            _, world, _ = preprocess(str(ROOT / "tests" / "rotated_previous_test.instr"), False)
+            _, world, _ = preprocess(str(ROOT / "tests" / "test_instruments" / "rotated_previous_test.instr"), False)
         except Exception as e:
             self.skipTest(f"preprocess needs a McStas installation: {e}")
         text = read("rotated_previous_test_geometry_trace.txt")
@@ -390,7 +390,7 @@ class EndToEndTest(unittest.TestCase):
     def test_trace_simple_instrument(self):
         with tempfile.TemporaryDirectory() as tmp:
             instr = os.path.join(tmp, "simple_test.instr")
-            shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
+            shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             try:
                 components, rays = mcstas_trace.trace_instrument(instr, ncount=2, seed=7)
             except mcstas_trace.TraceError as e:
@@ -400,7 +400,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(rays.n_rays, 2)
 
     def test_parameter_values_reach_mcrun(self):
-        text = (ROOT / "tests" / "simple_test.instr").read_text()
+        text = (ROOT / "tests" / "test_instruments" / "simple_test.instr").read_text()
         text = text.replace(
             "DEFINE INSTRUMENT ODIN (", "DEFINE INSTRUMENT ODIN (psd_w = 0.2, double nodef", 1
         ).replace("xwidth = 1,", "xwidth = psd_w,", 1)

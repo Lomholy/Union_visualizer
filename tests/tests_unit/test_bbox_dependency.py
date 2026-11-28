@@ -4,8 +4,8 @@ its box can't possibly touch the target, and the dependency signature that
 uses the same overlap relation to decide whether a component needs
 remeshing between reloads.
 
-This directory is intentionally NOT under tests/, since
-.github/workflows/run-tests.yml feeds every file in tests/* to
+This directory is intentionally NOT under tests/test_instruments/, since
+.github/workflows/run-tests.yml feeds every file in tests/test_instruments/* to
 unviz --export as a pipeline smoke test; a plain assertion script
 there would break that loop.
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 import bounding_box  # noqa: E402
 
 
@@ -282,7 +282,7 @@ class TestUnionMeshBboxScale(unittest.TestCase):
                 self.coordinate_scale = coordinate_scale
 
         stl_path = str(
-            Path(__file__).resolve().parent.parent / "tests" / "crack_cryst.stl"
+            Path(__file__).resolve().parent.parent.parent / "tests" / "test_instruments" / "crack_cryst.stl"
         )
         unscaled = bounding_box.compute_local_bbox(
             FakeMeshComp(stl_path, coordinate_scale=1.0)
@@ -306,7 +306,7 @@ class TestUnionMeshBboxScale(unittest.TestCase):
                 self.coordinate_scale = None
 
         stl_path = str(
-            Path(__file__).resolve().parent.parent / "tests" / "crack_cryst.stl"
+            Path(__file__).resolve().parent.parent.parent / "tests" / "test_instruments" / "crack_cryst.stl"
         )
         default = bounding_box.compute_local_bbox(FakeMeshComp(stl_path))
 

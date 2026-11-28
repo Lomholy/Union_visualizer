@@ -9,8 +9,8 @@ Section 1 (itself grounded in McCode's cogen_comp_init_position()):
     R[comp] = R[ROT_parent] @ R_local(comp)
     t[comp] = t[AT_parent] + R[AT_parent] @ AT_data(comp)
 
-This directory is intentionally NOT under tests/, since
-.github/workflows/run-tests.yml feeds every file in tests/* to
+This directory is intentionally NOT under tests/test_instruments/, since
+.github/workflows/run-tests.yml feeds every file in tests/test_instruments/* to
 unviz --export as a pipeline smoke test; a plain assertion script
 there would break that loop.
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import mcstasscript as ms
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 import preprocess  # noqa: E402
 
 
@@ -132,7 +132,7 @@ class TestATRotSeparation(unittest.TestCase):
 
     def test_rotated_previous_with_at_relative_to_a_different_named_component(self):
         # Numeric re-assertion of PR #8's original fix, sharper than the
-        # existing tests/rotated_previous_test.instr pipeline smoke test:
+        # existing tests/test_instruments/rotated_previous_test.instr pipeline smoke test:
         # spacer sits between A and F in declaration order, so PREVIOUS
         # (for F's ROTATED) resolves to "spacer", while F's AT is relative
         # to "A" directly - two different, non-PREVIOUS-spelled names.

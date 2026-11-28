@@ -1,9 +1,9 @@
 {
- "tests/crack_height.instr": [
+ "tests/test_instruments/crack_height.instr": [
   "metal_cyl_env",
   "vacuum_cyl_env"
  ],
- "tests/cryostat_test.instr": [
+ "tests/test_instruments/cryostat_test.instr": [
   "orange_layer_0_layer",
   "orange_layer_0_layer_vac",
   "orange_layer_0_outer_cut_0",
@@ -23,7 +23,7 @@
   "top",
   "vertical"
  ],
- "tests/fuel_cell.instr": [
+ "tests/test_instruments/fuel_cell.instr": [
   "Bubble_1",
   "Bubble_2",
   "hydro_tube_",
@@ -47,15 +47,15 @@
   "outlet_tube_3",
   "outlet_tube_5"
  ],
- "tests/mask_test.instr": [
+ "tests/test_instruments/mask_test.instr": [
   "box_left",
   "box_right"
  ],
- "tests/simple_test.instr": [
+ "tests/test_instruments/simple_test.instr": [
   "box_left",
   "box_lefttwo"
  ],
- "tests/test.instr": [
+ "tests/test_instruments/test.instr": [
   "box_left",
   "box_mid",
   "box_right",
@@ -64,13 +64,13 @@
   "cone_right",
   "sphere_mid"
  ],
- "tests_unit/data/coincident_faces_test.instr": [
+ "tests/tests_unit/data/coincident_faces_test.instr": [
   "nested_inner",
   "nested_outer",
   "touch_a",
   "touch_b"
  ],
- "tests_unit/data/union_clip_shapes.instr": [
+ "tests/tests_unit/data/union_clip_shapes.instr": [
   "base",
   "cone",
   "cylinder",

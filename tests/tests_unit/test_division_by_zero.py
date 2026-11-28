@@ -5,7 +5,7 @@
 # hitting it may not even be essential to the Union geometry being
 # visualized. Run directly:
 #
-#   python tests_unit/test_division_by_zero.py
+#   python tests/tests_unit/test_division_by_zero.py
 
 import io
 import os
@@ -14,7 +14,7 @@ import unittest
 import contextlib
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(os.path.dirname(TESTS_DIR), "src")
+SRC_DIR = os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "src")
 sys.path.insert(0, SRC_DIR)
 
 import preprocess as pp  # noqa: E402

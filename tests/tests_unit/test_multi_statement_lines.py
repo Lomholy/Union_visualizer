@@ -8,7 +8,7 @@
 # "if (cond) name = expr; [else name2 = expr2;]" conditional support. Run
 # directly:
 #
-#   python tests_unit/test_multi_statement_lines.py
+#   python tests/tests_unit/test_multi_statement_lines.py
 
 import io
 import os
@@ -17,7 +17,7 @@ import unittest
 import contextlib
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(TESTS_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(TESTS_DIR))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 
@@ -166,7 +166,7 @@ class ConditionalAssignmentTest(unittest.TestCase):
 
 class DemonstrationFixtureTest(unittest.TestCase):
     """End-to-end regression test tied to
-    tests/multi_statement_lines_test.instr - the demonstration fixture for
+    tests/test_instruments/multi_statement_lines_test.instr - the demonstration fixture for
     this fix. box_angle = Emin * A4 there only comes out right if every
     multi-statement/conditional INITIALIZE line above it resolved
     correctly; before this fix, DECLARE's zero-init silently masked the
@@ -175,7 +175,7 @@ class DemonstrationFixtureTest(unittest.TestCase):
     ~11.67 - a wrong-but-plausible-looking result, not just a noisy one."""
 
     def test_box_angle_resolves_correctly_and_reaches_the_rotated_vector(self):
-        instr_path = os.path.join(REPO_ROOT, "tests", "multi_statement_lines_test.instr")
+        instr_path = os.path.join(REPO_ROOT, "tests", "test_instruments", "multi_statement_lines_test.instr")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             instr, world, _ = pp.preprocess(instr_path, verbose=False)

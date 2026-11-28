@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 import cli  # noqa: E402
 from mcstas_trace import TraceError  # noqa: E402
@@ -71,14 +71,14 @@ class ExportInstrumentTest(unittest.TestCase):
         # build_union_meshes() stores None (not omitting the key) for a
         # component with no geometry - reproduces the crash
         # this caused: AttributeError: 'NoneType' object has no attribute
-        # 'export', seen in CI (unviz --export on tests/crack_height.instr
+        # 'export', seen in CI (unviz --export on tests/test_instruments/crack_height.instr
         # and others) once real instruments started hitting this path.
         import trimesh
         real_mesh = trimesh.creation.box(extents=(1, 1, 1))
 
         with tempfile.TemporaryDirectory() as tmp:
             instr = os.path.join(tmp, "simple_test.instr")
-            shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
+            shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             out_file = os.path.join(tmp, "with_empty")
             with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")), \
                  patch("union_clip.build_union_meshes",
@@ -97,7 +97,7 @@ class ExportInstrumentTest(unittest.TestCase):
         # mcrun on PATH.
         with tempfile.TemporaryDirectory() as tmp:
             instr = os.path.join(tmp, "simple_test.instr")
-            shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
+            shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             out_file = os.path.join(tmp, "union_only")
             with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")):
                 meshes = cli.export_instrument(instr, out_file=out_file)
@@ -115,7 +115,7 @@ class ExportInstrumentTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out_file = os.path.join(tmp, "masked")
             with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")):
-                meshes = cli.export_instrument(str(ROOT / "tests" / "mask_test.instr"), out_file=out_file)
+                meshes = cli.export_instrument(str(ROOT / "tests" / "test_instruments" / "mask_test.instr"), out_file=out_file)
             self.assertTrue(meshes)
             for name in meshes:
                 with self.subTest(component=name):
@@ -125,7 +125,7 @@ class ExportInstrumentTest(unittest.TestCase):
     def test_combines_union_geometry_and_other_components(self):
         with tempfile.TemporaryDirectory() as tmp:
             instr = os.path.join(tmp, "simple_test.instr")
-            shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
+            shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             out_file = os.path.join(tmp, "combined")
             try:
                 meshes = cli.export_instrument(instr, out_file=out_file)

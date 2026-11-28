@@ -3,7 +3,7 @@
 # value at preprocessing time and shouldn't be reported identically to a
 # typo'd variable name. Run directly:
 #
-#   python tests_unit/test_opaque_runtime_calls.py
+#   python tests/tests_unit/test_opaque_runtime_calls.py
 
 import io
 import os
@@ -12,7 +12,7 @@ import unittest
 import contextlib
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(os.path.dirname(TESTS_DIR), "src")
+SRC_DIR = os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "src")
 sys.path.insert(0, SRC_DIR)
 
 import preprocess as pp  # noqa: E402

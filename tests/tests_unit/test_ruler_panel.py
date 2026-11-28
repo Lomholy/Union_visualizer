@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from qtpy import QtWidgets  # noqa: E402
 

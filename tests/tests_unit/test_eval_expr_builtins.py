@@ -3,14 +3,14 @@
 # builtins that aren't part of Python's math module (MATH_ENV). Run
 # directly:
 #
-#   python tests_unit/test_eval_expr_builtins.py
+#   python tests/tests_unit/test_eval_expr_builtins.py
 
 import os
 import sys
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(os.path.dirname(TESTS_DIR), "src")
+SRC_DIR = os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "src")
 sys.path.insert(0, SRC_DIR)
 
 import preprocess as pp  # noqa: E402

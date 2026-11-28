@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 from preprocess import preprocess  # noqa: E402
 
@@ -15,7 +15,7 @@ from preprocess import preprocess  # noqa: E402
 @unittest.skipUnless(shutil.which("mcstas-pygen"), "mcstas-pygen not on PATH")
 class PygenTest(unittest.TestCase):
     def test_pygen_matches_the_quick_reader(self):
-        inp = str(ROOT / "tests" / "cryostat_test.instr")
+        inp = str(ROOT / "tests" / "test_instruments" / "cryostat_test.instr")
         with contextlib.redirect_stdout(io.StringIO()):
             _, _, quick = preprocess(inp, False)
             _, _, pygen = preprocess(inp, False, force_pygen=True)

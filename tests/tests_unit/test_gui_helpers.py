@@ -6,7 +6,7 @@ display-independent logic instead; union_viewer.py's own wiring was
 exercised interactively with QT_QPA_PLATFORM=offscreen against real test
 instruments while implementing this change.
 
-Not under tests/: .github/workflows/run-tests.yml feeds every file there
+Not under tests/test_instruments/: .github/workflows/run-tests.yml feeds every file there
 to unviz --export as a pipeline smoke test.
 """
 
@@ -16,14 +16,14 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 import gui_helpers  # noqa: E402
 
 
 class FakeComponent:
     """Stand-in for a mcstasscript component: the code under test only
     reads .material_string, so a plain object keeps these tests runnable
-    without a McStas installation (mirrors tests_unit/test_tapered_box.py's
+    without a McStas installation (mirrors tests/tests_unit/test_tapered_box.py's
     FakeBox)."""
 
     def __init__(self, material_string):
@@ -38,7 +38,7 @@ class TestNormalizeMaterialString(unittest.TestCase):
         self.assertEqual(gui_helpers.normalize_material_string("Al"), "Al")
 
     def test_embedded_quotes_are_stripped(self):
-        # Confirmed on tests/crack_height.instr: one Union_mesh component's
+        # Confirmed on tests/test_instruments/crack_height.instr: one Union_mesh component's
         # material_string comes back as '"sample_0"' (quotes included) and
         # a sibling's comes back as plain 'gas' - the .instr text parser is
         # inconsistent about this, the same wrinkle
