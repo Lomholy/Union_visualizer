@@ -39,25 +39,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="union_env",
         help="Exported file name (default: union_env)",
     )
-    parser.add_argument(
-        "--resolution",
-        type=int,
-        default=64,
-        help="Grid fineness used by the marching-cubes mesher (default: 64)",
-    )
-    parser.add_argument(
-        "--n-points",
-        dest="n_points",
-        type=int,
-        default=1_000,
-        help="Number of points used when plotting point clouds (default: 1000)",
-    )
-    parser.add_argument(
-        "--mesher",
-        choices=("mc", "dc", "brep", "union"),
-        default="brep",
-        help="Mesher used for export (default: brep)",
-    )
     parser.add_argument("--verbose", action="store_true", help="Print detailed progress")
     parser.add_argument(
         "--force-pygen",
@@ -86,8 +67,6 @@ def export_model(args: argparse.Namespace, input_file: str) -> None:
     export_instrument(
         input_file=input_file,
         out_file=args.out_file,
-        resolution=args.resolution,
-        mesher=args.mesher,
         verbose=args.verbose,
         force_pygen=args.force_pygen,
     )
@@ -96,8 +75,6 @@ def export_model(args: argparse.Namespace, input_file: str) -> None:
 def export_instrument(
     input_file: str,
     out_file: str = "union_env",
-    resolution: int = 64,
-    mesher: str = "brep",
     verbose: bool = False,
     force_pygen: bool = False,
 ) -> dict:
@@ -115,8 +92,7 @@ def export_instrument(
     """
     import trimesh
     from preprocess import preprocess
-    from signed_distance_functions import build_sdfs
-    from meshing import build_all_meshes
+    from union_clip import build_union_meshes
     from bounding_box import compute_all_world_bboxes
     from mcstas_trace import trace_instrument, McrunNotFoundError, TraceError
 
@@ -126,23 +102,12 @@ def export_instrument(
         input_file, verbose, force_pygen=force_pygen
     )
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
-    final_sdfs, sdfs = build_sdfs(union_geometries, world_matrices, world_bboxes=world_bboxes)
-    union_meshes = build_all_meshes(
-        union_geometries,
-        world_matrices,
-        sdfs,
-        final_sdfs,
-        resolution,
-        clip,
-        out_file=out_file,
-        export=False,
-        verbose=verbose,
-        mesher=mesher,
-        world_bboxes=world_bboxes,
+    union_meshes = build_union_meshes(
+        union_geometries, world_matrices, clip, verbose,
+        world_bboxes=world_bboxes, close_cuts=True,
     )
-    # build_all_meshes() stores None for a component whose geometry came out
-    # empty (it prints "WARNING: empty mesh for <name>" when that happens) -
-    # drop those rather than exporting them.
+    # build_union_meshes() stores None for masks and for components that are
+    # hidden entirely - drop those rather than exporting them.
     all_meshes = {name: mesh for name, mesh in union_meshes.items() if mesh is not None}
 
     # Every other component along the beamline - drawn via mcrun --trace,
@@ -190,8 +155,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     export_only_options = (
         args.out_file != "union_env"
-        or args.resolution != 64
-        or args.n_points != 1_000
         or args.verbose
         or args.force_pygen
     )
