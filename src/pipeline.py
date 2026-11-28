@@ -20,7 +20,6 @@ def compute_mesh_data(
     force_remesh=False,
     verbose=True,
     group_by_material=False,
-    force_pygen=False,
     param_values=None,
     close_cuts=False,
 ):
@@ -32,7 +31,6 @@ def compute_mesh_data(
     instr, world_matrices, union_geometries = preprocess(
         input_file,
         verbose=False,
-        force_pygen=force_pygen,
         param_values=param_values,
     )
     clip = resolve_clip_frame(clip, world_matrices)
@@ -114,13 +112,12 @@ def compute_mesh_data(
 NO_CLIP = {"enable": False, "axis": "X", "mode": "Above", "position": 0.0}
 
 
-def compute_trace_data(input_file, force_pygen, params, ncount, seed):
+def compute_trace_data(input_file, params, ncount, seed):
     """Run input_file through mcrun --trace. Worker-process side of
     TraceWorker, like compute_mesh_data for MeshBuildWorker."""
     return trace_instrument(
         input_file,
         params=params,
-        force_pygen=force_pygen,
         ncount=ncount,
         seed=seed,
         # trace_instrument's own max_rays default (1000) exists to bound a
@@ -131,10 +128,10 @@ def compute_trace_data(input_file, force_pygen, params, ncount, seed):
     )
 
 
-def compute_counts_data(run_folder, input_file, force_pygen):
+def compute_counts_data(run_folder, input_file):
     """Load run_folder's spatially-placeable detector output (Union
     loggers/abs_loggers and ordinary McStas monitors alike) as a
     {name: LoggerCounts} dict. Worker-process side of CountsWorker, like
     compute_trace_data for TraceWorker."""
-    types = component_types(input_file, force_pygen)
+    types = component_types(input_file)
     return logger_output.load_counts(run_folder, types)

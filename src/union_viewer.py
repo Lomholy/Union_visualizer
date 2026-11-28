@@ -206,12 +206,11 @@ class Viewer(QtWidgets.QMainWindow):
         settings.reset_view_button.clicked.connect(self.reset_view)
         settings.fit_instrument_button.clicked.connect(self.fit_whole_instrument)
         settings.export_stl_button.clicked.connect(self.export_stl)
-        settings.material_group_checkbox.stateChanged.connect(self.on_material_group_changed)
-        settings.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
-        settings.pygen_checkbox.stateChanged.connect(self.on_pygen_changed)
+        self.geometry_panel.material_group_checkbox.stateChanged.connect(self.on_material_group_changed)
+        self.geometry_panel.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
         settings.close_cuts_checkbox.stateChanged.connect(self.on_close_cuts_changed)
-        settings.components_checkbox.stateChanged.connect(self.on_components_changed)
-        settings.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
+        self.geometry_panel.components_checkbox.stateChanged.connect(self.on_components_changed)
+        self.geometry_panel.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
         settings.edges_checkbox.stateChanged.connect(self.apply_edges_visibility)
         settings.triangle_lines_checkbox.stateChanged.connect(self.apply_triangle_lines)
@@ -251,7 +250,7 @@ class Viewer(QtWidgets.QMainWindow):
         geometry.union_color_requested.connect(self.pick_color)
         geometry.component_color_requested.connect(self.pick_component_color)
 
-        geometry.set_components_shown(settings.components_checkbox.isChecked())
+        geometry.set_components_shown(geometry.components_checkbox.isChecked())
         rays.setEnabled(settings.rays_checkbox.isChecked())
 
     def _add_dock(self, title, panel, collapsed=True, stretch=True, closable=False):
@@ -329,7 +328,7 @@ class Viewer(QtWidgets.QMainWindow):
         to call on its own whenever either input changes."""
         if self.current_group is None:
             return
-        hide_vacuum = self.settings_panel.vacuum_checkbox.isChecked()
+        hide_vacuum = self.geometry_panel.vacuum_checkbox.isChecked()
         is_vacuum = self.current_group.geometry_is_vacuum
         for key, mesh in self.current_group.geometry_meshes.items():
             visible = self.geometry_panel.union_visibility.get(key, True)
@@ -367,8 +366,8 @@ class Viewer(QtWidgets.QMainWindow):
     def apply_component_visibility(self):
         if self.trace_group is None:
             return
-        self.trace_group.visible = self.settings_panel.components_checkbox.isChecked()
-        show_arms = self.settings_panel.arms_checkbox.isChecked()
+        self.trace_group.visible = self.geometry_panel.components_checkbox.isChecked()
+        show_arms = self.geometry_panel.arms_checkbox.isChecked()
         for name, obj in self.trace_group.component_objects.items():
             visible = self.geometry_panel.component_visibility.get(name, True)
             if self.trace_group.component_is_arm[name] and not show_arms:
@@ -533,9 +532,8 @@ class Viewer(QtWidgets.QMainWindow):
             meshes=self.meshes,
             dependencies=self.dependencies,
             force_remesh=force_reload,
-            group_by_material=self.settings_panel.material_group_checkbox.isChecked(),
+            group_by_material=self.geometry_panel.material_group_checkbox.isChecked(),
             close_cuts=self.settings_panel.close_cuts_checkbox.isChecked(),
-            force_pygen=self.settings_panel.pygen_checkbox.isChecked(),
             param_values=dict(self.params_panel.values),
             # Building the pygfx objects is cheap, so it stays on the job's
             # QThread instead of crossing the process boundary.
@@ -618,7 +616,7 @@ class Viewer(QtWidgets.QMainWindow):
         return self.settings_panel.rays_checkbox.isChecked()
 
     def trace_enabled(self):
-        return self.settings_panel.components_checkbox.isChecked() or self.rays_enabled()
+        return self.geometry_panel.components_checkbox.isChecked() or self.rays_enabled()
 
     def reload_trace(self):
         if self.input_file is None or not self.trace_enabled():
@@ -634,7 +632,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.trace_jobs.start(
             compute_trace_data,
             self.input_file,
-            self.settings_panel.pygen_checkbox.isChecked(),
             params,
             self.rays_panel.ncount() if self.rays_enabled() else 0,
             self.rays_panel.seed(),
@@ -670,7 +667,7 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_components_changed(self):
         self.geometry_panel.set_components_shown(
-            self.settings_panel.components_checkbox.isChecked()
+            self.geometry_panel.components_checkbox.isChecked()
         )
         if self.trace_group is None:
             self.reload_trace()
@@ -789,7 +786,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         self._loading_counts_folder = folder
         self.counts_jobs.start(
-            compute_counts_data, folder, self.input_file, self.settings_panel.pygen_checkbox.isChecked()
+            compute_counts_data, folder, self.input_file
         )
 
     def _on_counts_finished(self, counts, elapsed):
@@ -919,12 +916,6 @@ class Viewer(QtWidgets.QMainWindow):
 
     def on_material_group_changed(self):
         self.reload_meshes()
-
-    def on_pygen_changed(self):
-        # Switches which parser builds the McStas_instr entirely, so
-        # nothing from a previous load can be trusted as unchanged.
-        self.reload_meshes(force_reload=True)
-        self.reload_trace()
 
     def on_vacuum_changed(self):
         self.apply_geometry_visibility()

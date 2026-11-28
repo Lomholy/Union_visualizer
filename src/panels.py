@@ -41,44 +41,10 @@ class SettingsPanel(QtWidgets.QWidget):
         self.open_file_button = make_button(
             "Open File...", "Open a McStas instrument (shortcut: Ctrl+O)"
         )
-        self.material_group_checkbox = make_checkbox(
-            "Group by material",
-            True,
-            "Combine components that share a material into a single "
-            "rendered object (trimesh concatenation, not a boolean fusion).",
-        )
-        self.vacuum_checkbox = make_checkbox(
-            "Hide vacuum",
-            True,
-            "Hides volumes whose material is 'vacuum'/'Vacuum' or "
-            "'exit'/'Exit' (McStas treats 'exit' as vacuum too).",
-        )
-        self.pygen_checkbox = make_checkbox(
-            "Force mcstas-pygen preprocessing",
-            False,
-            "Translate a .instr input through the real McStas front-end "
-            "(mcstas-pygen) instead of mcstasscript's lightweight .instr "
-            "reader. mcstas-pygen already runs automatically whenever that "
-            "lightweight reader raises an error - this instead forces it "
-            "for every load, for instruments the lightweight reader "
-            "mis-parses without raising an error. Requires mcstas-pygen "
-            "on PATH (ships with the McStas install).",
-        )
         self.close_cuts_checkbox = make_checkbox(
             "Close cut surfaces", False,
             "Add walls where higher-priority components and masks cut a component, "
             "so it is drawn as a closed solid. Slower.",
-        )
-        self.components_checkbox = make_checkbox(
-            "Show McStas components",
-            True,
-            "Draw every non-Union component the way McStas's own MCDISPLAY "
-            "draws it (no priority cutting). Compiles and runs the "
-            "instrument with mcrun --trace, so it needs a working McStas "
-            "install and compiler.",
-        )
-        self.arms_checkbox = make_checkbox(
-            "Show Arms", False, "Arms only mark coordinate frames."
         )
         self.rays_checkbox = make_checkbox(
             "Show neutron rays",
@@ -111,12 +77,7 @@ class SettingsPanel(QtWidgets.QWidget):
         layout = _panel_layout(self)
         for widget in (
             self.open_file_button,
-            self.material_group_checkbox,
-            self.vacuum_checkbox,
-            self.pygen_checkbox,
             self.close_cuts_checkbox,
-            self.components_checkbox,
-            self.arms_checkbox,
             self.rays_checkbox,
             self.grid_checkbox,
             self.gizmo_checkbox,
@@ -124,11 +85,9 @@ class SettingsPanel(QtWidgets.QWidget):
             self.edges_checkbox,
             self.triangle_lines_checkbox,
             self.trace_status_label,
-            self.reset_view_button,
-            self.fit_instrument_button,
-            self.export_stl_button,
         ):
             layout.addWidget(widget)
+        add_row(layout, self.reset_view_button, self.fit_instrument_button, self.export_stl_button)
 
     def set_trace_status(self, text):
         """Show grey text under the checkboxes."""
@@ -644,7 +603,37 @@ class GeometryPanel(QtWidgets.QWidget):
         self.component_visibility = {}
         self.show_components = True
 
+        self.material_group_checkbox = make_checkbox(
+            "Group by material",
+            True,
+            "Combine components that share a material into a single "
+            "rendered object (trimesh concatenation, not a boolean fusion).",
+        )
+        self.vacuum_checkbox = make_checkbox(
+            "Hide vacuum",
+            True,
+            "Hides volumes whose material is 'vacuum'/'Vacuum' or "
+            "'exit'/'Exit' (McStas treats 'exit' as vacuum too).",
+        )
+        self.components_checkbox = make_checkbox(
+            "Show McStas components",
+            True,
+            "Draw every non-Union component the way McStas's own MCDISPLAY "
+            "draws it (no priority cutting). Compiles and runs the "
+            "instrument with mcrun --trace, so it needs a working McStas "
+            "install and compiler.",
+        )
+        self.arms_checkbox = make_checkbox(
+            "Show Arms", False, "Arms only mark coordinate frames."
+        )
         layout = QtWidgets.QVBoxLayout(self)
+        for checkbox in (
+            self.material_group_checkbox,
+            self.vacuum_checkbox,
+            self.components_checkbox,
+            self.arms_checkbox,
+        ):
+            layout.addWidget(checkbox)
 
         self.filter_edit = QtWidgets.QLineEdit()
         self.filter_edit.setPlaceholderText("Filter...")
