@@ -64,6 +64,11 @@ class SettingsPanel(QtWidgets.QWidget):
             "mis-parses without raising an error. Requires mcstas-pygen "
             "on PATH (ships with the McStas install).",
         )
+        self.close_cuts_checkbox = make_checkbox(
+            "Close cut surfaces", False,
+            "Add walls where higher-priority components and masks cut a component, "
+            "so it is drawn as a closed solid. Slower.",
+        )
         self.components_checkbox = make_checkbox(
             "Show McStas components",
             True,
@@ -109,6 +114,7 @@ class SettingsPanel(QtWidgets.QWidget):
             self.material_group_checkbox,
             self.vacuum_checkbox,
             self.pygen_checkbox,
+            self.close_cuts_checkbox,
             self.components_checkbox,
             self.arms_checkbox,
             self.rays_checkbox,
@@ -298,27 +304,6 @@ class ParametersPanel(QtWidgets.QWidget):
             return
         self.values[name] = text.strip()
         self.edited.emit()
-
-
-class MesherPanel(QtWidgets.QWidget):
-    """The union mesher's one option, Close cut surfaces. Emits changed()
-    when it is toggled."""
-
-    changed = QtCore.Signal()
-
-    def __init__(self):
-        super().__init__()
-        layout = _panel_layout(self)
-        self.close_cuts_checkbox = make_checkbox(
-            "Close cut surfaces", False,
-            "Add walls where higher-priority components and masks cut a component, "
-            "so it is drawn as a closed solid. Slower.",
-        )
-        layout.addWidget(self.close_cuts_checkbox)
-        self.close_cuts_checkbox.stateChanged.connect(lambda *_: self.changed.emit())
-
-    def close_cuts(self):
-        return self.close_cuts_checkbox.isChecked()
 
 
 class ClippingPanel(QtWidgets.QWidget):

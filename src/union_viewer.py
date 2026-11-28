@@ -42,7 +42,6 @@ from panels import (
     ClippingPanel,
     CountsPanel,
     GeometryPanel,
-    MesherPanel,
     ParametersPanel,
     RaysPanel,
     RulerPanel,
@@ -174,7 +173,6 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
         self.settings_panel = SettingsPanel()
         self.params_panel = ParametersPanel()
-        self.mesher_panel = MesherPanel()
         self.clipping_panel = ClippingPanel()
         self.ruler_panel = RulerPanel()
         self.rays_panel = RaysPanel()
@@ -183,7 +181,6 @@ class Viewer(QtWidgets.QMainWindow):
 
         self._add_dock("Settings", self.settings_panel, collapsed=False)
         self._add_dock("Instrument Parameters", self.params_panel, stretch=False)
-        self._add_dock("Mesher Options", self.mesher_panel)
         self._add_dock("Clipping", self.clipping_panel)
         self._add_dock("Ruler", self.ruler_panel)
         self._add_dock("Neutron Rays", self.rays_panel)
@@ -203,6 +200,7 @@ class Viewer(QtWidgets.QMainWindow):
         settings.material_group_checkbox.stateChanged.connect(self.on_material_group_changed)
         settings.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
         settings.pygen_checkbox.stateChanged.connect(self.on_pygen_changed)
+        settings.close_cuts_checkbox.stateChanged.connect(self.on_close_cuts_changed)
         settings.components_checkbox.stateChanged.connect(self.on_components_changed)
         settings.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
         settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
@@ -218,7 +216,6 @@ class Viewer(QtWidgets.QMainWindow):
             )
 
         self.params_panel.edited.connect(self.on_params_edited)
-        self.mesher_panel.changed.connect(self.on_mesher_options_changed)
         self.clipping_panel.changed.connect(self.apply_clipping)
         self.ruler_panel.clear_button.clicked.connect(self.clear_ruler)
         self.ruler_panel.points_edited.connect(self.on_ruler_points_edited)
@@ -525,7 +522,7 @@ class Viewer(QtWidgets.QMainWindow):
             dependencies=self.dependencies,
             force_remesh=force_reload,
             group_by_material=self.settings_panel.material_group_checkbox.isChecked(),
-            close_cuts=self.mesher_panel.close_cuts(),
+            close_cuts=self.settings_panel.close_cuts_checkbox.isChecked(),
             force_pygen=self.settings_panel.pygen_checkbox.isChecked(),
             param_values=dict(self.params_panel.values),
             # Building the pygfx objects is cheap, so it stays on the job's
@@ -903,9 +900,9 @@ class Viewer(QtWidgets.QMainWindow):
     # Settings changed
     # ========================================================
 
-    def on_mesher_options_changed(self):
-        # Global mesher settings, not part of any component's dependency
-        # signature, so everything is remeshed.
+    def on_close_cuts_changed(self):
+        # Not part of any component's dependency signature, so everything
+        # is remeshed.
         self.reload_meshes(force_reload=True)
 
     def on_material_group_changed(self):
