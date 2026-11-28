@@ -61,7 +61,7 @@ class ComputeTraceDataTest(unittest.TestCase):
             instr = os.path.join(tmp, "simple_test.instr")
             shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
             try:
-                _, rays = pipeline.compute_trace_data(instr, False, [], 1200, 7)
+                _, rays = pipeline.compute_trace_data(instr, [], 1200, 7)
             except Exception as e:
                 self.skipTest(f"mcrun could not compile here: {e}")
         self.assertEqual(rays.n_rays, 1200)

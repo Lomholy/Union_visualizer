@@ -78,23 +78,11 @@ installed before this module existed: run `python -m pip install -e .` again.
 
 ### Settings
 
-The "Group by material" button groups the Union geometries into their material allowing you to show/hide entire materials at a time.
-
-The "Hide Vacuum" button ensures that the vacuum union geometries are not shown.
-
-The "Force mcstas-pygen preprocessing" box forces the visualizer to use the mcstas-pygen engine to preprocess the instrument which may resolve some WARNING messages for instruments.
-
 unviz meshes Union geometry with its union mesher, which keeps each component's surface where that component has the highest priority, as McStas draws it with `mcdisplay --trace=2`. The "Close cut surfaces" box adds walls where higher-priority components and masks cut a component, so each component is drawn as a closed solid. `unviz FILE --export` always closes the cuts.
-
-With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file.
-
-Furthermore it is possible to show all the arms of the mcstas instrument using the Show Arms checkbox.
 
 The "show neutron rays" checkbox opens the neutron rays settings, and runs the instrument to start the rays.
 
-The Reset view button focuses the view on the union samples.
-
-The Fit whole instrument focuses the view on the whole instrument.
+The Reset view, Fit whole instrument and Export STL buttons sit on one row. Reset view focuses the view on the union samples, and Fit whole instrument on the whole instrument.
 
 The Export STL button allows you to export the current geometries (i.e clipping is taken into account and the hidden geometries are also taken into account).
 
@@ -120,7 +108,15 @@ The detector counts panel allows you to load in a mcstas run of your instrument,
 
 ### Visible geometries
 
-The visible geometries panel lists all the geometries and their colours. Each geometry can be toggled off and on, and all union geometries are as a default grouped together into their materials, but this can be changed by the "group material definitions" check box.
+The visible geometries panel lists all the geometries and their colours. Each geometry can be toggled off and on.
+
+The "Group by material" box (on by default) groups the Union geometries into their materials, so you can show or hide a whole material at a time.
+
+The "Hide vacuum" box hides the vacuum Union geometries.
+
+With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file.
+
+Furthermore it is possible to show all the arms of the mcstas instrument using the Show Arms checkbox.
 
 ---
 ### Dependencies:
