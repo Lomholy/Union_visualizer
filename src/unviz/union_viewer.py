@@ -9,8 +9,8 @@ import pylinalg as la
 from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
-from clipping import resolve_clip_frame
-from gui_helpers import (
+from .clipping import resolve_clip_frame
+from .gui_helpers import (
     component_color_key,
     clip_planes,
     instrument_param_args,
@@ -18,9 +18,9 @@ from gui_helpers import (
     RAY_COLOR_MODES,
     rays_reaching,
 )
-import logger_output
-from pipeline import NO_CLIP, compute_counts_data, compute_mesh_data, compute_trace_data
-from scene_objects import (
+from . import logger_output
+from .pipeline import NO_CLIP, compute_counts_data, compute_mesh_data, compute_trace_data
+from .scene_objects import (
     GRID_SPACING,
     MAX_GRID_DIVISIONS,
     add_default_lights,
@@ -34,11 +34,11 @@ from scene_objects import (
     pick_world_point,
     set_triangle_lines,
 )
-from background import JobRunner
-from qt_helpers import ask_color
-from camera import fit_camera_to_scene, recentre_controller, update_camera_depth_range
-from widgets import CollapsibleTitleBar, LoadingIndicator
-from panels import (
+from .background import JobRunner
+from .qt_helpers import ask_color
+from .camera import fit_camera_to_scene, recentre_controller, update_camera_depth_range
+from .widgets import CollapsibleTitleBar, LoadingIndicator
+from .panels import (
     ClippingPanel,
     CountsPanel,
     GeometryPanel,

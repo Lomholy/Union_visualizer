@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from qtpy import QtCore, QtWidgets  # noqa: E402
 
-from qt_helpers import (  # noqa: E402
+from unviz.qt_helpers import (  # noqa: E402
     add_labeled_row,
     clear_layout,
     make_checkbox,

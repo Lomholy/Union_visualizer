@@ -22,7 +22,7 @@ SRC_DIR = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 
 import mcstasscript as ms
-import preprocess as pp  # noqa: E402
+from unviz import preprocess as pp  # noqa: E402
 
 
 def var_map_for(*initialize_lines):

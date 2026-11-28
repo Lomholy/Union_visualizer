@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from qtpy import QtWidgets  # noqa: E402
 
-from panels import RulerPanel  # noqa: E402
+from unviz.panels import RulerPanel  # noqa: E402
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import trimesh
 
-from preprocess import execute_mcstasscript_file, load_McStas_file
+from .preprocess import execute_mcstasscript_file, load_McStas_file
 
 
 class McrunNotFoundError(RuntimeError):

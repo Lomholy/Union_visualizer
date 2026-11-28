@@ -6,7 +6,7 @@ import numpy as np
 import trimesh
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-from coplanar import find_coincident_faces  # noqa: E402
+from unviz.coplanar import find_coincident_faces  # noqa: E402
 
 
 def box(x=0.0, y=0.0, z=0.0, size=0.1):

@@ -5,7 +5,7 @@ import time
 
 from qtpy import QtCore, QtGui, QtWidgets
 
-from gui_helpers import VIRIDIS_STOPS
+from .gui_helpers import VIRIDIS_STOPS
 
 
 class CollapsibleTitleBar(QtWidgets.QWidget):

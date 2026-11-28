@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from qtpy import QtWidgets  # noqa: E402
 
-from background import JobRunner  # noqa: E402
+from unviz.background import JobRunner  # noqa: E402
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 

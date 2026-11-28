@@ -5,8 +5,8 @@ widgets and signals and applies the results to the scene."""
 import numpy as np
 from qtpy import QtCore, QtWidgets
 
-from gui_helpers import RAY_COLOR_MODES, wrap_label
-from qt_helpers import (
+from .gui_helpers import RAY_COLOR_MODES, wrap_label
+from .qt_helpers import (
     add_labeled_row,
     add_row,
     ask_color,
@@ -20,8 +20,8 @@ from qt_helpers import (
     repopulate_combo,
     set_swatch_color,
 )
-from scene_objects import DEFAULT_MARKER_SIZES, DEFAULT_RAY_COLORS, RULER_COLOR
-from widgets import ColorBarWidget
+from .scene_objects import DEFAULT_MARKER_SIZES, DEFAULT_RAY_COLORS, RULER_COLOR
+from .widgets import ColorBarWidget
 
 DEFAULT_SWATCH_COLOR = "#b6b6b6"
 

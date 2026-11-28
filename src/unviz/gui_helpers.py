@@ -7,7 +7,7 @@ import importlib.util
 import numpy as np
 import trimesh
 
-from clipping import clip_plane
+from .clipping import clip_plane
 
 
 def normalize_material_string(material_string):

@@ -17,7 +17,7 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-import logger_output  # noqa: E402
+from unviz import logger_output  # noqa: E402
 
 
 class FakeMetadata:

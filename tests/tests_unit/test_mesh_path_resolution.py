@@ -26,7 +26,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(TESTS_DIR))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 
-import preprocess as pp  # noqa: E402
+from unviz import preprocess as pp  # noqa: E402
 
 
 class FakeMeshComponent:

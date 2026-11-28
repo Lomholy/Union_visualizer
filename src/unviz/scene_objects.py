@@ -5,7 +5,7 @@ floor grid sizing."""
 import numpy as np
 import pygfx as gfx
 import trimesh
-from gui_helpers import (
+from .gui_helpers import (
     assign_default_color,
     component_color_key,
     ray_segment_indices,
@@ -19,8 +19,8 @@ from gui_helpers import (
     SCATTER_MARKER_SIZE,
     ABSORB_MARKER_SIZE,
 )
-from mcstas_trace import SCATTER, ABSORB, TELEPORT
-import logger_output
+from .mcstas_trace import SCATTER, ABSORB, TELEPORT
+from . import logger_output
 
 
 # How far, in metres, each Union mesh vertex is drawn outward along its

@@ -18,10 +18,10 @@ import numpy as np
 import trimesh
 from numba import njit
 
-from preprocess import box_dimensions
-from clipping import clip_plane
-from bounding_box import compute_all_world_bboxes, overlapping
-from union_facets import closed_cut
+from .preprocess import box_dimensions
+from .clipping import clip_plane
+from .bounding_box import compute_all_world_bboxes, overlapping
+from .union_facets import closed_cut
 
 # Split budget in half levels: a split in 4 costs 2, a split in 2 costs 1
 TRI_DEPTH = 12
