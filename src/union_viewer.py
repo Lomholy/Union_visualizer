@@ -179,8 +179,8 @@ class Viewer(QtWidgets.QMainWindow):
         self.counts_panel = CountsPanel()
         self.geometry_panel = GeometryPanel()
 
-        self.settings_panel.layout().insertWidget(1, self.params_panel)
-        self._add_dock("Settings", self.settings_panel, collapsed=False)
+        self.settings_panel.layout().addWidget(self.params_panel)
+        self._add_dock("Settings", self.settings_panel, collapsed=False, stretch=False)
         # Tool docks are hidden until chosen in the top bar.
         tool_bar = self.addToolBar("Tools")
         tool_bar.setMovable(False)
