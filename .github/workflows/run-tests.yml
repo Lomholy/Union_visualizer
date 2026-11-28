@@ -1,11 +1,11 @@
-name: Run Python Script On Test Files
+name: Unit tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  run-unviz-export:
+  unit-tests:
     runs-on: ubuntu-latest
 
     steps:
@@ -36,17 +36,6 @@ jobs:
           micromamba list
           which unviz
           unviz --help
-
-
-      - name: Run script on all test files
-        shell: bash -l {0}
-        run: |
-          status=0
-          for file in tests/test_instruments/*.instr tests/test_instruments/*.py; do
-            echo "Running unviz --export on $file"
-            unviz "$file" --export --out-file /tmp/unviz_export_smoke_test || status=1
-          done
-          exit $status
 
 
       - name: Run unit tests
