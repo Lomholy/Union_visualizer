@@ -100,7 +100,11 @@ The Export STL button allows you to export the current geometries (i.e clipping 
 
 ### Instrument parameters
 
-The Instrument Parameters panel (a scrollable list, since an instrument can have many) has one field per instrument parameter, showing its default. Values you type there are used both for the Union geometry and for the McStas run; parameters without a default must be filled in there. When a parameter is changed the visualized instrument should update.
+The Settings panel holds a scrollable list with one field per instrument parameter, showing its default. Values you type there are used both for the Union geometry and for the McStas run; parameters without a default must be filled in there. When a parameter is changed the visualized instrument should update.
+
+### Tool panels
+
+The bar along the top of the window shows and hides the Clipping, Ruler, Neutron Rays and Detector Counts panels. They are hidden until chosen there, and several can be open at once.
 
 ### Clipping planes
 
