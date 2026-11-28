@@ -66,7 +66,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.current_group = None
         self.dependencies = None
         self.meshes = None
-        self._shown_mesh_warnings = []
+        self._check_faces_pending = False
 
         # ----------------------------------------------------
         # Background jobs
@@ -206,6 +206,7 @@ class Viewer(QtWidgets.QMainWindow):
         settings.reset_view_button.clicked.connect(self.reset_view)
         settings.fit_instrument_button.clicked.connect(self.fit_whole_instrument)
         settings.export_stl_button.clicked.connect(self.export_stl)
+        settings.check_faces_button.clicked.connect(self.check_coinciding_faces)
         self.geometry_panel.material_group_checkbox.stateChanged.connect(self.on_material_group_changed)
         self.geometry_panel.vacuum_checkbox.stateChanged.connect(self.on_vacuum_changed)
         settings.close_cuts_checkbox.stateChanged.connect(self.on_close_cuts_changed)
@@ -511,6 +512,13 @@ class Viewer(QtWidgets.QMainWindow):
     # Reload geometry (asynchronous)
     # ========================================================
 
+    def check_coinciding_faces(self):
+        """Run the coinciding-face check with an (incremental) mesh reload."""
+        if self.input_file is None:
+            return
+        self._check_faces_pending = True
+        self.reload_meshes()
+
     def reload_meshes(self, force_reload=False):
         if self.input_file is None:
             return
@@ -522,6 +530,7 @@ class Viewer(QtWidgets.QMainWindow):
 
         self._reload_pending_force = False
         self.loading_indicator.set_loading(True)
+        check_faces, self._check_faces_pending = self._check_faces_pending, False
         print("Building meshes...")
 
         colors = self.colors
@@ -534,6 +543,7 @@ class Viewer(QtWidgets.QMainWindow):
             force_remesh=force_reload,
             group_by_material=self.geometry_panel.material_group_checkbox.isChecked(),
             close_cuts=self.settings_panel.close_cuts_checkbox.isChecked(),
+            check_faces=check_faces,
             param_values=dict(self.params_panel.values),
             # Building the pygfx objects is cheap, so it stays on the job's
             # QThread instead of crossing the process boundary.
@@ -587,11 +597,11 @@ class Viewer(QtWidgets.QMainWindow):
         if self.counts:
             self.rebuild_counts_group()
         print("Reload complete")
-        # Shown once per distinct set, so remeshing on every edit doesn't repeat the popup.
         warnings = instrument_info["warnings"]
-        if warnings and warnings != self._shown_mesh_warnings:
+        if warnings:
             QtWidgets.QMessageBox.warning(self, "Coinciding faces", "\n\n".join(warnings))
-        self._shown_mesh_warnings = warnings
+        elif warnings is not None:
+            QtWidgets.QMessageBox.information(self, "Coinciding faces", "No coinciding faces found.")
 
         if self._pending_fit_camera:
             self._pending_fit_camera = False

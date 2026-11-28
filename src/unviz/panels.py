@@ -73,6 +73,10 @@ class SettingsPanel(QtWidgets.QWidget):
             "single .stl file, cut by the clipping plane if enabled. "
             "McStas lines are exported as thin tubes.",
         )
+        self.check_faces_button = make_button(
+            "Check coinciding faces",
+            "Find Union components whose faces coincide, where Union's ray tracing is ambiguous.",
+        )
 
         layout = _panel_layout(self)
         for widget in (
@@ -87,7 +91,12 @@ class SettingsPanel(QtWidgets.QWidget):
             self.trace_status_label,
         ):
             layout.addWidget(widget)
-        add_row(layout, self.reset_view_button, self.fit_instrument_button, self.export_stl_button)
+        buttons = QtWidgets.QVBoxLayout()
+        buttons.setSpacing(0)
+        for button in (self.reset_view_button, self.fit_instrument_button, self.export_stl_button):
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+        layout.addWidget(self.check_faces_button)
 
     def set_trace_status(self, text):
         """Show grey text under the checkboxes."""
