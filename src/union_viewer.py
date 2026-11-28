@@ -179,12 +179,21 @@ class Viewer(QtWidgets.QMainWindow):
         self.counts_panel = CountsPanel()
         self.geometry_panel = GeometryPanel()
 
+        self.settings_panel.layout().insertWidget(1, self.params_panel)
         self._add_dock("Settings", self.settings_panel, collapsed=False)
-        self._add_dock("Instrument Parameters", self.params_panel, stretch=False)
-        self._add_dock("Clipping", self.clipping_panel)
-        self._add_dock("Ruler", self.ruler_panel)
-        self._add_dock("Neutron Rays", self.rays_panel)
-        self._add_dock("Detector Counts", self.counts_panel)
+        # Tool docks are hidden until chosen in the top bar.
+        tool_bar = self.addToolBar("Tools")
+        tool_bar.setMovable(False)
+        for title, panel in (
+            ("Clipping", self.clipping_panel),
+            ("Ruler", self.ruler_panel),
+            ("Neutron Rays", self.rays_panel),
+            ("Detector Counts", self.counts_panel),
+        ):
+            dock = self._add_dock(title, panel, collapsed=False)
+            dock.hide()
+            tool_bar.addAction(dock.toggleViewAction())
+            dock.visibilityChanged.connect(self.rebalance_docks)
         self.geometry_dock = self._add_dock("Visible Geometries", self.geometry_panel)
         QtCore.QTimer.singleShot(0, self.rebalance_docks)
 
