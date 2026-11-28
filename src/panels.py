@@ -261,13 +261,10 @@ class ParametersPanel(QtWidgets.QWidget):
         self.form = QtWidgets.QFormLayout(form_widget)
         self.empty_label = make_note_label("No instrument loaded.")
 
-        # Scrollable, and capped at a fixed height rather than growing with
-        # the parameter count - an instrument can have many parameters, and
-        # this keeps the rest of the panels from being pushed off-screen.
+        # Scrollable, so many parameters never push the other panels off-screen.
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(form_widget)
-        scroll.setMaximumHeight(220)
 
         layout = _panel_layout(self)
         layout.addWidget(self.empty_label)
