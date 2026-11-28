@@ -134,7 +134,7 @@ def execute_pygen_file(generated_file):
     with open(generated_file, "r") as f:
         code = f.read()
 
-    namespace = {"__name__": "mcstas_pygen_module"}
+    namespace = {"__name__": "mcstas_pygen_module", "__file__": generated_file}
     exec(compile(code, generated_file, "exec"), namespace)
 
     make = namespace.get("make")
