@@ -1,0 +1,51 @@
+name: Export test instruments
+
+# Runs only when something the exporter (unviz --export) uses changes.
+# ponytail: hand-kept list of the modules cli.export_instrument imports; add a module here when the exporter starts importing it.
+on:
+  push:
+    paths: &exporter_paths
+      - src/unviz/__init__.py
+      - src/unviz/cli.py
+      - src/unviz/preprocess.py
+      - src/unviz/union_clip.py
+      - src/unviz/union_facets.py
+      - src/unviz/bounding_box.py
+      - src/unviz/clipping.py
+      - src/unviz/mcstas_trace.py
+      - tests/test_instruments/**
+      - pyproject.toml
+      - unviz_env.yml
+      - .github/workflows/export-instruments.yml
+  pull_request:
+    paths: *exporter_paths
+
+jobs:
+  run-unviz-export:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: unviz_env.yml
+          environment-name: unviz
+          cache-environment: true
+          init-shell: bash
+
+      - name: Install unviz from this checkout
+        shell: bash -l {0}
+        run: python -m pip install -e . --no-deps
+
+      - name: Run unviz --export on all test instruments
+        shell: bash -l {0}
+        run: |
+          status=0
+          for file in tests/test_instruments/*.instr tests/test_instruments/*.py; do
+            echo "Running unviz --export on $file"
+            unviz "$file" --export --out-file /tmp/unviz_export_smoke_test || status=1
+          done
+          exit $status
