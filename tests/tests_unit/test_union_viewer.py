@@ -33,13 +33,21 @@ from unviz.logger_output import LoggerCounts  # noqa: E402
 
 
 class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
-    def warned(self, close_cuts):
-        instr = ROOT / "tests" / "tests_unit" / "data" / "coincident_faces_test.instr"
+    instr = ROOT / "tests" / "tests_unit" / "data" / "coincident_faces_test.instr"
+
+    def warnings(self, **kwargs):
         with contextlib.redirect_stdout(io.StringIO()):
             *_, instrument_info = pipeline.compute_mesh_data(
-                str(instr), pipeline.NO_CLIP, verbose=False, close_cuts=close_cuts
+                str(self.instr), pipeline.NO_CLIP, verbose=False, **kwargs
             )
-        return sorted(warning.split("'")[1:4:2] for warning in instrument_info["warnings"])
+        return instrument_info["warnings"]
+
+    def warned(self, close_cuts):
+        warnings = self.warnings(close_cuts=close_cuts, check_faces=True)
+        return sorted(warning.split("'")[1:4:2] for warning in warnings)
+
+    def test_no_check_unless_asked(self):
+        self.assertIsNone(self.warnings())
 
     def test_touching_volumes_are_warned_about_but_nested_ones_are_not(self):
         # nested_inner sits inside nested_outer without touching its faces, so

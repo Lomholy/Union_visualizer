@@ -22,10 +22,13 @@ def compute_mesh_data(
     group_by_material=False,
     param_values=None,
     close_cuts=False,
+    check_faces=False,
 ):
     """Everything a mesh reload needs to do that doesn't touch pygfx/Qt:
     preprocessing, union meshing (with dependency-based incremental
-    rebuild), and material grouping/vacuum tagging. Returns plain,
+    rebuild), and material grouping/vacuum tagging. With check_faces, the
+    returned instrument_info["warnings"] lists coinciding faces between Union
+    components; otherwise it is None. Returns plain,
     picklable data (trimesh objects + dicts), so this can run in a worker
     process."""
     instr, world_matrices, union_geometries = preprocess(
@@ -65,22 +68,24 @@ def compute_mesh_data(
         )
     dependencies = new_dependencies
 
-    # The union mesher keeps each surface only where its component has the
-    # highest priority, so a nested volume adds no coinciding faces; cut walls
-    # and the clip plane would.
-    if not close_cuts and not clip.get("enable"):
-        check_meshes = meshes
-    else:
-        check_meshes = build_union_meshes(
-            union_geometries, world_matrices, NO_CLIP, world_bboxes=world_bboxes
-        )
-    warnings = [
-        f"Union components '{a}' and '{b}' have coinciding faces "
-        f"in {len(shared)} plane(s); Union's ray tracing is ambiguous there."
-        for a, b, shared in find_coincident_faces(check_meshes)
-    ]
-    for warning in warnings:
-        print(f"Warning: {warning}")
+    warnings = None
+    if check_faces:
+        # The union mesher keeps each surface only where its component has the
+        # highest priority, so a nested volume adds no coinciding faces; cut walls
+        # and the clip plane would.
+        if not close_cuts and not clip.get("enable"):
+            check_meshes = meshes
+        else:
+            check_meshes = build_union_meshes(
+                union_geometries, world_matrices, NO_CLIP, world_bboxes=world_bboxes
+            )
+        warnings = [
+            f"Union components '{a}' and '{b}' have coinciding faces "
+            f"in {len(shared)} plane(s); Union's ray tracing is ambiguous there."
+            for a, b, shared in find_coincident_faces(check_meshes)
+        ]
+        for warning in warnings:
+            print(f"Warning: {warning}")
 
     # One entry per component, or per material if grouped (trimesh
     # concatenation, not a boolean fusion). Vacuum is not filtered here -
