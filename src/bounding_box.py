@@ -38,7 +38,7 @@ def compute_local_bbox(comp):
         return -b, b
 
     elif t == "union_mesh":
-        # meshing.py/brep.py both apply coordinate_scale (defaulting to
+        # union_clip.py applies coordinate_scale (defaulting to
         # 1e-3) before using a Union_mesh's geometry; without it here the
         # box is ~1000x too large for a millimetre-unit STL.
         scale = float(comp.coordinate_scale) if comp.coordinate_scale is not None else 1e-3

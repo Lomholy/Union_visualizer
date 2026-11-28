@@ -102,7 +102,7 @@ The Instrument Parameters panel (a scrollable list, since an instrument can have
 
 ### Mesher options
 
-You can choose between using Boundary representations (brep), Marching cubes (mc), or Dual Contouring (dc). For the brep you can choose the surface deflection (The coarseness of the polygonization). For the mc and dc you can change the input resolution.
+unviz meshes Union geometry with its union mesher, which keeps each component's surface where that component has the highest priority, as McStas draws it with `mcdisplay --trace=2`. Its one option, "Close cut surfaces", adds walls where higher-priority components and masks cut a component, so each component is drawn as a closed solid. `unviz FILE --export` always closes the cuts.
 
 ### Clipping planes
 
@@ -129,11 +129,11 @@ The visible geometries panel lists all the geometries and their colours. Each ge
 
 - trimesh (For loading and outputting meshes)
 
-- scikit-image (For applying the marching cubes algorithm)
+- networkx (Used by trimesh to orient the McStas component meshes)
 
 - pygfx (For the renderer inside union_viewer)
 
-- pythonocc-core (For the boundary representation math exposed by the Open Cascade Kernel)
+- numba (For compiling the union mesher's closed-cut kernel)
 
 - shapely and mapbox_earcut (Optional: close the cut faces when exporting a clipped instrument; without them the cut is left open)
 

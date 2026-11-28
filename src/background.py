@@ -13,10 +13,8 @@ class ProcessJob(QtCore.QObject):
     """Runs fn(*args, **kwargs) in a process pool, waiting for it on the
     QThread this object is moved to, then post(result) on that QThread.
 
-    The call runs in a worker *process*, not just a QThread:
-    pythonocc-core's OpenCASCADE calls (used by the "brep" mesher) don't
-    release the GIL, so a long boolean operation on a plain QThread would
-    still starve the GUI thread's event loop and freeze the window.
+    The call runs in a worker *process*, not just a QThread, so long
+    meshing, mcrun and count loading never hold the GUI thread's GIL.
     Blocking on future.result() is safe because waiting on inter-process
     I/O releases the GIL. post is for cheap follow-up work that must not
     cross the process boundary, such as wrapping the result in pygfx

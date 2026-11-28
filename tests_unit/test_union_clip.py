@@ -20,7 +20,7 @@ import numpy as np
 import trimesh
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-import meshing  # noqa: E402
+import union_clip  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"
 NO_CLIP = {"enable": False, "axis": "X", "mode": "Above", "position": 0.0}
@@ -54,9 +54,7 @@ def build(comps, matrices=None, clip=NO_CLIP):
     matrices = matrices or {}
     world = {name: matrices.get(name, np.eye(4)) for name in geoms}
     with contextlib.redirect_stdout(io.StringIO()):
-        return meshing.build_all_meshes(
-            geoms, world, {}, {}, 64, clip, export=False, mesher="union",
-        )
+        return union_clip.build_union_meshes(geoms, world, clip)
 
 
 def area(mesh):
@@ -74,24 +72,13 @@ class TestPriorityClipping(unittest.TestCase):
         self.assertAlmostEqual(area(meshes.get("a")), 4 + 4 * 2 * 1.1, places=6)
         self.assertAlmostEqual(area(meshes.get("b")), 2 * 2 * 2.5 * 2 + 2 * 2.5 * 2.5, places=6)
 
-    def test_no_boolean_operations(self):
-        # R1: the mesher never calls the OpenCASCADE Boolean kernel
-        import brep
-        with mock.patch.object(brep, "BRepAlgoAPI_Cut", side_effect=AssertionError), \
-                mock.patch.object(brep, "BRepAlgoAPI_Common", side_effect=AssertionError):
-            meshes = build([box("a", 2, 2, 2, priority=1), box("b", 1, 1, 1, priority=2)])
-        self.assertGreater(area(meshes.get("a")), 0)
-
     def test_unknown_component_type_is_skipped_with_warning(self):
         # R1 error case
         odd = FakeComp("Union_torus", "odd", priority=5)
         geoms = {"odd": odd, "a": box("a", 2, 2, 2)}
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            meshes = meshing.build_all_meshes(
-                geoms, {"odd": np.eye(4), "a": np.eye(4)}, {}, {}, 64, NO_CLIP,
-                export=False, mesher="union",
-            )
+            meshes = union_clip.build_union_meshes(geoms, {"odd": np.eye(4), "a": np.eye(4)}, NO_CLIP)
         self.assertIsNone(meshes.get("odd"))
         self.assertIn("Union_torus", out.getvalue())
         self.assertAlmostEqual(area(meshes.get("a")), 24.0, places=6)
@@ -131,13 +118,10 @@ class TestShapes(unittest.TestCase):
             comp = FakeComp("Union_mesh", "a", filename=str(path), coordinate_scale=1.0)
             self.assertAlmostEqual(area(build([comp]).get("a")), 22.0, places=6)
 
-    def test_missing_mesh_file_raises_like_brep(self):
-        # R2 error case: same exception type as the brep mesher
-        import brep
+    def test_missing_mesh_file_raises(self):
+        # R2 error case: trimesh's loader error reaches the caller
         comp = FakeComp("Union_mesh", "a", filename="/nonexistent/x.stl", coordinate_scale=1.0)
-        with self.assertRaises(Exception) as from_brep:
-            brep.build_comp_brep(comp, {"a": np.eye(4)})
-        with self.assertRaises(type(from_brep.exception)):
+        with self.assertRaisesRegex(ValueError, "not a file"):
             build([comp])
 
 
@@ -233,9 +217,7 @@ class TestCloseCuts(unittest.TestCase):
         geoms = {c.name: c for c in comps}
         world = {name: (matrices or {}).get(name, np.eye(4)) for name in geoms}
         with contextlib.redirect_stdout(io.StringIO()):
-            return meshing.build_all_meshes(
-                geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union", close_cuts=close_cuts,
-            )
+            return union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=close_cuts)
 
     def test_cut_box_is_closed_by_a_wall(self):
         # A (cube of side 2) with x > 0.1 taken by B: the wall at x = 0.1 closes it
@@ -275,8 +257,8 @@ class TestClosedCut(unittest.TestCase):
     def build_pair(self, cutter, matrix, close_cuts=True):
         geoms = {"a": box("a", 2, 2, 2, priority=1), "b": cutter}
         with contextlib.redirect_stdout(io.StringIO()):
-            return meshing.build_all_meshes(geoms, {"a": np.eye(4), "b": matrix}, {}, {}, 64, NO_CLIP,
-                                            export=False, mesher="union", close_cuts=close_cuts)
+            return union_clip.build_union_meshes(geoms, {"a": np.eye(4), "b": matrix}, NO_CLIP,
+                                                 close_cuts=close_cuts)
 
     def assert_closed(self, mesh):
         self.assertTrue(mesh.is_watertight)
@@ -324,8 +306,7 @@ class TestClosedCut(unittest.TestCase):
                                      box("c", 1, 1, 1, priority=3))}
         world = {"a": np.eye(4), "b": translation(x=0.5), "c": translation(x=0.8)}
         with contextlib.redirect_stdout(io.StringIO()):
-            mesh = meshing.build_all_meshes(geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union",
-                                            close_cuts=True)["a"]
+            mesh = union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=True)["a"]
         self.assert_closed(mesh)
         self.assertAlmostEqual(mesh.volume, 7.0, places=9)
 
@@ -357,8 +338,7 @@ class TestClosedCutGeneral(unittest.TestCase):
         geoms = {c.name: c for c in comps}
         world = {name: matrices.get(name, np.eye(4)) for name in geoms}
         with contextlib.redirect_stdout(io.StringIO()):
-            return meshing.build_all_meshes(geoms, world, {}, {}, 64, NO_CLIP, export=False, mesher="union",
-                                            close_cuts=close_cuts)
+            return union_clip.build_union_meshes(geoms, world, NO_CLIP, close_cuts=close_cuts)
 
     def masked(self, setting, close_cuts=True):
         # a (cube of side 2) masked by m1 (x < -0.1) and m2 (y < -0.1)
@@ -498,10 +478,7 @@ class TestMcStasReference(unittest.TestCase):
         reference = json.loads((DATA / "union_clip_shapes_mcstas_areas.json").read_text())
         with contextlib.redirect_stdout(io.StringIO()):
             _, world, geoms = preprocess.preprocess(str(DATA / "union_clip_shapes.instr"), False)
-            meshes = meshing.build_all_meshes(
-                geoms, world, {}, {}, 64, resolve_clip_frame(NO_CLIP, world),
-                export=False, mesher="union",
-            )
+            meshes = union_clip.build_union_meshes(geoms, world, resolve_clip_frame(NO_CLIP, world))
         self.assertEqual(set(reference), {n for n, m in meshes.items() if m is not None})
         for name, mcstas_area in reference.items():
             with self.subTest(name=name):
@@ -509,7 +486,7 @@ class TestMcStasReference(unittest.TestCase):
 
 
 class TestWatertightInstruments(unittest.TestCase):
-    # brep's watertight components per instrument, frozen while brep existed: a lower bound
+    # the components the former brep mesher closed on each instrument: a lower bound
     def test_brep_watertight_components_are_closed(self):
         import preprocess
         import union_clip

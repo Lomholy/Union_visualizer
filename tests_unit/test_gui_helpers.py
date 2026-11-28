@@ -138,8 +138,7 @@ class TestGroupMeshesByMaterial(unittest.TestCase):
         self.assertEqual(len(grouped["Al"].faces), 24)
 
     def test_none_mesh_is_excluded(self):
-        """A mask component (its mesh is None - see
-        brep.build_single_brep_mesh's mask_string check) must not break
+        """A mask component (its mesh is None) must not break
         concatenation, and a material left with nothing but None meshes
         must not appear in the result at all."""
         geometries = {
@@ -236,7 +235,7 @@ class TraceHelpersTest(unittest.TestCase):
     def test_component_color_key_does_not_collide_with_union_names(self):
         self.assertNotEqual(gui_helpers.component_color_key("box"), "box")
 
-    def test_clip_planes_keep_the_same_side_as_brep(self):
+    def test_clip_planes_keep_the_side_above_or_below(self):
         # pygfx keeps points where a*x + b*y + c*z + d >= 0.
         clip = {"enable": True, "axis": "Z", "mode": "Above", "position": 2.0}
         (_, _, c, d), = gui_helpers.clip_planes(clip)
