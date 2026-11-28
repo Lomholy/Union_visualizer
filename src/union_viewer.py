@@ -194,7 +194,7 @@ class Viewer(QtWidgets.QMainWindow):
             dock.hide()
             tool_bar.addAction(dock.toggleViewAction())
             dock.visibilityChanged.connect(self.rebalance_docks)
-        self.geometry_dock = self._add_dock("Visible Geometries", self.geometry_panel)
+        self.geometry_dock = self._add_dock("Visible Geometries", self.geometry_panel, stretch=False)
         QtCore.QTimer.singleShot(0, self.rebalance_docks)
 
         # ----------------------------------------------------
