@@ -37,7 +37,7 @@ class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
         instr = ROOT / "tests_unit" / "data" / "coincident_faces_test.instr"
         with contextlib.redirect_stdout(io.StringIO()):
             *_, instrument_info = pipeline.compute_mesh_data(
-                str(instr), pipeline.NO_CLIP, verbose=False, mesher="union", close_cuts=close_cuts
+                str(instr), pipeline.NO_CLIP, verbose=False, close_cuts=close_cuts
             )
         return sorted(warning.split("'")[1:4:2] for warning in instrument_info["warnings"])
 

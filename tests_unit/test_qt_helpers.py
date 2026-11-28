@@ -15,7 +15,6 @@ from qt_helpers import (  # noqa: E402
     clear_layout,
     make_checkbox,
     repopulate_combo,
-    set_option_enabled,
 )
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -59,11 +58,6 @@ class LayoutHelpersTest(unittest.TestCase):
         layout.addWidget(make_checkbox("x"))
         clear_layout(layout)
         self.assertEqual(layout.count(), 0)
-
-    def test_set_option_enabled_applies_to_every_widget(self):
-        widgets = (QtWidgets.QLabel("Resolution"), QtWidgets.QComboBox())
-        set_option_enabled(widgets, False, "Not used")
-        self.assertEqual([(w.isEnabled(), w.toolTip()) for w in widgets], [(False, "Not used")] * 2)
 
 
 if __name__ == "__main__":

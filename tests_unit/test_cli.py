@@ -19,17 +19,12 @@ class CliTest(unittest.TestCase):
     @patch("cli.launch_viewer", return_value=0)
     def test_no_arguments_launches_file_picker(self, launch_viewer):
         self.assertEqual(cli.main([]), 0)
-        launch_viewer.assert_called_once_with(None, "brep")
+        launch_viewer.assert_called_once_with(None)
 
     @patch("cli.launch_viewer", return_value=0)
     def test_positional_input_launches_viewer(self, launch_viewer):
         self.assertEqual(cli.main(["sample.instr"]), 0)
-        launch_viewer.assert_called_once_with("sample.instr", "brep")
-
-    @patch("cli.launch_viewer", return_value=0)
-    def test_mesher_choice_reaches_viewer(self, launch_viewer):
-        self.assertEqual(cli.main(["sample.instr", "--mesher", "union"]), 0)
-        launch_viewer.assert_called_once_with("sample.instr", "union")
+        launch_viewer.assert_called_once_with("sample.instr")
 
     @patch("cli.export_model")
     def test_export_dispatches_to_converter(self, export_model):

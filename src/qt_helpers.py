@@ -112,13 +112,6 @@ def ask_color(parent, current, title):
     return color.name() if color.isValid() else None
 
 
-def set_option_enabled(widgets, enabled, tooltip):
-    """Enable or disable widgets together and give them all tooltip."""
-    for widget in widgets:
-        widget.setEnabled(enabled)
-        widget.setToolTip(tooltip)
-
-
 def clear_layout(layout):
     """Remove every item from layout, deleting its widgets and emptying
     nested layouts."""
