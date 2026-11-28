@@ -37,7 +37,7 @@ jobs:
         shell: bash -l {0}
         run: |
           status=0
-          for file in tests/*.instr tests/*.py; do
+          for file in tests/test_instruments/*.instr tests/test_instruments/*.py; do
             echo "Running unviz --export on $file"
             unviz "$file" --export --out-file /tmp/unviz_export_smoke_test || status=1
           done
@@ -47,7 +47,7 @@ jobs:
       - name: Run unit tests
         shell: bash -l {0}
         run: |
-          python -m unittest discover -s tests_unit -v
+          python -m unittest discover -s tests/tests_unit -v
   #
   # run-union_viewer:
   #   runs-on: ubuntu-latest
@@ -80,7 +80,7 @@ jobs:
   #     - name: Run script on all test files
   #       shell: bash -l {0}
   #       run: |
-  #         for file in tests/*; do
+  #         for file in tests/test_instruments/*; do
   #           echo "Running union_viewer on $file"
   #           python src/union_viewer.py --input_file="$file"
   #         done

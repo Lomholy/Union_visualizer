@@ -465,7 +465,7 @@ def _orient_component_solid(solid):
     component: e.g. Guide_gravity draws its four walls from the same
     vertex-order template mirrored across the beam axis, so about half of
     them come out wound inward by construction - confirmed against
-    tests/BL18_SENJU_generated.instr, where 34 of its 68 guide-wall pieces
+    tests/test_instruments/BL18_SENJU_generated.instr, where 34 of its 68 guide-wall pieces
     (across 17 Guide_gravity components) were inward this way, independent
     of any single triangle's winding. McStas's own viewers never notice,
     since they always render this data double-sided.

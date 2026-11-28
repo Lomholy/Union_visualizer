@@ -8,14 +8,14 @@
 # handling it is exactly the mistake the DECLARE raw-string fix was written
 # to avoid. Run directly:
 #
-#   python tests_unit/test_parameter_recovery.py
+#   python tests/tests_unit/test_parameter_recovery.py
 
 import os
 import sys
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(os.path.dirname(TESTS_DIR), "src")
+SRC_DIR = os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "src")
 sys.path.insert(0, SRC_DIR)
 
 import preprocess as pp  # noqa: E402

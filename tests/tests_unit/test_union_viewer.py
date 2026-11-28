@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 import pipeline  # noqa: E402
 import scene_objects  # noqa: E402
@@ -34,7 +34,7 @@ from logger_output import LoggerCounts  # noqa: E402
 
 class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):
     def warned(self, close_cuts):
-        instr = ROOT / "tests_unit" / "data" / "coincident_faces_test.instr"
+        instr = ROOT / "tests" / "tests_unit" / "data" / "coincident_faces_test.instr"
         with contextlib.redirect_stdout(io.StringIO()):
             *_, instrument_info = pipeline.compute_mesh_data(
                 str(instr), pipeline.NO_CLIP, verbose=False, close_cuts=close_cuts
@@ -59,7 +59,7 @@ class ComputeTraceDataTest(unittest.TestCase):
         # more rays than that silently gets truncated back down to 1000.
         with tempfile.TemporaryDirectory() as tmp:
             instr = os.path.join(tmp, "simple_test.instr")
-            shutil.copy(ROOT / "tests" / "simple_test.instr", instr)
+            shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             try:
                 _, rays = pipeline.compute_trace_data(instr, [], 1200, 7)
             except Exception as e:

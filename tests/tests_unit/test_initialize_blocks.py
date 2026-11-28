@@ -4,7 +4,7 @@
 # "if (cond) x = a;", so every assignment inside a braced branch ran
 # whether or not its branch was taken, and the last one won. Run directly:
 #
-#   python tests_unit/test_initialize_blocks.py
+#   python tests/tests_unit/test_initialize_blocks.py
 
 import io
 import os
@@ -15,7 +15,7 @@ import contextlib
 import numpy as np
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(TESTS_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(TESTS_DIR))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 
@@ -151,11 +151,11 @@ class BracedChainTest(unittest.TestCase):
 
 
 class DemonstrationFixtureTest(unittest.TestCase):
-    """tests/initialize_blocks_test.instr rotates its sample arm by
+    """tests/test_instruments/initialize_blocks_test.instr rotates its sample arm by
     rot_samples, which only the branch of the selected setup sets."""
 
     def rotation_of_box(self, sample):
-        instr_path = os.path.join(REPO_ROOT, "tests", "initialize_blocks_test.instr")
+        instr_path = os.path.join(REPO_ROOT, "tests", "test_instruments", "initialize_blocks_test.instr")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             instr, world, _ = pp.preprocess(instr_path, verbose=False, param_values={"sample": sample})

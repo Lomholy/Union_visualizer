@@ -3,7 +3,7 @@ clipping (union_mcdisplay_polyhedron in McCode's union-lib.c).
 
 The fake components carry only the attributes the mesher reads, as in
 test_tapered_box.py. TestMcStasReference compares against areas McStas
-itself drew with mcdisplay --trace=2 for tests_unit/data/union_clip_shapes.instr.
+itself drew with mcdisplay --trace=2 for tests/tests_unit/data/union_clip_shapes.instr.
 """
 
 import contextlib
@@ -19,7 +19,7 @@ from unittest import mock
 import numpy as np
 import trimesh
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 import union_clip  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -492,7 +492,7 @@ class TestWatertightInstruments(unittest.TestCase):
         import union_clip
 
         expected = json.loads((DATA / "union_watertight_expected.json").read_text())
-        root = DATA.parent.parent
+        root = DATA.parent.parent.parent
         for inp, names in expected.items():
             with contextlib.redirect_stdout(io.StringIO()):
                 _, world, geoms = preprocess.preprocess(str(root / inp), False)

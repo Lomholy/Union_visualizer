@@ -1,18 +1,18 @@
 # Regression test for src/preprocess.py's handling of mcstasscript's
 # raw-string fallback entries in declare_list/user_var_list.
 #
-# Not wired into CI's tests/* loop (that loop feeds every file in tests/ to
+# Not wired into CI's tests/test_instruments/* loop (that loop feeds every file in tests/test_instruments/ to
 # unviz --export as an instrument input, so a plain unittest module can't
 # live there). Run directly:
 #
-#   python tests_unit/test_declare_recovery.py
+#   python tests/tests_unit/test_declare_recovery.py
 
 import os
 import sys
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(os.path.dirname(TESTS_DIR), "src")
+SRC_DIR = os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "src")
 sys.path.insert(0, SRC_DIR)
 
 import preprocess as pp  # noqa: E402
@@ -80,7 +80,7 @@ class DeclareRecoveryTest(unittest.TestCase):
     def test_unparseable_string_parameter_entry_is_left_unresolved(self):
         # A string parameter entry with no "name = expr" shape at all has
         # nothing to recover (see _recover_raw_parameter in
-        # tests_unit/test_parameter_recovery.py for the cases that DO get
+        # tests/tests_unit/test_parameter_recovery.py for the cases that DO get
         # recovered) - create_var_map must not raise or fabricate a value
         # for it, just leave it out of var_map.
         class FakeInstr:
