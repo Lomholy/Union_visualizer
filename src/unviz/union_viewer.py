@@ -211,7 +211,6 @@ class Viewer(QtWidgets.QMainWindow):
         settings.close_cuts_checkbox.stateChanged.connect(self.on_close_cuts_changed)
         self.geometry_panel.components_checkbox.stateChanged.connect(self.on_components_changed)
         self.geometry_panel.arms_checkbox.stateChanged.connect(self.apply_component_visibility)
-        settings.rays_checkbox.stateChanged.connect(self.on_rays_changed)
         settings.edges_checkbox.stateChanged.connect(self.apply_edges_visibility)
         settings.triangle_lines_checkbox.stateChanged.connect(self.apply_triangle_lines)
         for checkbox, attr in (
@@ -230,6 +229,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.ruler_panel.color_changed.connect(lambda _color: self.on_ruler_points_edited())
 
         rays = self.rays_panel
+        rays.show_checkbox.stateChanged.connect(self.on_rays_changed)
         rays.rerun_requested.connect(self.rerun_rays)
         rays.style_changed.connect(self.rebuild_ray_group)
         rays.visibility_changed.connect(self.apply_ray_visibility)
@@ -251,7 +251,7 @@ class Viewer(QtWidgets.QMainWindow):
         geometry.component_color_requested.connect(self.pick_component_color)
 
         geometry.set_components_shown(geometry.components_checkbox.isChecked())
-        rays.setEnabled(settings.rays_checkbox.isChecked())
+        rays.options.setEnabled(rays.show_checkbox.isChecked())
 
     def _add_dock(self, title, panel, collapsed=True, stretch=True, closable=False):
         """Put panel in a collapsible, left-docked QDockWidget titled
@@ -613,7 +613,7 @@ class Viewer(QtWidgets.QMainWindow):
     # ========================================================
 
     def rays_enabled(self):
-        return self.settings_panel.rays_checkbox.isChecked()
+        return self.rays_panel.show_checkbox.isChecked()
 
     def trace_enabled(self):
         return self.geometry_panel.components_checkbox.isChecked() or self.rays_enabled()
@@ -675,7 +675,7 @@ class Viewer(QtWidgets.QMainWindow):
             self.apply_component_visibility()
 
     def on_rays_changed(self):
-        self.rays_panel.setEnabled(self.rays_enabled())
+        self.rays_panel.options.setEnabled(self.rays_enabled())
         if not self.rays_enabled():
             self.apply_ray_visibility()
         elif self.trace_rays is None:
@@ -749,7 +749,7 @@ class Viewer(QtWidgets.QMainWindow):
     def apply_ray_visibility(self):
         if self.ray_group is None:
             return
-        self.ray_group.visible = self.settings_panel.rays_checkbox.isChecked()
+        self.ray_group.visible = self.rays_enabled()
         for obj, checkbox in (
             (self.ray_group.ray_line, self.rays_panel.line_checkbox),
             (self.ray_group.teleport_line, self.rays_panel.teleport_checkbox),

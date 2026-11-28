@@ -46,12 +46,6 @@ class SettingsPanel(QtWidgets.QWidget):
             "Add walls where higher-priority components and masks cut a component, "
             "so it is drawn as a closed solid. Slower.",
         )
-        self.rays_checkbox = make_checkbox(
-            "Show neutron rays",
-            False,
-            "Trace neutrons through the instrument with mcrun --trace and "
-            "draw their paths. Options are in the Neutron Rays panel.",
-        )
         self.grid_checkbox = make_checkbox("Show grid", True)
         self.gizmo_checkbox = make_checkbox("Show gizmo", True)
         self.axes_checkbox = make_checkbox("Show xyz axes", True)
@@ -78,7 +72,6 @@ class SettingsPanel(QtWidgets.QWidget):
         for widget in (
             self.open_file_button,
             self.close_cuts_checkbox,
-            self.rays_checkbox,
             self.grid_checkbox,
             self.gizmo_checkbox,
             self.axes_checkbox,
@@ -327,7 +320,8 @@ class ClippingPanel(QtWidgets.QWidget):
 
 
 class RaysPanel(QtWidgets.QWidget):
-    """Options for the traced neutron rays.
+    """Options for the traced neutron rays: show_checkbox turns tracing
+    them on, and the widgets in options configure them.
 
     Signals: rerun_requested() for the Re-run button, or 700 ms after the
     ray count or seed last changed; style_changed() when the colouring or
@@ -349,7 +343,16 @@ class RaysPanel(QtWidgets.QWidget):
         self.marker_sizes = dict(DEFAULT_MARKER_SIZES)
         self.color_buttons = {}
         self.size_spins = {}
-        layout = _panel_layout(self)
+        outer = _panel_layout(self)
+        self.show_checkbox = make_checkbox(
+            "Show neutron rays",
+            False,
+            "Trace neutrons through the instrument with mcrun --trace and draw their paths.",
+        )
+        outer.addWidget(self.show_checkbox)
+        self.options = QtWidgets.QWidget()
+        outer.addWidget(self.options)
+        layout = _panel_layout(self.options)
 
         self.count_spin = QtWidgets.QSpinBox()
         self.count_spin.setRange(1, 100_000_000)
