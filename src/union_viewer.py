@@ -10,7 +10,6 @@ from qtpy import QtWidgets, QtCore, QtGui
 from rendercanvas.qt import QRenderWidget
 from pygfx.utils.viewport import Viewport
 from clipping import resolve_clip_frame
-from meshing import MESHER_CAPABILITIES
 from gui_helpers import (
     component_color_key,
     clip_planes,
@@ -56,7 +55,7 @@ from panels import (
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self, input_file=None, settings=None, mesher="brep"):
+    def __init__(self, input_file=None, settings=None):
         super().__init__()
         self.settings = settings or QtCore.QSettings("unviz", "union_viewer")
         self.setWindowTitle("Union Viewer")
@@ -175,7 +174,7 @@ class Viewer(QtWidgets.QMainWindow):
         # ----------------------------------------------------
         self.settings_panel = SettingsPanel()
         self.params_panel = ParametersPanel()
-        self.mesher_panel = MesherPanel(mesher)
+        self.mesher_panel = MesherPanel()
         self.clipping_panel = ClippingPanel()
         self.ruler_panel = RulerPanel()
         self.rays_panel = RaysPanel()
@@ -507,10 +506,6 @@ class Viewer(QtWidgets.QMainWindow):
     def reload_meshes(self, force_reload=False):
         if self.input_file is None:
             return
-        # dc has no working incremental rebuild path (build_mesh returns
-        # None for it), so always fully rebuild while it's selected.
-        if not MESHER_CAPABILITIES[self.mesher_panel.mesher()]["incremental_rebuild"]:
-            force_reload = True
 
         if self.mesh_jobs.busy:
             self._reload_pending_force = self._reload_pending_force or force_reload
@@ -528,11 +523,8 @@ class Viewer(QtWidgets.QMainWindow):
             NO_CLIP,
             meshes=self.meshes,
             dependencies=self.dependencies,
-            mesher=self.mesher_panel.mesher(),
             force_remesh=force_reload,
-            res=self.mesher_panel.resolution(),
             group_by_material=self.settings_panel.material_group_checkbox.isChecked(),
-            deflection=self.mesher_panel.deflection(),
             close_cuts=self.mesher_panel.close_cuts(),
             force_pygen=self.settings_panel.pygen_checkbox.isChecked(),
             param_values=dict(self.params_panel.values),
@@ -1027,13 +1019,13 @@ def parse():
     return parser
 
 
-def launch(input_file=None, mesher="brep"):
+def launch(input_file=None):
     """Create the application and open the interactive Union viewer."""
     app = QtWidgets.QApplication([sys.argv[0]])
 
     app.setAttribute(QtCore.Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
 
-    viewer = Viewer(input_file=input_file, mesher=mesher)
+    viewer = Viewer(input_file=input_file)
     viewer.show()
     return app.exec()
 

@@ -4,9 +4,6 @@ Returns plain picklable data and never touches Qt or pygfx."""
 
 from preprocess import preprocess, instrument_parameters
 from clipping import resolve_clip_frame
-from signed_distance_functions import build_sdfs
-from meshing import build_all_meshes, build_mesh, DEFAULT_BREP_DEFLECTION
-from brep import build_many_brep_meshes
 from union_clip import build_union_meshes
 from coplanar import find_coincident_faces
 from bounding_box import compute_all_world_bboxes, component_dependency_signature
@@ -20,23 +17,18 @@ def compute_mesh_data(
     clip,
     meshes=None,
     dependencies=None,
-    mesher="brep",
     force_remesh=False,
-    res=64,
     verbose=True,
     group_by_material=False,
-    deflection=DEFAULT_BREP_DEFLECTION,
     force_pygen=False,
     param_values=None,
     close_cuts=False,
 ):
     """Everything a mesh reload needs to do that doesn't touch pygfx/Qt:
-    preprocessing, SDF/BREP mesh building (with dependency-based incremental
+    preprocessing, union meshing (with dependency-based incremental
     rebuild), and material grouping/vacuum tagging. Returns plain,
-    picklable data (trimesh objects + dicts), so this is safe to run in a
-    worker *process* rather than just a thread - some of the geometry
-    kernel calls it makes (OpenCASCADE, via pythonocc-core) don't release
-    the GIL, so running them on a QThread still freezes the GUI."""
+    picklable data (trimesh objects + dicts), so this can run in a worker
+    process."""
     instr, world_matrices, union_geometries = preprocess(
         input_file,
         verbose=False,
@@ -45,14 +37,6 @@ def compute_mesh_data(
     )
     clip = resolve_clip_frame(clip, world_matrices)
     world_bboxes = compute_all_world_bboxes(union_geometries, world_matrices)
-    # The "brep" and "union" meshers never touch sdfs/final_sdfs, so skip building them.
-    if mesher in ("brep", "union"):
-        final_sdfs, sdfs = {}, {}
-    else:
-        print("Building sdfs")
-        final_sdfs, sdfs = build_sdfs(
-            union_geometries, world_matrices, clip, world_bboxes=world_bboxes
-        )
     print("Building meshes")
 
     new_dependencies = {
@@ -61,18 +45,8 @@ def compute_mesh_data(
     }
 
     if meshes is None or force_remesh:
-        meshes = build_all_meshes(
-            union_geometries,
-            world_matrices,
-            sdfs,
-            final_sdfs,
-            res,
-            clip,
-            export=False,
-            verbose=False,
-            mesher=mesher,
-            deflection=deflection,
-            world_bboxes=world_bboxes,
+        meshes = build_union_meshes(
+            union_geometries, world_matrices, clip, world_bboxes=world_bboxes,
             close_cuts=close_cuts,
         )
     else:
@@ -83,45 +57,20 @@ def compute_mesh_data(
         if verbose:
             for name in changed_names:
                 print(f"Rebuilding {name}")
-        if mesher == "brep":
-            # Each changed component's boolean-cut chain is independent -
-            # fan them out across worker processes instead of rebuilding
-            # one at a time (see build_many_brep_meshes).
-            meshes.update(
-                build_many_brep_meshes(
-                    changed_names, union_geometries, world_matrices, clip,
-                    verbose, deflection=deflection, world_bboxes=world_bboxes,
-                )
+        # One call, so every shape is built once however many components changed.
+        meshes.update(
+            build_union_meshes(
+                union_geometries, world_matrices, clip, verbose,
+                world_bboxes=world_bboxes, names=changed_names,
+                close_cuts=close_cuts,
             )
-        elif mesher == "union":
-            # One call, so every shape is built once however many components changed.
-            meshes.update(
-                build_union_meshes(
-                    union_geometries, world_matrices, clip, verbose,
-                    world_bboxes=world_bboxes, names=changed_names,
-                    close_cuts=close_cuts,
-                )
-            )
-        else:
-            for name in changed_names:
-                meshes[name] = build_mesh(
-                    union_geometries[name],
-                    union_geometries,
-                    world_matrices,
-                    sdfs,
-                    final_sdfs,
-                    res,
-                    clip,
-                    mesher=mesher,
-                    deflection=deflection,
-                    world_bboxes=world_bboxes,
-                )
+        )
     dependencies = new_dependencies
 
     # The union mesher keeps each surface only where its component has the
     # highest priority, so a nested volume adds no coinciding faces; cut walls
     # and the clip plane would.
-    if mesher == "union" and not close_cuts and not clip.get("enable"):
+    if not close_cuts and not clip.get("enable"):
         check_meshes = meshes
     else:
         check_meshes = build_union_meshes(
@@ -161,7 +110,7 @@ def compute_mesh_data(
 
 
 # The viewer clips Union meshes with pygfx clipping planes like everything
-# else, so its meshers never cut and a clip change never remeshes.
+# else, so its mesher never cuts and a clip change never remeshes.
 NO_CLIP = {"enable": False, "axis": "X", "mode": "Above", "position": 0.0}
 
 

@@ -6,7 +6,6 @@ import numpy as np
 from qtpy import QtCore, QtWidgets
 
 from gui_helpers import RAY_COLOR_MODES, wrap_label
-from meshing import MESHER_CAPABILITIES
 from qt_helpers import (
     add_labeled_row,
     add_row,
@@ -19,45 +18,10 @@ from qt_helpers import (
     make_note_label,
     make_swatch_button,
     repopulate_combo,
-    set_option_enabled,
     set_swatch_color,
 )
 from scene_objects import DEFAULT_MARKER_SIZES, DEFAULT_RAY_COLORS, RULER_COLOR
 from widgets import ColorBarWidget
-
-# The meshers offered in the dock, in display order.
-MESHER_KEYS = ("mc", "dc", "brep", "union")
-
-MESHER_DESCRIPTIONS = {
-    "mc": (
-        "Marching Cubes: samples the signed distance field on a uniform grid. "
-        "Fast, but curved surfaces are limited by the chosen resolution."
-    ),
-    "dc": (
-        "Dual Contouring: builds an adaptive octree from the point cloud. "
-        "Better at preserving sharp edges/corners than Marching Cubes."
-    ),
-    "brep": (
-        "BREP (exact CAD): uses OpenCASCADE boundary representation for exact, "
-        "resolution-independent geometry. Most accurate, but can be slower for "
-        "complex boolean operations."
-    ),
-    "union": (
-        "Union priority clipping: keeps each component's own surface where it has "
-        "the highest priority, as McStas draws it with mcdisplay --trace=2. Fast, "
-        "with open surfaces where a cut is made."
-    ),
-}
-
-# The marching-cubes grid resolutions offered in the dock.
-RESOLUTIONS = (16, 32, 64, 128, 256, 512)
-DEFAULT_RESOLUTION = 64
-
-DEFLECTION_TOOLTIP = (
-    "How closely the brep mesher's triangles must follow the exact curved "
-    "surface, in metres. Smaller values hug curves more closely (more "
-    "triangles, slower to build); larger values are coarser but faster."
-)
 
 DEFAULT_SWATCH_COLOR = "#b6b6b6"
 
@@ -337,89 +301,24 @@ class ParametersPanel(QtWidgets.QWidget):
 
 
 class MesherPanel(QtWidgets.QWidget):
-    """Mesher choice, marching-cubes resolution and brep deflection. Emits
-    changed() when any of them changes; options the selected mesher
-    doesn't use are disabled."""
+    """The union mesher's one option, Close cut surfaces. Emits changed()
+    when it is toggled."""
 
     changed = QtCore.Signal()
 
-    def __init__(self, mesher="brep"):
+    def __init__(self):
         super().__init__()
         layout = _panel_layout(self)
-
-        self.mesher_box = QtWidgets.QComboBox()
-        for key in MESHER_KEYS:
-            label = key
-            if not MESHER_CAPABILITIES[key]["incremental_rebuild"]:
-                label += " (full rebuild only)"
-            self.mesher_box.addItem(label, key)
-        self.mesher_box.setCurrentIndex(self.mesher_box.findData(mesher))
-        add_labeled_row(layout, "Mesher", self.mesher_box)
-
-        self.description_label = make_note_label(MESHER_DESCRIPTIONS.get(mesher, ""), italic=True)
-        layout.addWidget(self.description_label)
-
-        self.resolution_box = QtWidgets.QComboBox()
-        for res in RESOLUTIONS:
-            self.resolution_box.addItem(str(res), res)
-        self.resolution_box.setCurrentIndex(self.resolution_box.findData(DEFAULT_RESOLUTION))
-        self.resolution_label = add_labeled_row(layout, "Resolution", self.resolution_box)
-
-        self.deflection_spin = make_double_spin(
-            0.0001, 10.0, 0.01, decimals=4, step=0.001, tooltip=DEFLECTION_TOOLTIP
-        )
-        self.deflection_label = add_labeled_row(layout, "Surface deflection", self.deflection_spin)
-        self.deflection_label.setToolTip(DEFLECTION_TOOLTIP)
-
         self.close_cuts_checkbox = make_checkbox(
             "Close cut surfaces", False,
             "Add walls where higher-priority components and masks cut a component, "
-            "so it is drawn closed as the brep mesher draws it. Slower.",
+            "so it is drawn as a closed solid. Slower.",
         )
         layout.addWidget(self.close_cuts_checkbox)
-
-        self.update_capabilities()
-        self.mesher_box.currentIndexChanged.connect(self._on_mesher_changed)
-        self.resolution_box.currentIndexChanged.connect(lambda *_: self.changed.emit())
-        self.deflection_spin.valueChanged.connect(lambda *_: self.changed.emit())
         self.close_cuts_checkbox.stateChanged.connect(lambda *_: self.changed.emit())
-
-    def mesher(self):
-        return self.mesher_box.currentData()
-
-    def resolution(self):
-        return self.resolution_box.currentData()
-
-    def deflection(self):
-        return self.deflection_spin.value()
 
     def close_cuts(self):
         return self.close_cuts_checkbox.isChecked()
-
-    def update_capabilities(self):
-        mesher = self.mesher()
-        caps = MESHER_CAPABILITIES[mesher]
-        unused_tip = f"Not used by the '{mesher}' mesher."
-        set_option_enabled(
-            (self.resolution_box, self.resolution_label),
-            caps["resolution"],
-            "" if caps["resolution"] else unused_tip,
-        )
-        set_option_enabled(
-            (self.deflection_spin, self.deflection_label),
-            caps["deflection"],
-            DEFLECTION_TOOLTIP if caps["deflection"] else unused_tip,
-        )
-        set_option_enabled(
-            (self.close_cuts_checkbox,),
-            caps["close_cuts"],
-            "" if caps["close_cuts"] else unused_tip,
-        )
-
-    def _on_mesher_changed(self):
-        self.description_label.setText(MESHER_DESCRIPTIONS.get(self.mesher(), ""))
-        self.update_capabilities()
-        self.changed.emit()
 
 
 class ClippingPanel(QtWidgets.QWidget):

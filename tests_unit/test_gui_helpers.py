@@ -1,6 +1,5 @@
 """Tests for gui_helpers.py: material normalisation/grouping, the
-vacuum/exit predicate, default colour assignment, and the mesher
-capability table.
+vacuum/exit predicate and default colour assignment.
 
 The GUI itself is not unit-testable without a display, so this covers the
 display-independent logic instead; union_viewer.py's own wiring was
@@ -19,7 +18,6 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import gui_helpers  # noqa: E402
-from meshing import MESHER_CAPABILITIES  # noqa: E402
 
 
 class FakeComponent:
@@ -211,49 +209,6 @@ class TestAssignDefaultColor(unittest.TestCase):
                 "#FFFFFF",
             ],
         )
-
-
-class TestMesherCapabilities(unittest.TestCase):
-    """Cross-checks against what the viewer actually offers and does,
-    without needing a QApplication - see panels.MESHER_KEYS, a
-    module-level constant kept in sync with the dock's combo box precisely
-    so this comparison doesn't need to construct one."""
-
-    def test_covers_exactly_the_meshers_the_combo_offers(self):
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-        import panels
-
-        self.assertEqual(set(MESHER_CAPABILITIES), set(panels.MESHER_KEYS))
-
-    def test_every_entry_has_the_same_capability_keys(self):
-        expected_keys = {"resolution", "deflection", "close_cuts", "clip", "incremental_rebuild"}
-        for mesher, caps in MESHER_CAPABILITIES.items():
-            with self.subTest(mesher=mesher):
-                self.assertEqual(set(caps), expected_keys)
-
-    def test_dc_is_marked_as_not_supporting_incremental_rebuild(self):
-        # meshing.build_mesh has `if mesher == "dc": return` unconditionally
-        # - this flag is what makes union_viewer.Viewer.reload_meshes force
-        # a full rebuild instead of silently blanking a changed component.
-        self.assertFalse(MESHER_CAPABILITIES["dc"]["incremental_rebuild"])
-
-    def test_only_mc_uses_the_resolution_grid(self):
-        self.assertTrue(MESHER_CAPABILITIES["mc"]["resolution"])
-        self.assertFalse(MESHER_CAPABILITIES["dc"]["resolution"])
-        self.assertFalse(MESHER_CAPABILITIES["brep"]["resolution"])
-
-    def test_only_brep_uses_deflection(self):
-        self.assertFalse(MESHER_CAPABILITIES["mc"]["deflection"])
-        self.assertFalse(MESHER_CAPABILITIES["dc"]["deflection"])
-        self.assertTrue(MESHER_CAPABILITIES["brep"]["deflection"])
-
-    def test_all_three_meshers_respect_clip(self):
-        # mc and dc both mesh final_sdfs, which already has the clip
-        # half-space intersected in (signed_distance_functions.build_sdfs);
-        # brep applies the same clip dict directly via brep.clip_component.
-        for mesher in MESHER_CAPABILITIES:
-            with self.subTest(mesher=mesher):
-                self.assertTrue(MESHER_CAPABILITIES[mesher]["clip"])
 
 
 class WrapLabelTest(unittest.TestCase):

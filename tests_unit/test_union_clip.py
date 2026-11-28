@@ -220,10 +220,10 @@ class TestIncrementalRebuild(unittest.TestCase):
 
         inp = str(DATA / "union_clip_shapes.instr")
         with contextlib.redirect_stdout(io.StringIO()):
-            _, _, meshes, deps, _ = union_viewer.compute_mesh_data(inp, NO_CLIP, mesher="union")
+            _, _, meshes, deps, _ = union_viewer.compute_mesh_data(inp, NO_CLIP)
             stale = {name: "stale" for name in deps}
             with mock.patch.object(union_clip, "build_shapes", counting):
-                union_viewer.compute_mesh_data(inp, NO_CLIP, meshes=meshes, dependencies=stale, mesher="union")
+                union_viewer.compute_mesh_data(inp, NO_CLIP, meshes=meshes, dependencies=stale)
         self.assertEqual(len(calls), 1)
 
 
@@ -576,7 +576,7 @@ COMPONENT master"""
             return real(*args, **kwargs)
 
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
-            kw = dict(mesher="union", close_cuts=True)
+            kw = dict(close_cuts=True)
             _, _, meshes, deps, _ = pipeline.compute_mesh_data(self.write(tmp, -0.04), NO_CLIP, **kw)
             moved = self.write(tmp, -0.03)
             with mock.patch.object(pipeline, "build_union_meshes", recording):
