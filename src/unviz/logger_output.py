@@ -24,7 +24,7 @@ line or plane - a detector is just another AT/ROTATED component.
 import numpy as np
 import mcstasscript as ms
 
-from gui_helpers import colormap
+from .gui_helpers import colormap
 
 SPATIAL_AXES = ("x", "y", "z")
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}

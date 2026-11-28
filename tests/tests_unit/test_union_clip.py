@@ -20,7 +20,7 @@ import numpy as np
 import trimesh
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-import union_clip  # noqa: E402
+from unviz import union_clip  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"
 NO_CLIP = {"enable": False, "axis": "X", "mode": "Above", "position": 0.0}
@@ -181,7 +181,7 @@ class TestCoincidentSurfaces(unittest.TestCase):
 class TestIncrementalRebuild(unittest.TestCase):
     def test_moving_a_cutters_mask_changes_the_lower_components_signature(self):
         # A (priority 1) is cut by B (priority 2), which mask M limits
-        from bounding_box import compute_all_world_bboxes, component_dependency_signature
+        from unviz.bounding_box import compute_all_world_bboxes, component_dependency_signature
 
         geoms = {c.name: c for c in (box("a", 2, 2, 2, priority=1), box("b", 1, 1, 1, priority=2),
                                      box("m", 1, 1, 1, mask_string="b"))}
@@ -192,8 +192,8 @@ class TestIncrementalRebuild(unittest.TestCase):
         self.assertNotEqual(*signatures)
 
     def test_union_rebuild_builds_shapes_once(self):
-        import union_clip
-        import union_viewer
+        from unviz import union_clip
+        from unviz import union_viewer
 
         calls = []
         real = union_clip.build_shapes
@@ -272,7 +272,7 @@ class TestClosedCut(unittest.TestCase):
 
     def facet_volume_inside_a(self, cutter, matrix):
         # the cutter's display polyhedron cut by the six faces of a (a cube of side 2 at the origin)
-        import union_clip
+        from unviz import union_clip
         solid = trimesh.Trimesh(union_clip.make_shape(cutter, matrix).triangles().reshape(-1, 3)).convex_hull
         for axis in range(3):
             for sign in (1, -1):
@@ -472,8 +472,8 @@ class TestClipBox(unittest.TestCase):
 class TestMcStasReference(unittest.TestCase):
     # R7: per-component area within 0.2% of McStas's own --trace=2 polyhedra
     def test_shapes_instrument(self):
-        import preprocess
-        from clipping import resolve_clip_frame
+        from unviz import preprocess
+        from unviz.clipping import resolve_clip_frame
 
         reference = json.loads((DATA / "union_clip_shapes_mcstas_areas.json").read_text())
         with contextlib.redirect_stdout(io.StringIO()):
@@ -488,8 +488,8 @@ class TestMcStasReference(unittest.TestCase):
 class TestWatertightInstruments(unittest.TestCase):
     # the components the former brep mesher closed on each instrument: a lower bound
     def test_brep_watertight_components_are_closed(self):
-        import preprocess
-        import union_clip
+        from unviz import preprocess
+        from unviz import union_clip
 
         expected = json.loads((DATA / "union_watertight_expected.json").read_text())
         root = DATA.parent.parent.parent
@@ -509,8 +509,8 @@ class TestWatertightInstruments(unittest.TestCase):
 class TestParallelBuild(unittest.TestCase):
     # components clipped in worker processes give the serial meshes, with close cuts off and on
     def test_pool_matches_serial(self):
-        import preprocess
-        import union_clip
+        from unviz import preprocess
+        from unviz import union_clip
 
         with contextlib.redirect_stdout(io.StringIO()):
             _, world, geoms = preprocess.preprocess(str(DATA / "union_clip_shapes.instr"), False)
@@ -542,8 +542,8 @@ COMPONENT master"""
         return str(path)
 
     def test_rebuilt_mesh_equals_full_rebuild(self):
-        import pipeline
-        import union_clip
+        from unviz import pipeline
+        from unviz import union_clip
 
         rebuilt = []
         real = union_clip.build_union_meshes
@@ -573,7 +573,7 @@ COMPONENT master"""
 
 class TestKernelPlanes(unittest.TestCase):
     def test_coincident_planes_in_one_call_share_an_id(self):
-        from union_facets import Kernel
+        from unviz.union_facets import Kernel
         kernel = Kernel(1.0)
         # offsets in neighbouring rounding bins, closer than eps
         ids, sides = kernel.planes(np.array([[0, 1.0, 0], [0, 1.0, 0], [0, -1.0, 0]]),
@@ -582,7 +582,7 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertEqual(sides.tolist()[2], -sides.tolist()[0])
 
     def test_vertex_lookup_takes_lowest_id_in_first_neighbour_cell(self):
-        from union_facets import Kernel
+        from unviz.union_facets import Kernel
         kernel = Kernel(1.0)
         rng = np.random.default_rng(0)
         cells, pos, got, want = {}, [], [], []
@@ -600,7 +600,7 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertLess(len(pos), 400)
 
     def test_vertex_keys_with_one_hash_stay_apart(self):
-        from union_facets import Kernel, key_hash
+        from unviz.union_facets import Kernel, key_hash
         kernel = Kernel(1.0)
         a, b = np.array([0, 2, 5]), np.array([0, 1, 1000008])
         self.assertEqual(key_hash(a), key_hash(b))
@@ -614,7 +614,7 @@ class TestKernelPlanes(unittest.TestCase):
         self.assertEqual(kernel.vertex(np.full(3, 7.0), b.tolist()), second)
 
     def test_triangles_repair_edges_and_fan_from_the_centre(self):
-        from union_facets import Kernel
+        from unviz.union_facets import Kernel
         kernel = Kernel(1.0)
         ids, _ = kernel.planes(np.array([[0, 0, 1.0], [1.0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [0, 1.0, 0]]),
                                np.array([0, 0, 1.0, 0, 1.0]))
@@ -639,15 +639,15 @@ class TestNumbaDependency(unittest.TestCase):
         import importlib
 
         with mock.patch.dict(sys.modules, {"numba": None}):
-            del sys.modules["union_clip"]
+            del sys.modules["unviz.union_clip"]
             with self.assertRaises(ImportError) as ctx:
-                importlib.import_module("union_clip")
+                importlib.import_module("unviz.union_clip")
         self.assertIn("numba", str(ctx.exception))
 
 
 class TestKernelHelpers(unittest.TestCase):
     def test_fixes_point_matches_the_smallest_singular_value(self):
-        from union_facets import fixes_point
+        from unviz.union_facets import fixes_point
         rng = np.random.default_rng(1)
         normals = rng.normal(size=(40, 3))
         normals /= np.linalg.norm(normals, axis=1)[:, None]
@@ -661,12 +661,12 @@ class TestKernelHelpers(unittest.TestCase):
                 self.assertEqual(fixes_point(normals, ids), np.linalg.svd(normals[ids], compute_uv=False)[2] > 1e-9)
 
     def test_boxes_of_no_pieces(self):
-        from union_facets import Kernel
+        from unviz.union_facets import Kernel
         lo, hi = Kernel(1.0).boxes([])
         self.assertEqual((lo.shape, hi.shape), ((0, 3), (0, 3)))
 
     def test_triangle_facets_match_the_polygon_path_and_drop_degenerate_ones(self):
-        from union_facets import facet_geometry
+        from unviz.union_facets import facet_geometry
         mesh = trimesh.creation.icosphere(subdivisions=1)
         # a repeated corner and a zero-area sliver
         faces = np.vstack([mesh.faces, [[0, 0, 1], [0, 1, 0]]])

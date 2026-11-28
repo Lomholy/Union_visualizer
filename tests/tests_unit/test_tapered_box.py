@@ -21,8 +21,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-import preprocess  # noqa: E402
-import bounding_box  # noqa: E402
+from unviz import preprocess  # noqa: E402
+from unviz import bounding_box  # noqa: E402
 
 
 class FakeBox:

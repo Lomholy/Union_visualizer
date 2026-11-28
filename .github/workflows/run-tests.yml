@@ -82,5 +82,5 @@ jobs:
   #       run: |
   #         for file in tests/test_instruments/*; do
   #           echo "Running union_viewer on $file"
-  #           python src/union_viewer.py --input_file="$file"
+  #           python -m unviz.union_viewer --input_file="$file"
   #         done

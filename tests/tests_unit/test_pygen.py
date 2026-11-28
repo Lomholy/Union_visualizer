@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-from preprocess import preprocess  # noqa: E402
+from unviz.preprocess import preprocess  # noqa: E402
 
 
 @unittest.skipUnless(shutil.which("mcstas-pygen"), "mcstas-pygen not on PATH")

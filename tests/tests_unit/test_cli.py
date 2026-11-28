@@ -11,22 +11,22 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-import cli  # noqa: E402
-from mcstas_trace import TraceError  # noqa: E402
+from unviz import cli  # noqa: E402
+from unviz.mcstas_trace import TraceError  # noqa: E402
 
 
 class CliTest(unittest.TestCase):
-    @patch("cli.launch_viewer", return_value=0)
+    @patch("unviz.cli.launch_viewer", return_value=0)
     def test_no_arguments_launches_file_picker(self, launch_viewer):
         self.assertEqual(cli.main([]), 0)
         launch_viewer.assert_called_once_with(None)
 
-    @patch("cli.launch_viewer", return_value=0)
+    @patch("unviz.cli.launch_viewer", return_value=0)
     def test_positional_input_launches_viewer(self, launch_viewer):
         self.assertEqual(cli.main(["sample.instr"]), 0)
         launch_viewer.assert_called_once_with("sample.instr")
 
-    @patch("cli.export_model")
+    @patch("unviz.cli.export_model")
     def test_export_dispatches_to_converter(self, export_model):
         self.assertEqual(
             cli.main(
@@ -80,8 +80,8 @@ class ExportInstrumentTest(unittest.TestCase):
             instr = os.path.join(tmp, "simple_test.instr")
             shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             out_file = os.path.join(tmp, "with_empty")
-            with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")), \
-                 patch("union_clip.build_union_meshes",
+            with patch("unviz.mcstas_trace.trace_instrument", side_effect=TraceError("boom")), \
+                 patch("unviz.union_clip.build_union_meshes",
                        return_value={"box_left": None, "box_lefttwo": real_mesh}):
                 meshes = cli.export_instrument(instr, out_file=out_file)
 
@@ -99,7 +99,7 @@ class ExportInstrumentTest(unittest.TestCase):
             instr = os.path.join(tmp, "simple_test.instr")
             shutil.copy(ROOT / "tests" / "test_instruments" / "simple_test.instr", instr)
             out_file = os.path.join(tmp, "union_only")
-            with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")):
+            with patch("unviz.mcstas_trace.trace_instrument", side_effect=TraceError("boom")):
                 meshes = cli.export_instrument(instr, out_file=out_file)
 
             # The two Union_box components are still there...
@@ -114,7 +114,7 @@ class ExportInstrumentTest(unittest.TestCase):
         import trimesh
         with tempfile.TemporaryDirectory() as tmp:
             out_file = os.path.join(tmp, "masked")
-            with patch("mcstas_trace.trace_instrument", side_effect=TraceError("boom")):
+            with patch("unviz.mcstas_trace.trace_instrument", side_effect=TraceError("boom")):
                 meshes = cli.export_instrument(str(ROOT / "tests" / "test_instruments" / "mask_test.instr"), out_file=out_file)
             self.assertTrue(meshes)
             for name in meshes:

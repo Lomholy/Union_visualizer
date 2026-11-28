@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,34 +8,30 @@ version = "0.1.0"
 description = "Visualize and export McStas Union sample environments"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numba"]
-license = { file = "LICENSE" }
+dependencies = [
+    "mapbox_earcut",
+    "mcstasscript",
+    "networkx",
+    "numba",
+    "numpy",
+    "pygfx",
+    "pylinalg",
+    "qtpy",
+    "rendercanvas",
+    "shapely",
+    "trimesh",
+]
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [
     { name = "Daniel Lomholt Christensen" },
 ]
 
-[project.scripts]
-unviz = "cli:main"
+[project.urls]
+Homepage = "https://github.com/Lomholy/Union_visualizer"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-py-modules = [
-    "background",
-    "bounding_box",
-    "camera",
-    "cli",
-    "clipping",
-    "coplanar",
-    "gui_helpers",
-    "logger_output",
-    "mcstas_trace",
-    "panels",
-    "pipeline",
-    "preprocess",
-    "qt_helpers",
-    "scene_objects",
-    "union_clip",
-    "union_facets",
-    "union_viewer",
-    "widgets",
-]
+[project.scripts]
+unviz = "unviz.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

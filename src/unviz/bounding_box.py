@@ -4,7 +4,7 @@ import os
 import numpy as np
 import trimesh
 
-from preprocess import box_dimensions
+from .preprocess import box_dimensions
 
 
 def compute_local_bbox(comp):

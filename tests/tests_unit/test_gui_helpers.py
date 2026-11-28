@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-import gui_helpers  # noqa: E402
+from unviz import gui_helpers  # noqa: E402
 
 
 class FakeComponent:
@@ -258,7 +258,7 @@ class TraceHelpersTest(unittest.TestCase):
 
     def test_clip_mesh_matches_clip_planes(self):
         import trimesh
-        from clipping import resolve_clip_frame
+        from unviz.clipping import resolve_clip_frame
 
         box = trimesh.creation.box(extents=(2, 2, 2))
         # A frame at x=0.5 rotated 90 degrees about z: its local x is world y.
@@ -287,7 +287,7 @@ class TraceHelpersTest(unittest.TestCase):
 
 class RayHelpersTest(unittest.TestCase):
     def setUp(self):
-        from mcstas_trace import TraceRays
+        from unviz.mcstas_trace import TraceRays
 
         # Ray 0: a -> b (3 points). Ray 1: a only (2 points).
         self.rays = TraceRays(

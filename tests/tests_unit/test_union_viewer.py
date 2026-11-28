@@ -20,16 +20,16 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-import pipeline  # noqa: E402
-import scene_objects  # noqa: E402
+from unviz import pipeline  # noqa: E402
+from unviz import scene_objects  # noqa: E402
 import pygfx as gfx  # noqa: E402
-from camera import (  # noqa: E402
+from unviz.camera import (  # noqa: E402
     CAMERA_FAR,
     CAMERA_NEAR,
     fit_camera_to_scene,
     update_camera_depth_range,
 )
-from logger_output import LoggerCounts  # noqa: E402
+from unviz.logger_output import LoggerCounts  # noqa: E402
 
 
 class ComputeMeshDataCoincidentFacesTest(unittest.TestCase):

@@ -20,7 +20,7 @@ SRC_DIR = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 
 import mcstasscript as ms
-import preprocess as pp  # noqa: E402
+from unviz import preprocess as pp  # noqa: E402
 
 # The setup selection of McCode's Test_inhomogeneous_process.instr
 SAMPLE_CHAIN = """

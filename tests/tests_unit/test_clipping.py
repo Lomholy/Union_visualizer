@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-from clipping import clip_plane, resolve_clip_frame  # noqa: E402
+from unviz.clipping import clip_plane, resolve_clip_frame  # noqa: E402
 
 
 def clip(axis="Z", mode="Above", position=0.0, frame=None):

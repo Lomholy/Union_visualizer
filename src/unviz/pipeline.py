@@ -2,14 +2,14 @@
 Union instrument, tracing it with mcrun, and loading detector counts.
 Returns plain picklable data and never touches Qt or pygfx."""
 
-from preprocess import preprocess, instrument_parameters
-from clipping import resolve_clip_frame
-from union_clip import build_union_meshes
-from coplanar import find_coincident_faces
-from bounding_box import compute_all_world_bboxes, component_dependency_signature
-from gui_helpers import group_meshes_by_material, is_vacuum_material
-from mcstas_trace import trace_instrument, component_types
-import logger_output
+from .preprocess import preprocess, instrument_parameters
+from .clipping import resolve_clip_frame
+from .union_clip import build_union_meshes
+from .coplanar import find_coincident_faces
+from .bounding_box import compute_all_world_bboxes, component_dependency_signature
+from .gui_helpers import group_meshes_by_material, is_vacuum_material
+from .mcstas_trace import trace_instrument, component_types
+from . import logger_output
 
 
 def compute_mesh_data(

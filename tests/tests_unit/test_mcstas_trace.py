@@ -20,8 +20,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-import mcstas_trace  # noqa: E402
-from mcstas_trace import (  # noqa: E402
+from unviz import mcstas_trace  # noqa: E402
+from unviz.mcstas_trace import (  # noqa: E402
     ABSORB, PASS, SCATTER, STATE, TELEPORT, _drawcall_geometry, parse_rays, parse_trace,
 )
 
@@ -88,7 +88,7 @@ class WorldMatrixTest(unittest.TestCase):
         preprocess.compute_world_matrices, or McStas components and Union
         meshes would not line up."""
         try:
-            from preprocess import preprocess
+            from unviz.preprocess import preprocess
             _, world, _ = preprocess(str(ROOT / "tests" / "test_instruments" / "rotated_previous_test.instr"), False)
         except Exception as e:
             self.skipTest(f"preprocess needs a McStas installation: {e}")

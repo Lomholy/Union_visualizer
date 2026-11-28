@@ -58,7 +58,7 @@ def _resolve_input(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 def launch_viewer(input_file: str | None) -> int:
     # Import lazily so that `unviz --help` does not require the GUI stack to
     # initialise and the headless exporter does not import Qt at all.
-    from union_viewer import launch
+    from .union_viewer import launch
 
     return launch(input_file)
 
@@ -91,10 +91,10 @@ def export_instrument(
     geometry-kernel/meshing stack just to parse arguments.
     """
     import trimesh
-    from preprocess import preprocess
-    from union_clip import build_union_meshes
-    from bounding_box import compute_all_world_bboxes
-    from mcstas_trace import trace_instrument, McrunNotFoundError, TraceError
+    from .preprocess import preprocess
+    from .union_clip import build_union_meshes
+    from .bounding_box import compute_all_world_bboxes
+    from .mcstas_trace import trace_instrument, McrunNotFoundError, TraceError
 
     clip = {"enable": False, "axis": "X", "mode": "Above", "position": 0}
 

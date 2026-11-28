@@ -25,7 +25,7 @@ import numpy as np
 import mcstasscript as ms
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
-import preprocess  # noqa: E402
+from unviz import preprocess  # noqa: E402
 
 
 def expected_rotation_matrix(rx_deg, ry_deg, rz_deg):

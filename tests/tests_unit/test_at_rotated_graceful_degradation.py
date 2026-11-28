@@ -21,7 +21,7 @@ sys.path.insert(0, SRC_DIR)
 
 import numpy as np
 import mcstasscript as ms
-import preprocess as pp  # noqa: E402
+from unviz import preprocess as pp  # noqa: E402
 
 
 class ParseParamWarningTest(unittest.TestCase):
