@@ -212,7 +212,7 @@ class TestIncrementalRebuild(unittest.TestCase):
 
 
 class TestCloseCuts(unittest.TestCase):
-    # Mesher Options > Close cut surfaces: walls where higher priorities and masks cut a component
+    # Settings > Close cut surfaces: walls where higher priorities and masks cut a component
     def build_closed(self, comps, matrices=None, close_cuts=True):
         geoms = {c.name: c for c in comps}
         world = {name: (matrices or {}).get(name, np.eye(4)) for name in geoms}

@@ -84,6 +84,8 @@ The "Hide Vacuum" button ensures that the vacuum union geometries are not shown.
 
 The "Force mcstas-pygen preprocessing" box forces the visualizer to use the mcstas-pygen engine to preprocess the instrument which may resolve some WARNING messages for instruments.
 
+unviz meshes Union geometry with its union mesher, which keeps each component's surface where that component has the highest priority, as McStas draws it with `mcdisplay --trace=2`. The "Close cut surfaces" box adds walls where higher-priority components and masks cut a component, so each component is drawn as a closed solid. `unviz FILE --export` always closes the cuts.
+
 With "Show McStas components" ticked (the default), union_viewer.py also draws every other component (sources, guides, slits, monitors, ...) the way McStas's own `MCDISPLAY` draws it. To get that drawing it compiles and runs the instrument with `mcrun --trace`, so it needs a working McStas install and compiler (launch it from the activated `unviz` environment). Like a normal `mcrun`, this leaves `<instrument>.c` and `<instrument>.out` next to the instrument file.
 
 Furthermore it is possible to show all the arms of the mcstas instrument using the Show Arms checkbox.
@@ -99,10 +101,6 @@ The Export STL button allows you to export the current geometries (i.e clipping 
 ### Instrument parameters
 
 The Instrument Parameters panel (a scrollable list, since an instrument can have many) has one field per instrument parameter, showing its default. Values you type there are used both for the Union geometry and for the McStas run; parameters without a default must be filled in there. When a parameter is changed the visualized instrument should update.
-
-### Mesher options
-
-unviz meshes Union geometry with its union mesher, which keeps each component's surface where that component has the highest priority, as McStas draws it with `mcdisplay --trace=2`. Its one option, "Close cut surfaces", adds walls where higher-priority components and masks cut a component, so each component is drawn as a closed solid. `unviz FILE --export` always closes the cuts.
 
 ### Clipping planes
 
