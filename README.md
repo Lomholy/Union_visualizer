@@ -121,9 +121,7 @@ Furthermore it is possible to show all the arms of the mcstas instrument using t
 ---
 ### Dependencies:
 
-- pyqt (For the interface of union_viewer)
-
-- mcstas (To load in the instrument, and get the mcstasscript parser)
+- mcstas (To load in the instrument, get the mcstasscript parser, and PyQt6 for the interface of union_viewer)
 
 - trimesh (For loading and outputting meshes)
 
